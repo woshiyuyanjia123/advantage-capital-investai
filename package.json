@@ -1,0 +1,59 @@
+{
+  "name": "@local/investai-desktop",
+  "version": "2.1.0",
+  "description": "深蓝投研工作台（InvestAI）2.0：投资管理全流程 + 四层权限 + 可配置流程 + AI 协作（DeepSeek / 本地模型 / 离线）；DSH 全局插件 + 独立 SaaS",
+  "type": "module",
+  "private": true,
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "core",
+    "app",
+    "server.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "GLOSSARY.md",
+    "docs",
+    "scripts",
+    "fixtures",
+    "test"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "desktop": "node server.mjs --desktop",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "verify": "node scripts/verify.mjs",
+    "eval": "node scripts/eval.mjs",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "setup-asr": "sh scripts/setup-asr.sh",
+    "demo-video": "node scripts/demo/record.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "docx": "9.5.1",
+    "exceljs": "4.4.0",
+    "pdfjs-dist": "4.10.38",
+    "pptxgenjs": "3.12.0"
+  }
+}

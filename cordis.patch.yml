@@ -1,0 +1,4 @@
+# DSH 组合包层：安装后在 profile 中插入 InvestAI 插件行（宿主 + 客户端）
+- insert:
+    - id: investai-desktop
+      name: '@local/investai-desktop'

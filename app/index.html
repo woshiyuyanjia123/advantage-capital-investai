@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深蓝投研工作台 · InvestAI Desktop</title>
+<link rel="icon" href="/api/investai?asset=logo.svg">
+<link rel="stylesheet" href="/api/investai?asset=app.css">
+</head>
+<body>
+<!-- 顶栏（状态/处理模式）｜左导航（DSH 内嵌时隐藏，改用 DSH 原生侧栏）｜中栏视图｜右栏 AI 协作 -->
+<div id="app" class="app">
+  <header id="hdr" class="hdr"></header>
+  <aside id="nav" class="nav" aria-label="导航"></aside>
+  <main class="main"><section id="view" class="view"></section></main>
+  <aside id="ai" class="ai" aria-label="AI 协作助手"></aside>
+</div>
+<div id="drawer" class="drawer" hidden></div>
+<div id="modal" class="modal" hidden></div>
+<div id="drop" class="drop" hidden><div>松开以上传到知识库</div></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script type="module" src="/api/investai?asset=app.js"></script>
+</body>
+</html>

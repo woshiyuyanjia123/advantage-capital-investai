@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InvestAI 代码审查报告</title>
+<style>
+:root { --bg:#0A1120; --panel:#111B30; --card:#15203A; --line:#22304C; --text:#E6ECF5; --muted:#8A98AE; --blue:#3B82F6; --green:#10B981; --amber:#F59E0B; --red:#EF4444; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.7 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { font-size: 26px; margin: 0 0 6px; } h2 { font-size: 19px; margin: 36px 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+h3 { font-size: 15px; margin: 0 0 6px; }
+p.lead { color: var(--muted); margin: 0 0 20px; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; } .kpi b { display: block; font-size: 24px; } .kpi span { color: var(--muted); font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; } th { color: var(--muted); font-weight: 500; background: #0F1930; }
+.tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.fixed { background: #0D3B2E; color: #6EE7B7; } .open { background: #3A2C0F; color: #FBBF24; } .design { background: #1B3466; color: #93C5FD; }
+.strong { background: #3A1C24; color: #FCA5A5; } .worth { background: #3A2C0F; color: #FBBF24; } .spec { background: #22304D; color: #C5CFDD; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.cols > div { background: #0B1324; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.cols h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); }
+.mermaid { background: transparent; }
+code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: #0B1324; padding: 1px 5px; border-radius: 4px; }
+.muted { color: var(--muted); } ul { margin: 6px 0; padding-left: 20px; }
+@media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, 1fr); } .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body><main>
+<h1>InvestAI 2.0 代码审查报告</h1>
+<p class="lead">方法：mattpocock/skills（MIT）——<b>code-review</b>（Standards / Spec 两轴独立审查 + Fowler 坏味道基线）、<b>improve-codebase-architecture / codebase-design</b>（深模块、seam、删除测试）、<b>diagnosing-bugs</b>（先建立会变红的反馈回路）、<b>tdd</b>（在约定 seam 上先红后绿）、<b>domain-modeling</b>（GLOSSARY.md 与 ADR）。2026-10-17。</p>
+
+<div class="kpis">
+  <div class="kpi"><b>14 / 14</b><span>Standards 轴问题已修复（含复核新发现 1 项）</span></div>
+  <div class="kpi"><b>13 / 15</b><span>Spec 轴问题已修复（1 项按设计加固，1 项保留）</span></div>
+  <div class="kpi"><b>5</b><span>架构加深候选（4 项已实施）</span></div>
+  <div class="kpi"><b>202</b><span>自动化检查全部通过（33 单元 + 135 验收 + 34 评测）</span></div>
+</div>
+
+<h2>测试 seam（tdd：先约定再写）</h2>
+<table>
+<tr><th>Seam</th><th>能发现</th><th>不能发现</th></tr>
+<tr><td><code>/api/investai</code> 接口（产品真实入口）</td><td>权限、跨站、状态机、数据泄露、端到端流程</td><td>前端渲染与交互</td></tr>
+<tr><td><code>lifecycle.check / actions</code>（成果生命周期）</td><td>岗位 × 状态 × 动作的全部规则</td><td>文件读写、通知</td></tr>
+<tr><td>浏览器（3 个岗位扫 20 个页面 + 关键流程）</td><td>脚本错误、按钮与说明、流程走得通</td><td>视觉细节</td></tr>
+</table>
+<p class="muted">每个问题先写回归测试并确认变红（修复前 32 条中 29 条失败），再修复至全绿。命令：<code>node --test test/*.test.mjs</code>。</p>
+
+<h2>Standards 轴（是否符合项目约定 + 坏味道）</h2>
+<table>
+<tr><th>#</th><th>问题</th><th>后果</th><th>处理</th></tr>
+<tr><td>S1</td><td>桌面 / DSH 模式不校验跨站请求，且接受 text/plain 正文</td><td>任意网页可把身份切成管理员再改设置、删项目</td><td><span class="tag fixed">已修复</span> 所有模式校验同源 + 必须 JSON</td></tr>
+<tr><td>S2</td><td><code>ai.generate</code> 不校验成果属于该项目</td><td>可写入无权访问项目的成果</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S3</td><td>确认提取后公司库中的估值、融资金额未脱敏</td><td>分析师经公司库看到被隐藏的估值</td><td><span class="tag fixed">已修复</span> 统一视图投影</td></tr>
+<tr><td>S4</td><td>智能体保存草稿不检查「编辑成果」</td><td>无编辑权的合伙人可经 AI 写成果</td><td><span class="tag fixed">已修复</span> 生命周期统一判定</td></tr>
+<tr><td>S5</td><td>全体回避且节点无「否决」结果时崩溃</td><td>500，决策卡死</td><td><span class="tag fixed">已修复</span> 取消并提示重新发起；表决包在事务中</td></tr>
+<tr><td>S6</td><td>退回到不存在阶段 500；终止 / 退回不取消进行中的决策</td><td>已终止项目仍可被表决推进</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S7</td><td>删除的项目无法回滚；且<b>没有任何岗位具备删除权限</b></td><td>「可回滚」承诺落空</td><td><span class="tag fixed">已修复</span> 管理层可删除，管理员可恢复</td></tr>
+<tr><td>S8</td><td>无公司项目确认提取 500</td><td>崩溃</td><td><span class="tag fixed">已修复</span> 按确认的企业名称自动建档</td></tr>
+<tr><td>S9</td><td>进入阶段 / 关联录音直接修改内存中的已存文档</td><td>历史快照与事务回滚可能带入半成品</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S10</td><td>撤销填报链接不检查「外部填报」权限</td><td>风控可撤销别人的链接</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S11</td><td>确认会议纪要绕过「材料定稿」权限</td><td>分析师可产生定稿文件</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S12</td><td>可读取他人的对话任务</td><td>对话内容泄露</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>S13</td><td>账号可以重复</td><td>后建账号永远无法登录</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>+</td><td>（复核时发现）<code>handle.ssoSession</code> 写在 return 之后，永远不执行</td><td>SaaS 统一登录回调崩溃</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>坏味道</td><td>状态词表 4 处各写一份；密级名称重复；遮蔽逻辑 4 种占位符；两套工具注册</td><td>改一处漏一处</td><td><span class="tag fixed">词表、密级、遮蔽已收拢</span> <span class="tag open">两套工具注册保留（DSH 与内置智能体接口不同）</span></td></tr>
+</table>
+
+<h2>Spec 轴（是否实现了需求）</h2>
+<table>
+<tr><th>#</th><th>问题</th><th>处理</th></tr>
+<tr><td>P1</td><td>财务分析表、尽调汇总在界面上无法确认入库</td><td><span class="tag fixed">已修复</span> 单元格 / 行级勾选，冲突值下拉选定</td></tr>
+<tr><td>P2</td><td>「项目信息表」AI 提取不生成成果文件，启动审批永远不满足</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>P3</td><td>快照接口返回密码哈希与未脱敏字段；「商业秘密」没有脱敏规则</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>P4</td><td>智能体检索、DSH 会话工具、预审、模型提取可能把机密内容发往外部模型</td><td><span class="tag fixed">已修复</span> 外部观看者投影 + 探针测试</td></tr>
+<tr><td>P5</td><td>「按资料密级限制 AI 级别」未生效</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>P6</td><td>没有转写引擎时会议纪要无路可走</td><td><span class="tag fixed">已修复</span> 粘贴文字稿</td></tr>
+<tr><td>P7</td><td>退回补充没有实际约束</td><td><span class="tag fixed">已修复</span> 需补充的工作重新定稿前不满足准入</td></tr>
+<tr><td>P8</td><td>重复出现的工作共用一份成果；所有会议纪要挤在一份</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>P9</td><td>确认提取会写入未勾选字段，静默覆盖公司库已有值</td><td><span class="tag fixed">已修复</span> 只写勾选项，覆盖时保留旧值并提示</td></tr>
+<tr><td>P10</td><td>新增的业务类型无法拥有流程</td><td><span class="tag fixed">已修复</span> 以现有流程为模板建立</td></tr>
+<tr><td>P11</td><td>风控无法编写风控意见；法务财务在新项目会签时不可见；界面显示岗位英文代码</td><td><span class="tag fixed">已修复</span> 表决人自动获得项目可见</td></tr>
+<tr><td>P12</td><td>桌面 / DSH 模式下切换身份无需认证</td><td><span class="tag design">按设计 + 加固</span> 单用户模式没有登录；新增「锁定本机身份」，并修复了使其可被跨站利用的 S1</td></tr>
+<tr><td>P13</td><td>提取结果的 PDF 导出按钮永远不出现</td><td><span class="tag fixed">已修复</span></td></tr>
+<tr><td>P-</td><td>外部填报附件未参与提取；toolknit 工具不受权限约束</td><td><span class="tag fixed">已修复</span> 附件自动提取并比对；toolknit 工具需管理员逐个勾选允许</td></tr>
+<tr><td>P-</td><td>「PDF 导出」依赖系统打印，不是生成的文件</td><td><span class="tag open">保留</span> 原生生成中文 PDF 需嵌入字体库，当前用排版打印页另存为 PDF</td></tr>
+</table>
+
+<h2>架构：加深候选（improve-codebase-architecture）</h2>
+
+<div class="card"><h3>① 成果生命周期没有唯一归属 <span class="tag strong">Strong</span> <span class="tag fixed">已实施</span></h3>
+<p>「谁能在什么状态下对成果做什么」分散在成果模块、AI 起草、智能体保存、接口层与前端，已出现真实分歧（S4、S11）。新增深模块 <code>core/lifecycle.mjs</code>：小接口（<code>check / authorize / actions / holders</code>），背后是状态机与全部权限规则；前端按钮直接由 <code>actions</code> 绘制，不可做时点击说明原因与可操作的人。测试从「搭 HTTP 场景」变成一张判定表。</p>
+<div class="cols"><div><h4>之前</h4><pre class="mermaid">flowchart LR
+api[接口层] --> canEdit
+ai[AI 起草] --> own1[各自检查]
+agent[智能体保存] --> own2[漏检编辑权]
+meet[会议确认] --> own3[直接写定稿]
+ui[前端] --> own4[can + canOp]</pre></div><div><h4>之后</h4><pre class="mermaid">flowchart LR
+api[接口层] --> L[lifecycle]
+ai[AI 起草] --> L
+agent[智能体保存] --> L
+meet[会议确认] --> L
+L --> acts[actions] --> ui[前端按钮]</pre></div></div></div>
+
+<div class="card"><h3>② 「观看者能看到什么」构造了四次 <span class="tag strong">Strong</span> <span class="tag fixed">已实施</span></h3>
+<p>接口、智能体、DSH 工具、AI 汇集各自遮蔽字段，占位符各不相同，<code>org.mask</code> 无人调用（假想 seam）。新增 <code>core/projection.mjs</code>：观看者分为「人」与「代表这个人调用的外部模型」两种适配器——这是有两个适配器的真实 seam。修复了 S3、P3、P4。</p>
+<div class="cols"><div><h4>之前</h4><pre class="mermaid">flowchart LR
+api --> o1[canField ×11]
+agent --> o2[外部不可见]
+tools --> o3[无权限]
+ai --> o4[另一种]</pre></div><div><h4>之后</h4><pre class="mermaid">flowchart LR
+api --> P[projection]
+agent --> P
+tools --> P
+ext[提取/预审] --> P
+P --> H[human 适配器]
+P --> E[external 适配器]</pre></div></div></div>
+
+<div class="card"><h3>③ 流程引擎不发事件，接口层替它补通知 <span class="tag worth">Worth exploring</span> <span class="tag fixed">已实施</span></h3>
+<p>引擎现在自己发出 <code>approval.requested / approval.decided</code>，任何调用方（接口、未来的智能体或定时任务）都不会漏通知；表决与结果应用放在同一事务中。</p></div>
+
+<div class="card"><h3>④ 状态与标签字符串前后端重复 <span class="tag worth">Worth exploring</span> <span class="tag fixed">已实施</span></h3>
+<p>新增 <code>core/vocab.mjs</code>，经 <code>meta</code> 接口下发，前端同步；「持有 / 继续持有」两种写法统一。</p></div>
+
+<div class="card"><h3>⑤ 前端按岗位上限判断 AI 按钮，后端按策略取低 <span class="tag spec">Speculative</span> <span class="tag fixed">由①顺带解决</span></h3>
+<p>工作卡片的 AI 按钮现在用后端对该工作的 <code>aiWrite</code> 判定，不再出现「按钮可点、点了 403」。AI 类内部的依赖回填（<code>ai.engine = engine</code>）保留，未拆分。</p></div>
+
+<h2>领域模型（domain-modeling）</h2>
+<ul>
+<li><code>GLOSSARY.md</code>：阶段、工作、必做工作、准入条件、决策节点、表决、回避、退回补充、成果、版本、定稿、标准文书、研究成果、资料、密级、敏感字段、提取、冲突、公司库、外部填报、岗位、数据范围、业务操作、AI 参与级别、模型路由、离线引擎。</li>
+<li><code>docs/adr/</code>：0001 SQLite + 全量快照历史 · 0002 按密级路由模型 · 0003 AI 不拥有决策工具 · 0004 toolknit 只作可选连接器。</li>
+</ul>
+
+<h2>可用性改进</h2>
+<ul>
+<li>项目页「下一步」：逐条列出还差什么、谁负责，轮到你的带「去处理 / 去起草 / 去表决」。</li>
+<li>工作台「轮到你」：汇总所有项目中需要你处理的事项。</li>
+<li>灰色按钮可点击：说明原因与可以操作的人（不再静默禁用）。</li>
+<li>首次使用导览（5 步）与「帮助」中心：三步上手、按岗位用法、名词解释、常见问题。</li>
+<li>岗位显示中文名称；切换身份时说明数据范围与 AI 级别；会议可粘贴文字稿；提取确认说明写入去向并提示被覆盖的旧值。</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'dark' })</script>
+</body>
+</html>
