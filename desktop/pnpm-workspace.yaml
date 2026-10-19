@@ -1,0 +1,7 @@
+onlyBuiltDependencies:
+  - electron
+# electron-builder 的依赖 @electron/node-gyp 来自 git 仓库（Electron 官方组织）
+blockExoticSubdeps: false
+# electron-winstaller 只用于 Squirrel 安装包，本项目用 NSIS，不需要它的安装脚本
+ignoredBuiltDependencies:
+  - electron-winstaller

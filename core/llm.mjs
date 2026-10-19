@@ -165,3 +165,28 @@ export function parseJson(text) {
 }
 
 export const NONE = { kind: 'none', info: async () => ({ ok: false, note: '未配置模型' }), models: async () => [], async *stream() { throw new Error('未配置模型') } }
+
+/**
+ * 从本机密钥文件读取 API Key 的 OpenAI 兼容适配器（独立桌面版 / 服务端在界面里填写 DeepSeek Key 后即刻生效）。
+ * 环境变量里的 Key 优先；密钥文件每 5 秒最多读取一次。
+ */
+export function secretLlm({ readSecrets, secretKey = 'deepseekApiKey', envKey = '', baseURL = 'https://api.deepseek.com', model = 'deepseek-v4.1-flash' }) {
+  let cached = { at: 0, key: envKey, adapter: null }
+  async function current() {
+    if (envKey) return cached.adapter ??= openaiLlm({ baseURL, apiKey: envKey, model })
+    if (Date.now() - cached.at > 5000) {
+      const key = String((await readSecrets().catch(() => ({})))[secretKey] ?? '')
+      if (key !== cached.key || !cached.adapter) cached = { at: Date.now(), key, adapter: key ? openaiLlm({ baseURL, apiKey: key, model }) : null }
+      else cached.at = Date.now()
+    }
+    return cached.adapter
+  }
+  const none = { ok: false, note: '未配置 DeepSeek API Key：在「系统配置 → AI 策略与模型」中填写' }
+  return {
+    kind: 'openai',
+    info: async () => (await current())?.info() ?? none,
+    models: async () => (await current())?.models() ?? [],
+    async turn(opts) { const a = await current(); if (!a) throw new Error(none.note); return a.turn(opts) },
+    async *stream(opts) { const a = await current(); if (!a) throw new Error(none.note); yield* a.stream(opts) },
+  }
+}

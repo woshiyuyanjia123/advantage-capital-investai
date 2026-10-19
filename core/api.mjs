@@ -311,7 +311,7 @@ export function createApi(ctx) {
       return settingsView(user)
     },
     'secret.set': async (user, b) => {
-      const allowed = { wisburgApiKey: 'integration.manage', 'sso.clientSecret': 'integration.manage' }
+      const allowed = { wisburgApiKey: 'integration.manage', deepseekApiKey: 'ai.policy', 'sso.clientSecret': 'integration.manage' }
       const key = String(b.key)
       const perm = allowed[key] ?? (/^push\.[a-z0-9]+\.(url|secret)$/.test(key) ? 'integration.manage' : null)
       if (!perm) throw fail('不允许的密钥项')

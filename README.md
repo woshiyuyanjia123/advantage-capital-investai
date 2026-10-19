@@ -1,22 +1,62 @@
-# 深蓝投研工作台 · InvestAI 2.1
+# 深蓝投研工作台 · InvestAI 2.2
 
 投资管理机构的 AI 协作系统：项目按业务类型配置的流程推进，每个阶段有具体工作与准入条件，决策由有权人员表决；AI 在你的权限范围内检索资料、起草成果、提取数据、整理会议纪要，但**不做任何正式决策**。
 
-同一套代码三种运行方式：**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
+同一套代码四种运行方式：**独立桌面应用**（Mac / Windows 安装包，双击即用，不需要 DSH 或 Node）、**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
 
 ![DSH 内嵌工作台](docs/screenshots/1-dsh-workbench.jpg)
 
-## 快速开始（Node ≥ 22.13）
+## 安装桌面应用（推荐，无需任何开发环境）
+
+到 [GitHub Releases](https://github.com/evanzhu0105-ship-it/InvestAI-Desktop/releases/latest) 下载对应安装包：
+
+| 电脑 | 安装包 | 安装 |
+|---|---|---|
+| Mac（Apple 芯片 M1–M4） | `InvestAI-2.2.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
+| Mac（Intel） | `InvestAI-2.2.0-mac-x64.dmg` | 同上 |
+| Windows 10 / 11（64 位） | `InvestAI-2.2.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
+
+**首次打开的安全提示**（安装包未使用付费的开发者证书签名，属正常现象）：
+- Mac 提示「无法验证开发者」：在「应用程序」里**右键 InvestAI → 打开 → 打开**；若提示「已损坏」，在终端运行 `xattr -cr /Applications/InvestAI.app` 后再打开。
+- Windows 出现 SmartScreen「已保护你的电脑」：点**更多信息 → 仍要运行**。
+
+打开即是本机演示模式（无需登录，右上角切换岗位）。DeepSeek API Key 在「系统配置 → AI 策略与模型」中填写，只保存在本机。
+
+**与 DeepSeek Harness 桌面版互不冲突**，可同时安装、同时运行：
+
+| | InvestAI 桌面应用 | DeepSeek Harness 桌面版 |
+|---|---|---|
+| 应用标识 | `com.investai.workbench` | DSH 自己的标识 |
+| 程序数据 | Mac `~/Library/Application Support/InvestAI`，Windows `%APPDATA%\InvestAI` | `~/.dsh`、`…/@deepseek-ai/dsh-desktop` |
+| 内置服务端口 | 每次启动随机选空闲端口，只监听 127.0.0.1 | DSH 自己的端口 |
+| 密钥 | 应用数据目录下 `secrets.json` | DSH 自己的配置 |
+
+桌面应用不读写 DSH 的任何目录；DSH 插件版（`~/.dsh/investai`）与桌面应用的数据也相互独立。卸载桌面应用不会删除数据目录（菜单「帮助 → 打开数据目录」可找到）。自己打包：`cd desktop && pnpm install && pnpm run dist`（在 Mac 上可同时产出 Mac 与 Windows 安装包，见 [desktop/README.md](desktop/README.md)）。
+
+## 从源码运行（Node ≥ 22.13）
+
+从 GitHub 下载（`git clone` 或 Download ZIP）后，**必须先安装依赖**，否则启动会报 `Cannot find package 'exceljs'`：
 
 ```bash
 npm install
 ```
 
+然后按用途选一种方式启动。**想看到和作者本机一样的界面（无需登录、可切换岗位），用「本机演示」：**
+
 | 方式 | 命令 | 说明 |
 |---|---|---|
-| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | DSH 桌面版：设置 → 插件 → 添加本目录或 `release/investai-desktop-2.0.0.tgz`。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
-| 本机演示 | `node server.mjs --desktop` | 打开 http://127.0.0.1:4310，右上角头像切换 15 个演示岗位 |
-| SaaS | `DEEPSEEK_API_KEY=… node server.mjs` | 首次启动在数据目录生成 `initial-credentials.txt`（随机初始密码，权限 600） |
+| 本机演示 | `node server.mjs --desktop` | 打开 http://127.0.0.1:4310，无需登录，右上角头像切换 15 个演示岗位 |
+| 多人使用（SaaS） | `DEEPSEEK_API_KEY=… node server.mjs` | 有登录页。账号与随机初始密码在数据目录的 `initial-credentials.txt`（默认 `./data/`，权限 600） |
+| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版：设置 → 插件 → 添加本目录，或 GitHub Releases 中的 `investai-desktop-2.2.0.tgz`。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
+
+下载的副本与作者本机看到的内容会有这些正常差异：
+- **数据**：每个新的数据目录首次启动都会生成同一套虚构演示数据；作者本机在演示中做过的操作（定稿、表决、会议纪要等）存在本机数据库里，不在仓库中。
+- **密钥与外部服务**：智堡 API Key、推送地址、DeepSeek Key 都不在仓库中，下载后显示「未配置」，AI 使用离线引擎（原文摘录 + 规则）。
+- **会议转写**：本机转写模型约 480MB，不在仓库中，需运行 `sh scripts/setup-asr.sh`；未安装时可在会议中「粘贴文字稿」。
+- **安装包与演示视频**：在 GitHub Releases 中，不在仓库里。
+
+| 其他 | 命令 | 说明 |
+|---|---|---|
 | 会议转写 | `sh scripts/setup-asr.sh` | 安装本机 faster-whisper small（约 480MB），录音不出本机 |
 | 测试 | `node --test test/*.test.mjs` | 33 项回归与生命周期测试（代码审查发现的每个问题一条） |
 | 验收 | `node scripts/verify.mjs` | 135 项自动化验收（临时目录，不碰真实数据） |
