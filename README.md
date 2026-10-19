@@ -1,4 +1,4 @@
-# 深蓝投研工作台 · InvestAI 2.2
+# 深蓝投研工作台 · InvestAI 2.3
 
 投资管理机构的 AI 协作系统：项目按业务类型配置的流程推进，每个阶段有具体工作与准入条件，决策由有权人员表决；AI 在你的权限范围内检索资料、起草成果、提取数据、整理会议纪要，但**不做任何正式决策**。
 
@@ -8,19 +8,39 @@
 
 ## 安装桌面应用（推荐，无需任何开发环境）
 
-到 [GitHub Releases](https://github.com/evanzhu0105-ship-it/InvestAI-Desktop/releases/latest) 下载对应安装包：
+到 [GitHub Releases](https://github.com/evanzhu0105-ship-it/InvestAI-Desktop/releases/latest) 下载对应安装包（仓库为私有时，下载者需先被添加为仓库协作者，或由你把安装包转发给对方）：
 
 | 电脑 | 安装包 | 安装 |
 |---|---|---|
-| Mac（Apple 芯片 M1–M4） | `InvestAI-2.2.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
-| Mac（Intel） | `InvestAI-2.2.0-mac-x64.dmg` | 同上 |
-| Windows 10 / 11（64 位） | `InvestAI-2.2.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
+| Mac（Apple 芯片 M1–M4） | `InvestAI-2.3.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
+| Mac（Intel） | `InvestAI-2.3.0-mac-x64.dmg` | 同上 |
+| Windows 10 / 11（64 位） | `InvestAI-2.3.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
 
 **首次打开的安全提示**（安装包未使用付费的开发者证书签名，属正常现象）：
-- Mac 提示「无法验证开发者」：在「应用程序」里**右键 InvestAI → 打开 → 打开**；若提示「已损坏」，在终端运行 `xattr -cr /Applications/InvestAI.app` 后再打开。
+- Mac 提示「无法验证开发者」或「Apple 无法验证…是否包含恶意软件」：
+  - macOS 14 及更早：在「应用程序」里**右键 InvestAI → 打开 → 打开**。
+  - macOS 15 及更新：先双击一次（提示后点「完成」），再到**系统设置 → 隐私与安全性**，在页面下方点 **「仍要打开」**，输入开机密码确认。
+  - 若提示「已损坏，无法打开」：在终端运行 `xattr -cr /Applications/InvestAI.app` 后再打开。
 - Windows 出现 SmartScreen「已保护你的电脑」：点**更多信息 → 仍要运行**。
 
-打开即是本机演示模式（无需登录，右上角切换岗位）。DeepSeek API Key 在「系统配置 → AI 策略与模型」中填写，只保存在本机。
+打开即是**本机模式**（无需登录，右上角切换演示岗位）。要体验按岗位分层的账号登录，用菜单 **「账户 → 登录模式」**，应用重新打开后用演示账号登录（见下节）。DeepSeek API Key 在「系统配置 → AI 策略与模型」中填写，只保存在本机。
+
+### 演示账号与权限分层
+
+[docs/accounts/InvestAI-演示账号与权限.xlsx](docs/accounts/InvestAI-演示账号与权限.xlsx)（桌面应用菜单「账户 → 演示账号与权限」也可打开）列出 15 个演示账号的**账号、初始密码**和四层权限，按权限大小分为五层：
+
+| 层级 | 岗位（账号数） | 数据范围 · 资料密级 · 关键操作 |
+|---|---|---|
+| 第 1 层 决策层 | 合伙人（3） | 全机构 · 绝密 · 表决、投资审批、退出审批 |
+| 第 2 层 管理层 | 部门负责人（2） | 本部门 · 绝密 · 启动授权、材料定稿、表决 |
+| 第 3 层 执行层 | 投资经理（2）、投后管理（1） | 本人负责 / 投后阶段 · 机密 · 经理确认、定稿 / 退出审批 |
+| 第 4 层 专业支持层 | 风控、法务、财务、基金募资（各 1） | 指定授权（风控全机构） · 按专业开放敏感字段 · 交割确认 / 表决 |
+| 第 5 层 协作层 | 分析师、综合协作（各 1） | 指定授权 · 内部 · 无敏感字段 |
+| 系统管理 | 系统管理员（1） | 只做配置，不看敏感字段 |
+
+表格另有「功能权限矩阵」「数据·操作·敏感信息」两张岗位对照表，均由 `node scripts/make-accounts-xlsx.mjs` 从系统实际权限配置生成（测试会逐个账号登录核对）。
+
+> ⚠ 这些是公开在仓库中的**演示密码**，只在明确启用时生效：桌面应用的「登录模式」，或命令行 `node server.mjs --demo-accounts`。正式部署不要启用，系统默认为每个账号生成随机初始密码。登录后点右上角头像 →「修改密码」可改成自己的密码。
 
 **与 DeepSeek Harness 桌面版互不冲突**，可同时安装、同时运行：
 
@@ -28,7 +48,7 @@
 |---|---|---|
 | 应用标识 | `com.investai.workbench` | DSH 自己的标识 |
 | 程序数据 | Mac `~/Library/Application Support/InvestAI`，Windows `%APPDATA%\InvestAI` | `~/.dsh`、`…/@deepseek-ai/dsh-desktop` |
-| 内置服务端口 | 每次启动随机选空闲端口，只监听 127.0.0.1 | DSH 自己的端口 |
+| 内置服务端口 | 首次由系统分配空闲端口，之后沿用（被占用时自动换），只监听 127.0.0.1 | DSH 自己的端口 |
 | 密钥 | 应用数据目录下 `secrets.json` | DSH 自己的配置 |
 
 桌面应用不读写 DSH 的任何目录；DSH 插件版（`~/.dsh/investai`）与桌面应用的数据也相互独立。卸载桌面应用不会删除数据目录（菜单「帮助 → 打开数据目录」可找到）。自己打包：`cd desktop && pnpm install && pnpm run dist`（在 Mac 上可同时产出 Mac 与 Windows 安装包，见 [desktop/README.md](desktop/README.md)）。
@@ -47,7 +67,8 @@ npm install
 |---|---|---|
 | 本机演示 | `node server.mjs --desktop` | 打开 http://127.0.0.1:4310，无需登录，右上角头像切换 15 个演示岗位 |
 | 多人使用（SaaS） | `DEEPSEEK_API_KEY=… node server.mjs` | 有登录页。账号与随机初始密码在数据目录的 `initial-credentials.txt`（默认 `./data/`，权限 600） |
-| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版：设置 → 插件 → 添加本目录，或 GitHub Releases 中的 `investai-desktop-2.2.0.tgz`。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
+| 演示账号登录 | `node server.mjs --demo-accounts` | 同上，但使用 Excel 中的演示密码（仅演示；已设过密码的数据目录不会被覆盖，可加 `--data <新目录>`） |
+| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版：设置 → 插件 → 添加本目录，或 GitHub Releases 中的 `investai-desktop-2.3.0.tgz`。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
 
 下载的副本与作者本机看到的内容会有这些正常差异：
 - **数据**：每个新的数据目录首次启动都会生成同一套虚构演示数据；作者本机在演示中做过的操作（定稿、表决、会议纪要等）存在本机数据库里，不在仓库中。
@@ -57,8 +78,8 @@ npm install
 
 | 其他 | 命令 | 说明 |
 |---|---|---|
-| 会议转写 | `sh scripts/setup-asr.sh` | 安装本机 faster-whisper small（约 480MB），录音不出本机 |
-| 测试 | `node --test test/*.test.mjs` | 33 项回归与生命周期测试（代码审查发现的每个问题一条） |
+| 会议转写 | Mac / Linux：`sh scripts/setup-asr.sh`；Windows：`powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` | 安装本机 faster-whisper small（约 480MB，需要 [uv](https://docs.astral.sh/uv/)），录音不出本机。桌面应用在「会议纪要」页给出带本应用数据目录的完整命令 |
+| 测试 | `node --test --test-concurrency=1 test/*.test.mjs` | 40 项回归、生命周期与演示账号测试（发现的每个问题一条） |
 | 验收 | `node scripts/verify.mjs` | 135 项自动化验收（临时目录，不碰真实数据） |
 | 评测 | `node scripts/eval.mjs [--deepseek]` | 34 项 AI 质量与安全评测，结果在「系统配置 → 评测」 |
 

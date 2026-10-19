@@ -181,8 +181,13 @@ export function createDeliverables({ db, kb, org, events, lifecycle }) {
 
 /** 用操作系统默认程序打开文件（Word/WPS/PowerPoint/Excel）。 */
 export function openWithSystem(path) {
-  const [cmd, args] = process.platform === 'darwin' ? ['open', [path]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', path]] : ['xdg-open', [path]]
-  try { spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref() } catch { /* 无桌面环境时只返回路径 */ }
+  // Windows 用 explorer.exe 打开（不经 cmd，路径中的空格、中文、& 等字符不会被 shell 解析）
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [path]] : process.platform === 'win32' ? ['explorer.exe', [path]] : ['xdg-open', [path]]
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', () => { /* 无桌面环境：只返回路径；不监听会让未处理的 error 事件终止服务 */ })
+    child.unref()
+  } catch { /* 同上 */ }
 }
 
 export async function writeTemp(dir, name, buf) {

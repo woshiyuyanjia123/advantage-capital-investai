@@ -1,7 +1,7 @@
 {
   "name": "investai-workbench",
   "productName": "InvestAI",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "深蓝投研工作台（InvestAI）独立桌面版：投资管理全流程 + 四层权限 + AI 协作。不依赖 DeepSeek Harness，可与其同时安装。",
   "author": "InvestAI",
   "license": "UNLICENSED",

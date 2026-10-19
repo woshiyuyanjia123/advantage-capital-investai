@@ -1,0 +1,65 @@
+{
+  "_说明": "演示账号的固定初始密码，仅在明确启用演示账号时使用（命令行 --demo-accounts，或桌面应用菜单「账户 → 登录模式」）。正式部署不要启用：默认会为每个账号生成随机密码。账号权限说明见 docs/accounts/InvestAI-演示账号与权限.xlsx。",
+  "accounts": [
+    {
+      "username": "admin",
+      "password": "h4BU-pahw-cBL6"
+    },
+    {
+      "username": "wang",
+      "password": "Jq9E-UaHr-DssT"
+    },
+    {
+      "username": "li",
+      "password": "vsz5-AZXP-74cp"
+    },
+    {
+      "username": "liu",
+      "password": "ZBM8-g8Dg-vLPE"
+    },
+    {
+      "username": "chen",
+      "password": "hJEu-Qt2s-tJsS"
+    },
+    {
+      "username": "zhao",
+      "password": "k4N7-8bdg-Q2Qv"
+    },
+    {
+      "username": "zhangwei",
+      "password": "dJfh-hSgL-AzY5"
+    },
+    {
+      "username": "qiancheng",
+      "password": "BTXh-YgK2-wPG2"
+    },
+    {
+      "username": "linxiao",
+      "password": "73xM-RAEj-kVvF"
+    },
+    {
+      "username": "zhoumin",
+      "password": "xxFB-DtaJ-2LtS"
+    },
+    {
+      "username": "wulv",
+      "password": "RDmJ-bMqb-XTWR"
+    },
+    {
+      "username": "sunlin",
+      "password": "MnHN-J4Ra-dfzQ"
+    },
+    {
+      "username": "zhengjie",
+      "password": "WX42-8rkc-ue4e"
+    },
+    {
+      "username": "fengchen",
+      "password": "LP9p-HvUc-NUCG"
+    },
+    {
+      "username": "hejing",
+      "password": "qQLY-Mt5M-dp6P"
+    }
+  ]
+}

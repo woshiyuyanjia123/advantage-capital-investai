@@ -22,6 +22,9 @@ import { VOCAB } from './vocab.mjs'
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
 const TYPE = { html: 'text/html', css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml' }
+// 可执行文件路径：macOS / Linux 的 /…/python3、Windows 的 C:\…\python.exe 都要接受；toolknit 只允许命令名或绝对路径，不经 shell
+export const PYTHON_EXE = /(^|[\\/])python3?(\.\d+)?(\.exe)?$/i
+export const TOOLKNIT_CMD = /^(toolknit(\.exe)?|(\/|[A-Za-z]:[\\/])[^\0"'`$;&|<>]+[\\/]toolknit(\.exe)?)$/i
 const fail = (m, status = 400) => Object.assign(new Error(m), { status })
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } })
 
@@ -302,10 +305,10 @@ export function createApi(ctx) {
       if (sec === 'toolknit') {
         if (value.enabled && !value.licenseAck) throw fail('启用前请确认已取得 toolknit 的商业使用授权（PolyForm Noncommercial 许可）')
         // 只允许启动 toolknit 本身（命令名或以 /toolknit 结尾的绝对路径），不经 shell
-        if (value.command && !/^(toolknit|\/[\w./ -]+\/toolknit)$/.test(value.command)) throw fail('命令只能是 toolknit 或其绝对路径')
+        if (value.command && !TOOLKNIT_CMD.test(value.command)) throw fail('命令只能是 toolknit 或其绝对路径')
         value = { ...s.toolknit, ...value, allowTools: (value.allowTools ?? s.toolknit?.allowTools ?? []).map(String).slice(0, 40) }
       }
-      if (sec === 'asr' && value.python && !/\/python3?(\.\d+)?$/.test(value.python)) throw fail('Python 路径应指向 python 可执行文件')
+      if (sec === 'asr' && value.python && !PYTHON_EXE.test(value.python)) throw fail('Python 路径应指向 python 可执行文件')
       if (sec === 'push') value = { channels: (value.channels ?? []).map(c => ({ id: c.id ?? randomBytes(4).toString('hex'), name: String(c.name).slice(0, 30), type: c.type, enabled: !!c.enabled, kinds: c.kinds ?? [] })) }
       db.put('settings', { ...s, [sec]: sec === 'models' ? { ...s.models, ...value } : value }, meta(user, `修改设置：${sec}`, 'settings'))
       return settingsView(user)
@@ -368,6 +371,19 @@ export function createApi(ctx) {
       if (b.disabled || b.password) for (const [sid, s] of sessions) if (s.userId === u.id) sessions.delete(sid)
       const { pw, ...safe } = db.put('users', next, meta(user, `维护人员「${next.name}」${b.disabled ? '（停用）' : ''}`, 'user'))
       return safe
+    },
+    // 本人修改密码（多人登录模式）：校验原密码，至少 8 位，退出该账号的其他会话
+    'me.password': (user, b, request) => {
+      if (mode !== 'saas') throw fail('本机模式没有登录密码', 409)
+      const u = db.get('users', user.id)
+      if (!checkPassword(String(b.old ?? ''), u.pw)) throw fail('原密码不正确', 403)
+      const pw = String(b.password ?? '')
+      if (pw.length < 8) throw fail('新密码至少 8 位')
+      if (pw === String(b.old)) throw fail('新密码不能与原密码相同')
+      db.put('users', { ...u, pw: hashPassword(pw) }, meta(user, '修改本人登录密码', 'user'))
+      const sid = /(?:^|;\s*)investai_sid=([a-f0-9]{48})/.exec(request.headers.get('cookie') ?? '')?.[1]
+      for (const [k, x] of sessions) if (x.userId === u.id && k !== sid) sessions.delete(k)
+      return { ok: true }
     },
     'dept.save': (user, b) => { org.assert(user, 'org.manage'); return db.put('depts', { id: b.id ?? `d_${randomBytes(3).toString('hex')}`, name: String(b.name).slice(0, 30), parentId: b.parentId ?? null }, meta(user, '维护部门', 'dept')) },
     'history.rollback': (user, b) => {

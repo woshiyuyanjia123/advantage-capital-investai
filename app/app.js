@@ -405,11 +405,17 @@ Object.assign(ACT, {
   persona: el => {
     const d = D()
     const r = el.getBoundingClientRect()
-    if (d.mode === 'saas') return popup(`<div class="hd">${esc(d.me.name)} · ${esc(d.me.title)}</div><div class="it" data-act="logout">${icon('x', 13)}退出登录</div>`, r.right - 220, r.bottom + 6, 220)
+    if (d.mode === 'saas') return popup(`<div class="hd">${esc(d.me.name)} · ${esc(d.me.title)}</div><div class="it" data-act="my-password">${icon('edit', 13)}修改密码</div><div class="it" data-act="logout">${icon('x', 13)}退出登录</div>`, r.right - 220, r.bottom + 6, 220)
     const locked = d.settings.desktop?.personaSwitch === false
     popup(`<div class="hd">${locked ? '身份已由管理员锁定' : '切换演示身份：每个身份看到的项目、字段和能做的操作都不同'}</div>${d.users.map(u => `<div class="it ${u.id === d.me.id ? 'on' : ''}" ${locked ? '' : `data-act="set-persona" data-id="${u.id}"`} title="${esc((u.roles ?? []).map(roleName).join('、'))}">${avatar(u.name, 22)}<div class="grow" style="min-width:0"><div>${esc(u.name)} <span class="dim">${esc(u.title)}</span></div><div class="dim ell" style="font-size:11px">${esc((u.roles ?? []).map(roleName).join('、'))}</div></div></div>`).join('')}`, r.right - 300, r.bottom + 6, 300)
   },
   'set-persona': async el => { closePopup(); await post('persona', { userId: el.dataset.id }); S.chat = []; S.project = null; await hooks.reload(); await loadChat(); if (S.view === 'project' && !proj(S.sel)) go('pipeline'); const c = D().caps; toast(`已切换为 ${D().me.name}（${c.roleNames.join('、')}）：数据范围 ${c.scopes.map(x => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[x])).join('、')}，AI ${AI_LEVEL[c.ai]}`) },
+  'my-password': async () => {
+    const r = await dialog(`<h3>修改密码</h3><label class="f">原密码<input class="input" type="password" name="old" autocomplete="current-password" required></label><label class="f">新密码（至少 8 位）<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required></label><label class="f">再次输入新密码<input class="input" type="password" name="again" autocomplete="new-password" required></label><div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">保存</button></div>`)
+    if (!r) return
+    if (r.password !== r.again) return toast('两次输入的新密码不一致', 'deny')
+    await act('me.password', { old: r.old, password: r.password }, '密码已修改，其他设备上的登录已退出')
+  },
   logout: async () => { await post('logout'); location.reload() },
 })
 

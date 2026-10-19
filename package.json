@@ -1,6 +1,6 @@
 {
   "name": "@local/investai-desktop",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "深蓝投研工作台（InvestAI）2.0：投资管理全流程 + 四层权限 + 可配置流程 + AI 协作（DeepSeek / 本地模型 / 离线）；DSH 全局插件 + 独立 SaaS",
   "type": "module",
   "private": true,

@@ -1,11 +1,13 @@
 # InvestAI 桌面应用（Electron）
 
-把仓库根目录的 `core/`、`app/`、`fixtures/` 打包成独立的 Mac / Windows 应用，不依赖 DSH、Node 或命令行。应用启动时在本机 `127.0.0.1` 的随机空闲端口启动内置服务（与 `node server.mjs --desktop` 相同），窗口加载该地址。
+把仓库根目录的 `core/`、`app/`、`fixtures/` 打包成独立的 Mac / Windows 应用，不依赖 DSH、Node 或命令行。应用启动时在本机 `127.0.0.1` 启动内置服务（与 `node server.mjs --desktop` 相同），窗口加载该地址。端口首次由系统分配，记在 `prefs.json` 中下次沿用（界面的本地存储按地址区分），被占用时自动换一个。
+
+菜单「账户」可在**本机模式**（免登录、切换演示身份）与**登录模式**（多人账号，等同 `node server.mjs --demo-accounts`，演示账号见 `docs/accounts/` 下的 Excel）之间切换，两种模式共用同一份数据。
 
 | 文件 | 作用 |
 |---|---|
-| `main.cjs` | 主进程：单实例锁、数据目录（`app.getPath('userData')`）、启动内置服务、窗口与中文菜单 |
-| `scripts/prepare.mjs` | 把 `../core`、`../app`、`../fixtures` 复制到 `app-src/`（打包内容） |
+| `main.cjs` | 主进程：单实例锁、数据目录（`app.getPath('userData')`）、端口沿用、本机 / 登录模式、窗口与中文菜单 |
+| `scripts/prepare.mjs` | 把 `../core`、`../app`、`../fixtures`、转写安装脚本与账号 Excel 复制到 `app-src/`（打包内容） |
 | `scripts/after-pack.cjs` | Mac 无证书时 ad-hoc 签名；Windows 用 resedit 写入图标与版本信息 |
 | `build/icon.png` · `build/icon.ico` | 应用图标（`scripts/icon.swift` 生成 png） |
 

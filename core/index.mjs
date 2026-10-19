@@ -148,6 +148,7 @@ export async function createCore({ dir, mode, llm, wisburg = createWisburg(), fe
   timer.unref?.()
   return {
     db, org, kb, ai, engine, deliverables, extractor, meetings, fill, sso, notify, scheduler, lifecycle, projection, persona, handle, ready: scanning,
-    async close() { clearInterval(timer); scheduler.stop(); db.close() },
+    // 先等首次资料扫描结束再关库：否则扫描中的语句会在已关闭的数据库上执行（退出过快时报「database is not open」）
+    async close() { clearInterval(timer); scheduler.stop(); await scanning.catch(() => {}); db.close() },
   }
 }

@@ -15,7 +15,15 @@ export const AUDIO = ['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.webm', '.aiff', 
 export function asrRuntime(settings) {
   const python = settings?.asr?.python || join(RUNTIME, 'asr-venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
   const model = settings?.asr?.model || join(RUNTIME, 'models', 'faster-whisper-small')
-  return { python, model, ready: existsSync(python) && existsSync(join(model, 'model.bin')) }
+  return { python, model, ready: existsSync(python) && existsSync(join(model, 'model.bin')), setup: asrSetupCommand() }
+}
+
+/** 安装转写引擎的命令（按当前系统给出；安装位置与本程序读取的位置一致，桌面应用的脚本随安装包附带）。 */
+export function asrSetupCommand(platform = process.platform, runtime = RUNTIME) {
+  const scripts = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts')
+  return platform === 'win32'
+    ? `powershell -ExecutionPolicy Bypass -File "${join(scripts, 'setup-asr.ps1')}" -Runtime "${runtime}"`
+    : `INVESTAI_RUNTIME="${runtime}" sh "${join(scripts, 'setup-asr.sh')}"`
 }
 
 // 中文数字日期：十月二十五日 / 10月25日 / 下周 / 本周

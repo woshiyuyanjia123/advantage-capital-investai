@@ -1,19 +1,22 @@
 // HTTP 服务：命令行（server.mjs）与独立桌面版（desktop/）共用。
 //   desktop：本机单用户（无登录、可切换演示身份），只监听 127.0.0.1
 //   saas：多人登录；没有密码的账号会生成随机初始密码，写入数据目录 initial-credentials.txt（权限 600）
+//         demoAccounts：改用 fixtures/demo-accounts.json 中的固定演示密码（与 docs/accounts 下的 Excel 一致），仅供演示
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createCore } from './index.mjs'
 import { openaiLlm, secretLlm } from './llm.mjs'
 import { readSecrets } from './notify.mjs'
 import { hashPassword } from './api.mjs'
 
 const LIMIT = 80 * 1024 * 1024
+export const DEMO_ACCOUNTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'demo-accounts.json')
 
 /** 启动服务，返回 { url, port, core, close }。port 传 0 表示由系统分配空闲端口（桌面版用，避免与其他程序冲突）。 */
-export async function startServer({ dir, desktop = false, host = '127.0.0.1', port = 4310, env = process.env, log = console.log } = {}) {
+export async function startServer({ dir, desktop = false, demoAccounts = false, host = '127.0.0.1', port = 4310, env = process.env, log = console.log } = {}) {
   const apiKey = env.INVESTAI_LLM_API_KEY ?? env.DEEPSEEK_API_KEY ?? ''
   const baseURL = env.INVESTAI_LLM_BASE_URL ?? 'https://api.deepseek.com'
   const model = env.INVESTAI_LLM_MODEL ?? (baseURL.includes('deepseek') ? 'deepseek-v4.1-flash' : '')
@@ -22,8 +25,10 @@ export async function startServer({ dir, desktop = false, host = '127.0.0.1', po
   const core = await createCore({ dir, mode: desktop ? 'desktop' : 'saas', llm })
 
   if (!desktop) {
+    // 只给还没有密码的账号设置；已有密码（包括用户自己改过的）一律不覆盖
+    const demo = demoAccounts ? new Map(JSON.parse(await readFile(DEMO_ACCOUNTS, 'utf8')).accounts.map(a => [a.username, a.password])) : new Map()
     const lines = core.db.all('users').filter(u => !u.disabled && !u.pw).map(u => {
-      const password = randomBytes(6).toString('base64url')
+      const password = demo.get(u.username) ?? randomBytes(6).toString('base64url')
       core.db.putQuiet('users', { ...u, pw: hashPassword(password) })
       return `${u.username}\t${password}\t${u.name}（${u.title}）`
     })
@@ -33,6 +38,7 @@ export async function startServer({ dir, desktop = false, host = '127.0.0.1', po
       await writeFile(file, `${prev || '账号\t初始密码\t身份\n'}${prev ? `# ${new Date().toLocaleString('zh-CN')} 补充生成\n` : ''}${lines.join('\n')}\n`, { mode: 0o600 })
       log(`[investai] 已为 ${lines.length} 个账号生成初始密码，见 ${file}`)
     }
+    if (demoAccounts) log('[investai] ⚠ 已启用演示账号（固定密码公开在仓库中），仅用于演示，不要用于正式部署')
   }
 
   const bindHost = desktop ? '127.0.0.1' : host
