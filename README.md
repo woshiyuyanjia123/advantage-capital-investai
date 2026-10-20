@@ -1,8 +1,10 @@
-# 深蓝投研工作台 · InvestAI 2.3
+# 深蓝投研工作台 · InvestAI 2.4
 
 投资管理机构的 AI 协作系统：项目按业务类型配置的流程推进，每个阶段有具体工作与准入条件，决策由有权人员表决；AI 在你的权限范围内检索资料、起草成果、提取数据、整理会议纪要，但**不做任何正式决策**。
 
-同一套代码四种运行方式：**独立桌面应用**（Mac / Windows 安装包，双击即用，不需要 DSH 或 Node）、**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
+同一套代码四种运行方式（另可部署为**云服务器**多人共用）：**独立桌面应用**（Mac / Windows 安装包，双击即用，不需要 DSH 或 Node）、**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
+
+> 📘 **完整的安装部署与使用教程（Mac / Windows / DSH 插件 / 云服务器）：[docs/GUIDE.md](docs/GUIDE.md)**　·　云服务器与权限、同步：[docs/CLOUD.md](docs/CLOUD.md)
 
 ![DSH 内嵌工作台](docs/screenshots/1-dsh-workbench.jpg)
 
@@ -12,9 +14,9 @@
 
 | 电脑 | 安装包 | 安装 |
 |---|---|---|
-| Mac（Apple 芯片 M1–M4） | `InvestAI-2.3.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
-| Mac（Intel） | `InvestAI-2.3.0-mac-x64.dmg` | 同上 |
-| Windows 10 / 11（64 位） | `InvestAI-2.3.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
+| Mac（Apple 芯片 M1–M4） | `InvestAI-2.4.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
+| Mac（Intel） | `InvestAI-2.4.0-mac-x64.dmg` | 同上 |
+| Windows 10 / 11（64 位） | `InvestAI-2.4.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
 
 **首次打开的安全提示**（安装包未使用付费的开发者证书签名，属正常现象）：
 - Mac 提示「无法验证开发者」或「Apple 无法验证…是否包含恶意软件」：
@@ -68,7 +70,7 @@ npm install
 | 本机演示 | `node server.mjs --desktop` | 打开 http://127.0.0.1:4310，无需登录，右上角头像切换 15 个演示岗位 |
 | 多人使用（SaaS） | `DEEPSEEK_API_KEY=… node server.mjs` | 有登录页。账号与随机初始密码在数据目录的 `initial-credentials.txt`（默认 `./data/`，权限 600） |
 | 演示账号登录 | `node server.mjs --demo-accounts` | 同上，但使用 Excel 中的演示密码（仅演示；已设过密码的数据目录不会被覆盖，可加 `--data <新目录>`） |
-| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版：设置 → 插件 → 添加本目录，或 GitHub Releases 中的 `investai-desktop-2.3.0.tgz`。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
+| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版（Mac / Windows）：左侧栏「插件 → 添加插件」，填 Releases 中 `investai-desktop-2.4.0.tgz` 的绝对路径，安装后重启 DSH，步骤见 [GUIDE 第 3 节](docs/GUIDE.md#3-方式二deepseek-harness-插件)（需 2.4+）。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
 
 下载的副本与作者本机看到的内容会有这些正常差异：
 - **数据**：每个新的数据目录首次启动都会生成同一套虚构演示数据；作者本机在演示中做过的操作（定稿、表决、会议纪要等）存在本机数据库里，不在仓库中。
@@ -79,7 +81,7 @@ npm install
 | 其他 | 命令 | 说明 |
 |---|---|---|
 | 会议转写 | Mac / Linux：`sh scripts/setup-asr.sh`；Windows：`powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` | 安装本机 faster-whisper small（约 480MB，需要 [uv](https://docs.astral.sh/uv/)），录音不出本机。桌面应用在「会议纪要」页给出带本应用数据目录的完整命令 |
-| 测试 | `node --test --test-concurrency=1 test/*.test.mjs` | 40 项回归、生命周期与演示账号测试（发现的每个问题一条） |
+| 测试 | `node --test --test-concurrency=1 "test/*.test.mjs"` | 52 项回归测试（代码审查、生命周期、演示账号、云端安全与同步、DSH 兼容；GitHub Actions 在 Windows / macOS / Linux 上运行） |
 | 验收 | `node scripts/verify.mjs` | 135 项自动化验收（临时目录，不碰真实数据） |
 | 评测 | `node scripts/eval.mjs [--deepseek]` | 34 项 AI 质量与安全评测，结果在「系统配置 → 评测」 |
 

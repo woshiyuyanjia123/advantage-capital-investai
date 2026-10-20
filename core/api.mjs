@@ -37,6 +37,23 @@ function checkPassword(pw, rec) {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
+/**
+ * 写请求是否来自其他站点。优先用浏览器给出的 Sec-Fetch-Site（页面无法伪造）；没有时比较 Origin 与 Host。
+ * 不能用 request.url 的主机比较：DSH 把插件请求的地址改写为内部主机（http://dsh.internal/…），
+ * 桌面版页面来自 dsh-app:// 协议，两者都与浏览器看到的来源不同（2.3 及以前因此在 DSH 中所有写操作被拒绝）。
+ */
+export function crossSite(request, url = new URL(request.url)) {
+  const site = request.headers.get('sec-fetch-site')
+  if (site) return !['same-origin', 'none'].includes(site)
+  const origin = request.headers.get('origin')
+  if (!origin) return false
+  if (origin === 'null') return true
+  const o = new URL(origin)
+  // DSH 桌面版自己的页面协议：普通网页无法向它发请求
+  if (o.protocol === 'dsh-app:') return false
+  return o.host !== url.host && o.host !== request.headers.get('host')
+}
+
 export function createApi(ctx) {
   const { db, org, kb, ai, engine, deliverables, extractor, meetings, fill, sso, notify, scheduler, wisburg, mode, appDir, dir, lifecycle, projection, persona } = ctx
   const market = createMarket({ db, org, wisburg })
@@ -557,8 +574,7 @@ export function createApi(ctx) {
       const op = q.get('op') ?? ''
       if (request.method === 'POST') {
         // 所有模式都校验：同源 + JSON（跨站「简单请求」无法带 application/json，必须先经预检）
-        const origin = request.headers.get('origin')
-        if (origin && (origin === 'null' || new URL(origin).host !== url.host)) return json({ error: '跨站请求被拒绝' }, 403)
+        if (crossSite(request, url)) return json({ error: '跨站请求被拒绝' }, 403)
         if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return json({ error: '请求格式必须为 JSON' }, 415)
       }
       const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {}

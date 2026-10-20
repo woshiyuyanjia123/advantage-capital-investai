@@ -9,7 +9,7 @@ import { complete, parseJson } from './llm.mjs'
 
 const fail = (m, status = 400) => Object.assign(new Error(m), { status })
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), 'asr_worker.py')
-const RUNTIME = process.env.INVESTAI_RUNTIME ?? join(homedir(), '.dsh', 'investai-runtime')
+const RUNTIME = process.env.INVESTAI_RUNTIME ?? join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'investai-runtime')
 export const AUDIO = ['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.webm', '.aiff', '.flac', '.mp4']
 
 export function asrRuntime(settings) {

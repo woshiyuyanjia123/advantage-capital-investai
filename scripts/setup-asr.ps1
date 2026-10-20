@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1                       # 安装到 %USERPROFILE%\.dsh\investai-runtime
 #   powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1 -Runtime "<目录>"      # 桌面应用：系统配置页会给出带数据目录的完整命令
 # 模型约 480MB，来自 Hugging Face「Systran/faster-whisper-small」（MIT 许可）。
-param([string]$Runtime = $(if ($env:INVESTAI_RUNTIME) { $env:INVESTAI_RUNTIME } else { Join-Path $env:USERPROFILE '.dsh\investai-runtime' }))
+param([string]$Runtime = $(if ($env:INVESTAI_RUNTIME) { $env:INVESTAI_RUNTIME } elseif ($env:DSH_HOME) { Join-Path $env:DSH_HOME 'investai-runtime' } else { Join-Path $env:USERPROFILE '.dsh\investai-runtime' }))
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Write-Host '未找到 uv：请先安装 https://docs.astral.sh/uv/'; exit 1 }
 $venv = Join-Path $Runtime 'asr-venv'

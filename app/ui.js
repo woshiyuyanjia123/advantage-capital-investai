@@ -188,13 +188,21 @@ export const rawUrl = (fileId, inline) => `${API}?op=file.raw&id=${encodeURIComp
 export function downloadFile(fileId) { const a = document.createElement('a'); a.href = rawUrl(fileId); a.download = ''; document.body.append(a); a.click(); a.remove() }
 
 /** 浏览器打印为 PDF（Markdown 渲染为排版页面）。 */
+// 打印 / 导出 PDF：在页面内的隐藏 iframe 中排版后调用系统打印对话框（可「存储为 PDF」）。
+// 不用 window.open：DSH 桌面版禁止非 http(s) 的新窗口，弹窗拦截也会让它失效。
 export function printDoc(title, markdown, meta = '') {
-  const w = window.open('', '_blank')
-  if (!w) return toast('浏览器阻止了打印窗口；请允许弹出窗口或下载 Word 版本', 'deny')
+  document.getElementById('print-frame')?.remove()
+  const f = document.createElement('iframe')
+  f.id = 'print-frame'
+  f.setAttribute('aria-hidden', 'true')
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
+  document.body.append(f)
+  const w = f.contentWindow
+  if (!w) return toast('无法打开打印：请改用下载 Word 版本', 'deny')
+  w.document.open()
   w.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{font:14px/1.75 "PingFang SC","Microsoft YaHei",sans-serif;color:#111;max-width:760px;margin:32px auto;padding:0 24px}h1{font-size:22px;border-bottom:2px solid #1E3A8A;padding-bottom:8px;color:#0F172A}h2{font-size:17px;color:#1E3A8A;margin-top:22px}h3{font-size:15px}table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px}th,td{border:1px solid #CBD5E1;padding:5px 8px;text-align:left}th{background:#EFF4FB}blockquote{border-left:3px solid #94A3B8;margin:8px 0;padding:4px 12px;color:#475569;background:#F8FAFC}.meta{color:#64748B;font-size:12px;margin-bottom:18px}.cite,.cite-x{font-size:10px;color:#1E40AF;vertical-align:super;border:0;background:none;padding:0}@page{margin:18mm}</style></head><body><h1>${esc(title)}</h1><div class="meta">${esc(meta)}</div>${md(markdown)}</body></html>`)
   w.document.close()
-  w.focus()
-  setTimeout(() => w.print(), 300)
+  setTimeout(() => { try { w.focus(); w.print() } catch { toast('无法打开打印：请改用下载 Word 版本', 'deny') } }, 300)
 }
 
 /** 简易折线图（SVG），用于行情与指标。 */
