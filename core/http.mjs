@@ -28,8 +28,10 @@ export async function startServer({ dir, desktop = false, demoAccounts = false, 
     // 只给还没有密码的账号设置；已有密码（包括用户自己改过的）一律不覆盖
     const demo = demoAccounts ? new Map(JSON.parse(await readFile(DEMO_ACCOUNTS, 'utf8')).accounts.map(a => [a.username, a.password])) : new Map()
     const lines = core.db.all('users').filter(u => !u.disabled && !u.pw).map(u => {
-      const password = demo.get(u.username) ?? randomBytes(6).toString('base64url')
-      core.db.putQuiet('users', { ...u, pw: hashPassword(password) })
+      const password = demo.get(u.username) ?? randomBytes(9).toString('base64url')
+      // 随机生成的初始密码首次登录须修改；公开的演示密码不强制（多人轮流体验同一账号）
+      const mustChange = !demo.has(u.username) && (core.db.get('settings', 'main')?.security?.forceChangeGenerated ?? true)
+      core.db.putQuiet('users', { ...u, pw: hashPassword(password), mustChange })
       return `${u.username}\t${password}\t${u.name}（${u.title}）`
     })
     if (lines.length) {
@@ -42,6 +44,7 @@ export async function startServer({ dir, desktop = false, demoAccounts = false, 
   }
 
   const bindHost = desktop ? '127.0.0.1' : host
+  const trustProxy = env.INVESTAI_TRUST_PROXY === '1'
   const send = (res, response) => response.arrayBuffer().then(buf => { res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(Buffer.from(buf)) })
   const redirect = (res, location, headers = {}) => { res.writeHead(302, { location, ...headers }); res.end() }
 
@@ -59,7 +62,7 @@ export async function startServer({ dir, desktop = false, demoAccounts = false, 
         try {
           const user = await core.sso.callback(url.searchParams.get('code') ?? '', url.searchParams.get('state') ?? '')
           core.db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: user.name, action: '登录', target: '统一登录' })
-          return redirect(res, '/api/investai?asset=index.html', { 'set-cookie': core.handle.ssoSession(user) })
+          return redirect(res, '/api/investai?asset=index.html', { 'set-cookie': core.handle.ssoSession(user, new Request(url)) })
         } catch (e) { res.writeHead(e.status ?? 500, { 'content-type': 'text/plain; charset=utf-8' }); return res.end(`统一登录失败：${e.message}`) }
       }
       if (url.pathname !== '/api/investai') { res.writeHead(404); res.end('not found'); return }
@@ -71,7 +74,10 @@ export async function startServer({ dir, desktop = false, demoAccounts = false, 
         chunks.push(c)
       }
       const headers = new Headers()
-      for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v)
+      for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string' && k !== 'x-investai-client') headers.set(k, v)
+      // 来源地址（登录锁定、审计用）：部署在反向代理后设置 INVESTAI_TRUST_PROXY=1，取 X-Forwarded-For 的第一个地址
+      const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : ''
+      headers.set('x-investai-client', forwarded || req.socket.remoteAddress || '')
       await send(res, await core.handle(new Request(url, { method: req.method, headers, body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks) })))
     } catch (e) {
       console.error('[investai]', e)

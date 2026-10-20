@@ -12,7 +12,7 @@ export const FUNCTIONS = {
   'meeting.manage': '管理会议与纪要', 'company.view': '查看公司库', 'company.edit': '编辑公司信息', 'company.confirm': '确认提取/填报信息',
   'fill.manage': '发起外部填报', 'extract.run': '运行智能提取', 'views.manage': '维护机构观点', 'research.view': '查看外部研究',
   'workflow.config': '配置业务流程', 'org.manage': '管理组织与人员', 'settings.manage': '系统设置', 'ai.policy': '配置 AI 策略与模型',
-  'audit.read': '查看审计日志', 'history.rollback': '回滚历史版本', 'export.all': '导出全量数据', 'kb.mount': '管理挂载目录', 'integration.manage': '管理外部集成',
+  'audit.read': '查看审计日志', 'history.rollback': '回滚历史版本', 'export.all': '导出全量数据', 'kb.mount': '管理挂载目录', 'integration.manage': '管理外部集成', 'sync.manage': '管理云端同步与设备令牌',
 }
 
 export const OPS = {
@@ -30,7 +30,7 @@ const WORK = [...READ, 'project.create', 'project.edit', 'project.submit', 'mate
 
 // 岗位默认配置；管理员可在「系统设置 → 角色权限」修改（存于 roles 集合）
 export const DEFAULT_ROLES = [
-  { id: 'sysadmin', name: '系统管理员', functions: ['project.view', 'org.manage', 'workflow.config', 'settings.manage', 'ai.policy', 'audit.read', 'history.rollback', 'kb.mount', 'integration.manage', 'research.view', 'company.view'], ops: [], scope: 'all', clearance: 1, categories: [], ai: 1 },
+  { id: 'sysadmin', name: '系统管理员', functions: ['project.view', 'org.manage', 'workflow.config', 'settings.manage', 'ai.policy', 'audit.read', 'history.rollback', 'kb.mount', 'integration.manage', 'sync.manage', 'research.view', 'company.view'], ops: [], scope: 'all', clearance: 1, categories: [], ai: 1 },
   { id: 'partner', name: '企业管理层 / 合伙人', functions: [...READ, 'project.delete', 'project.export', 'project.archive', 'project.pause', 'export.all', 'audit.read', 'views.manage', 'meeting.manage', 'history.rollback'], ops: ['op.meeting.decide', 'op.invest.approve', 'op.exit.approve', 'op.archive.confirm'], scope: 'all', clearance: 3, categories: Object.keys(FIELD_CATEGORIES), ai: 2 },
   { id: 'head', name: '投资负责人 / 部门负责人', functions: [...WORK, 'project.pause', 'project.archive', 'project.export', 'project.member', 'company.confirm', 'views.manage', 'audit.read'], ops: ['op.start.authorize', 'op.pm.confirm', 'op.material.finalize', 'op.meeting.decide', 'op.archive.confirm'], scope: 'dept', clearance: 3, categories: ['amount', 'valuation', 'terms', 'trade_secret'], ai: 3 },
   { id: 'pm', name: '项目经理 / 投资经理', functions: [...WORK, 'project.pause', 'project.member', 'company.confirm', 'project.export'], ops: ['op.pm.confirm', 'op.material.finalize'], scope: 'own', clearance: 2, categories: ['amount', 'valuation', 'terms'], ai: 3 },

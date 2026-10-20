@@ -4,9 +4,10 @@ import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, avatar, get, post, act, 
 
 const TABS = [
   ['org', '组织与人员', 'org.manage'], ['roles', '岗位权限', null], ['workflow', '流程配置', null], ['security', '密级与敏感字段', 'settings.manage'],
-  ['ai', 'AI 策略与模型', null], ['integrations', '集成', 'integration.manage'], ['automation', '自动化与定时', 'settings.manage'], ['audit', '审计与回滚', 'audit.read'], ['eval', '评测', 'ai.policy'],
+  ['ai', 'AI 策略与模型', null], ['integrations', '集成', 'integration.manage'], ['automation', '自动化与定时', 'settings.manage'], ['cloud', '云端与安全', 'org.manage'], ['audit', '审计与回滚', 'audit.read'], ['eval', '评测', 'ai.policy'],
 ]
 const AI_L = ['关闭', '辅助建议', '起草待确认', '授权执行']
+const SYNC_NAMES = { projects: '项目', companies: '公司库', deliverables: '成果（不含正文）', meetings: '会议', tasks: '任务', approvals: '决策表决', workflows: '流程', businessTypes: '业务类型', depts: '部门', users: '人员（不含密码）', roles: '岗位权限' }
 const CAT = { amount: '投资金额', valuation: '内部估值', terms: '交易条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }
 const SCOPE = { own: '本人负责', dept: '本部门', assigned: '指定授权', postinv: '投后阶段', all: '全机构' }
 
@@ -138,6 +139,35 @@ const T = {
       <div class="box" style="margin-top:12px"><h3>运行记录</h3>${logs.sched.slice(0, 12).map(l => `<div class="li2"><span class="${l.ok ? 'ok' : 'bad'}">${l.ok ? '✓' : '✕'}</span><span class="grow">${esc(l.job)}${l.manual ? '（手动）' : ''} · <span class="dim">${esc(JSON.stringify(l.result ?? l.error ?? '').slice(0, 80))}</span></span><span class="dim">${rel(l.at)}</span></div>`).join('') || empty('暂无')}
         <h3 style="margin-top:12px">推送记录</h3>${logs.push.slice(0, 10).map(l => `<div class="li2"><span class="${l.ok ? 'ok' : 'bad'}">${l.ok ? '✓' : '✕'}</span><span class="grow ell">${esc(l.channel ?? '')} · ${esc(l.title ?? '')}${l.error ? ` · <span class="bad">${esc(l.error)}</span>` : ''}</span><span class="dim">${rel(l.at)}</span></div>`).join('') || empty('暂无')}</div></div></div>`
   },
+  // ───────── 云端与安全（云服务器部署：账号安全、在线会话、设备令牌、信息同步预留）─────────
+  async cloud(el) {
+    const d = D()
+    const sec = d.settings.security ?? {}
+    const sy = d.settings.sync
+    const saas = d.mode === 'saas'
+    const [sessions, devices, status] = await Promise.all([saas ? get('security.sessions').catch(() => []) : [], sy ? get('devices').catch(() => []) : [], sy ? get('sync.status').catch(() => null) : null])
+    const num = (k, l, unit, min, max) => `<label class="f">${l}<span class="row"><input class="input sm" type="number" min="${min}" max="${max}" data-sec="${k}" value="${sec[k]}" style="width:90px"> <span class="dim">${unit}</span></span></label>`
+    el.innerHTML = `${saas ? '' : '<div class="infobox" style="margin-bottom:12px">当前为本机模式（无登录）。以下账号安全与同步设置在部署到云服务器（多人登录模式）后生效，可提前配置。部署方法见仓库 docs/CLOUD.md。</div>'}
+    <div class="setgrid"><div><div class="box"><h3>${icon('shield', 15)}账号安全</h3>
+      ${num('idleMinutes', '闲置多久自动退出', '分钟', 5, 1440)}${num('sessionHours', '登录最长有效', '小时', 1, 720)}
+      ${num('maxFailures', '连续输错几次锁定', '次', 3, 20)}${num('lockMinutes', '锁定时长', '分钟', 1, 1440)}${num('minPassword', '密码最少位数', '位', 8, 64)}
+      <label class="f"><span><input type="checkbox" data-sec="forceChangeGenerated" ${sec.forceChangeGenerated !== false ? 'checked' : ''}> 系统生成或管理员重置的密码，首次登录必须修改</span></label>
+      <button class="btn sm pri" data-act="sec-save">保存</button>
+      <div class="dim" style="font-size:12px;margin-top:8px">会话保存在服务端数据库（重启不掉线）；通过 HTTPS 访问时登录凭证只在加密连接上传输。部署在反向代理后请设置 INVESTAI_TRUST_PROXY=1，登录锁定与审计才能识别真实来源地址。</div></div>
+      <div class="box" style="margin-top:12px"><h3>${icon('user', 15)}在线会话</h3>${saas ? (sessions.map(x => `<div class="li2"><div class="grow"><b>${esc(x.userName)}</b> <span class="dim">${esc(x.ip || '')}</span><div class="dim ell" style="font-size:11px">${esc(x.ua || '')} · 登录 ${rel(x.created)} · 活动 ${rel(x.seen)}</div></div><button class="btn sm ghost" data-act="sess-revoke" data-id="${esc(x.id)}">强制退出</button></div>`).join('') || empty('暂无在线会话')) : empty('本机模式没有登录会话')}</div></div>
+      <div>${sy ? `<div class="box"><h3>${icon('globe', 15)}信息同步（预留）</h3>
+        <label class="f">本机在同步中的角色<select class="select" id="syRole">${opts(Object.entries(sy.roles), sy.role)}</select></label>
+        <label class="f">云端服务器地址（作为客户端时）<input class="input" id="syUrl" value="${esc(sy.serverUrl ?? '')}" placeholder="https://invest.example.com"></label>
+        <label class="f">同步频率<span class="row"><input class="input sm" type="number" min="5" max="1440" id="syInt" value="${sy.intervalMinutes}" style="width:90px"> <span class="dim">分钟</span></span></label>
+        <div class="f">同步内容${sy.available.map(c => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" data-sycol="${c}" ${sy.collections.includes(c) ? 'checked' : ''}> ${esc(SYNC_NAMES[c] ?? c)}</label>`).join('')}</div>
+        <div class="row"><button class="btn sm pri" data-act="sync-save">保存</button><span class="grow"></span></div>
+        <label class="f" style="margin-top:10px">设备令牌（由云端服务器管理员签发，只保存在本机密钥文件）<div class="row"><input class="input grow" type="password" id="syToken" autocomplete="off" placeholder="iai_…"><button class="btn sm" data-act="secret" data-k="sync.deviceToken" data-src="syToken">保存令牌</button><button class="btn sm" data-act="sync-test">测试连接</button></div></label>
+        <div class="dim" style="font-size:12px">协议版本 ${status?.protocol ?? 1} · 本机变更序号 ${status?.cursor ?? 0} · 冲突处理：以云端为准。当前版本提供从云端增量拉取（按令牌所属人员的四层权限过滤与脱敏）；推送修改到云端为预留接口，尚未启用。</div></div>
+      <div class="box" style="margin-top:12px"><h3>${icon('link', 15)}设备令牌（其他电脑或程序访问本服务）</h3>
+        ${devices.map(x => `<div class="li2"><div class="grow"><b>${esc(x.name)}</b> <span class="dim">代表 ${esc(x.userName ?? '')}</span><div class="dim" style="font-size:11px">${x.scopes.map(k => esc(sy.scopes[k] ?? k)).join('、')} · ${x.revoked ? '<span class="bad">已吊销</span>' : x.expiresAt < Date.now() ? '<span class="bad">已过期</span>' : `${ymd(x.expiresAt)} 到期`} · ${x.lastSeen ? `最近使用 ${rel(x.lastSeen)}` : '未使用'}</div></div>${x.revoked ? '' : `<button class="btn sm ghost" data-act="dev-revoke" data-id="${x.id}">吊销</button>`}</div>`).join('') || empty('还没有签发设备令牌')}
+        <button class="btn sm" data-act="dev-issue" style="margin-top:8px">签发令牌</button>
+        <div class="dim" style="font-size:12px;margin-top:6px">令牌的数据权限等同于签发给的那个人；只能调用同步接口，不能登录界面。令牌只在签发时显示一次，丢失请吊销后重新签发。</div></div>` : empty('需要「管理云端同步与设备令牌」权限')}</div></div>`
+  },
   // ───────── 审计与回滚 ─────────
   async audit(el) {
     const r = await get('audit')
@@ -183,6 +213,32 @@ function stageCard(s, i, w, ed) {
 const wfRerender = () => T.workflow($('#sbody'))
 
 Object.assign(ACT, {
+  'sec-save': async () => {
+    const v = {}
+    for (const i of $$('[data-sec]')) v[i.dataset.sec] = i.type === 'checkbox' ? i.checked : Number(i.value)
+    if (await saveSection('security', v)) T.cloud($('#sbody'))
+  },
+  'sess-revoke': async el => { if (await act('security.revoke', { id: el.dataset.id }, '已强制退出')) T.cloud($('#sbody')) },
+  'sync-save': async () => {
+    const v = { role: $('#syRole').value, serverUrl: $('#syUrl').value.trim(), intervalMinutes: Number($('#syInt').value), collections: $$('[data-sycol]').filter(i => i.checked).map(i => i.dataset.sycol) }
+    if (await saveSection('sync', v)) T.cloud($('#sbody'))
+  },
+  'sync-test': async () => { const r = await act('sync.test', { serverUrl: $('#syUrl').value.trim() }); if (r?.ok) toast(`连接成功：云端协议 v${r.remote.protocol}，令牌代表 ${r.remote.user?.name ?? '—'}`, 'ok') },
+  'dev-issue': async () => {
+    const users = D().users
+    const sc = D().settings.sync.scopes
+    const r = await dialog(`<h3>签发设备令牌</h3><label class="f">设备名称<input class="input" name="name" required placeholder="如：上海办公室桌面应用、BI 报表"></label>
+      <label class="f">代表的人员（令牌的数据权限等同此人）<select class="select" name="userId">${opts(users.map(u => [u.id, `${u.name} · ${u.title}`]), D().me.id)}</select></label>
+      <div class="f">权限${Object.entries(sc).map(([k, l]) => `<label style="display:block"><input type="checkbox" name="scopes" data-multi value="${k}" ${k === 'sync.pull' ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+      <label class="f">有效期（天）<input class="input sm" type="number" name="days" value="365" min="1" max="730" style="width:90px"></label>
+      <div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">签发</button></div>`)
+    if (!r) return
+    const out = await act('device.issue', { name: r.name, userId: r.userId, scopes: r.scopes, days: Number(r.days) })
+    if (!out) return
+    await dialog(`<h3>令牌已签发</h3><div class="warnbox">只显示这一次，请复制后保存到对方设备（系统配置 → 云端与安全 → 设备令牌）。丢失请吊销后重新签发。</div><label class="f">设备令牌<input class="input mono" value="${esc(out.token)}" readonly></label><div class="acts"><button class="btn pri" data-dlg="ok">我已保存</button></div>`)
+    T.cloud($('#sbody'))
+  },
+  'dev-revoke': async el => { if (await confirmBox('吊销设备令牌', '吊销后该设备立即无法同步，不可恢复。', { danger: true, okText: '吊销' }) && await act('device.revoke', { id: el.dataset.id }, '已吊销')) T.cloud($('#sbody')) },
   'wf-sel': el => { S.wfSel = el.dataset.id; S.wfEdit = null; wfRerender() },
   'wf-clone': async () => { const w = await act('workflow.clone', { id: S.wfSel }, '已复制为新版本草稿'); if (w) { S.wfSel = w.id; S.wfEdit = null; await hooks.reload({ files: false }); wfRerender() } },
   'wf-save': async () => { if (await act('workflow.save', { def: S.wfEdit }, '草稿已保存')) { S.wfEdit = null; wfRerender() } },

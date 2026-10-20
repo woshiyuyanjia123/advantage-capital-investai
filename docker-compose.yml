@@ -1,0 +1,13 @@
+# docker compose up -d --build；只在本机 4310 端口提供服务，由同机的 HTTPS 反向代理（Caddy / Nginx）对外。见 docs/CLOUD.md
+services:
+  investai:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INVESTAI_TRUST_PROXY: "1"
+    ports:
+      - "127.0.0.1:4310:4310"
+    volumes:
+      - ./data:/data
+      - ./secrets:/secrets

@@ -1,0 +1,12 @@
+node_modules
+desktop
+release
+data
+secrets
+reports
+docs
+test
+scripts
+.git
+.env
+*.sqlite*

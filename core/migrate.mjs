@@ -23,6 +23,11 @@ const STEPS = {
       if (changed) db.put('companies', { ...c, fields: f }, { actor: SYSTEM, reason: '公司库敏感字段归类', action: 'migrate' })
     }
   },
+  // 4 → 5：云端部署预留（系统管理员可管理同步与设备令牌；账号安全与同步的默认配置）
+  5(db) {
+    const admin = db.get('roles', 'sysadmin')
+    if (admin && !admin.functions.includes('sync.manage')) db.put('roles', { ...admin, functions: [...admin.functions, 'sync.manage'] }, { actor: SYSTEM, reason: '系统管理员可管理云端同步与设备令牌', action: 'migrate' })
+  },
 }
 
 export function migrate(db) {

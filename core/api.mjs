@@ -18,6 +18,7 @@ import { findProject, findType } from './intent.mjs'
 import { createMarket } from './market.mjs'
 import { viewer } from './projection.mjs'
 import { VOCAB } from './vocab.mjs'
+import { createSessionStore, createLoginGuard, createSync, DEFAULT_SECURITY, DEFAULT_SYNC, SYNC_ROLES, SYNC_COLLECTIONS, DEVICE_SCOPES } from './cloud.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -38,19 +39,33 @@ function checkPassword(pw, rec) {
 
 export function createApi(ctx) {
   const { db, org, kb, ai, engine, deliverables, extractor, meetings, fill, sso, notify, scheduler, wisburg, mode, appDir, dir, lifecycle, projection, persona } = ctx
-  const sessions = new Map()
   const market = createMarket({ db, org, wisburg })
   const S = () => db.get('settings', 'main')
+  const SEC = () => ({ ...DEFAULT_SECURITY, ...S()?.security })
+  // 云端部署：会话入库（重启不掉线、闲置超时）、登录失败锁定、设备令牌与信息同步（core/cloud.mjs）
+  const sessions = createSessionStore(db, () => S()?.security)
+  const guard = createLoginGuard(() => S()?.security)
+  const sync = createSync({ db, org, projection, settings: S })
+  const sidOf = request => /(?:^|;\s*)investai_sid=([a-f0-9]{48})/.exec(request.headers.get('cookie') ?? '')?.[1]
+  const clientIp = request => request.headers.get('x-investai-client') ?? ''
+  // 通过 HTTPS 访问（或 HTTPS 反向代理转发）时 Cookie 只在加密连接上发送
+  const secure = request => request && new URL(request.url).protocol === 'https:' ? '; Secure' : ''
+  const bearer = request => /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '')?.[1]
+  // 设备令牌只能调用同步接口；须改密码的账号只能看状态、改密码、退出
+  const DEVICE_OPS = { 'sync.status': null, 'sync.pull': 'sync.pull', 'sync.push': 'sync.push' }
+  const MUST_CHANGE_OPS = new Set(['state', 'me.password', 'logout', 'security.policy'])
   const meta = (user, reason, action) => ({ actor: user, reason, action })
 
   function currentUser(request) {
     if (mode !== 'saas') return persona()
-    const sid = /(?:^|;\s*)investai_sid=([a-f0-9]{48})/.exec(request.headers.get('cookie') ?? '')?.[1]
-    const s = sid && sessions.get(sid)
-    if (!s || s.exp < Date.now()) return null
+    const s = sessions.resolve(sidOf(request))
+    if (!s) return null
     return db.get('users', s.userId)?.disabled ? null : db.get('users', s.userId)
   }
-  const session = user => { const sid = randomBytes(24).toString('hex'); sessions.set(sid, { userId: user.id, exp: Date.now() + 12 * 3600e3 }); return `investai_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200` }
+  const session = (user, request) => {
+    const sid = sessions.create(user, { ip: clientIp(request ?? new Request('http://x')), ua: request?.headers.get('user-agent') ?? '' })
+    return `investai_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SEC().sessionHours * 3600}${secure(request)}`
+  }
 
   // ───────── 视图（按权限裁剪） ─────────
   const pub = u => u && ({ id: u.id, name: u.name, title: u.title, deptId: u.deptId, roles: u.roles })
@@ -74,6 +89,7 @@ export function createApi(ctx) {
     const s = S()
     const admin = org.can(user, 'settings.manage') || org.can(user, 'ai.policy')
     return { org: s.org, models: { mode: s.models.mode, sensitiveLevel: s.models.sensitiveLevel, external: s.models.external, local: admin ? s.models.local : undefined }, sensitivity: s.sensitivity, materialRules: admin ? s.materialRules : undefined, aiPolicy: s.aiPolicy, automation: s.automation,
+      security: org.can(user, 'org.manage') ? SEC() : { minPassword: SEC().minPassword }, sync: org.can(user, 'sync.manage') ? { ...DEFAULT_SYNC, ...s.sync, roles: SYNC_ROLES, available: SYNC_COLLECTIONS, scopes: DEVICE_SCOPES } : undefined,
       push: admin ? { channels: s.push.channels } : undefined, schedules: s.schedules, watchlist: s.watchlist, sso: admin ? s.sso : { enabled: s.sso.enabled }, toolknit: s.toolknit, market: s.market, asr: asrRuntime(s), desktop: s.desktop ?? { personaSwitch: true } }
   }
 
@@ -82,7 +98,7 @@ export function createApi(ctx) {
     const week = Date.now() - 7 * 864e5
     const myTasks = db.find('tasks', t => t.owner === user.id)
     return {
-      rev: db.rev, mode, me: { ...pub(user), dept: db.get('depts', user.deptId)?.name }, caps: org.capabilities(user),
+      rev: db.rev, mode, me: { ...pub(user), dept: db.get('depts', user.deptId)?.name, mustChange: mode === 'saas' && !!user.mustChange }, caps: org.capabilities(user),
       users: db.all('users').filter(u => !u.disabled).map(pub), depts: db.all('depts'), businessTypes: db.all('businessTypes'),
       workflows: db.all('workflows').map(w => ({ id: w.id, businessType: w.businessType, name: w.name, version: w.version, status: w.status, stages: w.stages.map(s => ({ id: s.id, name: s.name, kind: s.kind, label: s.label, gate: s.gate?.name })) })),
       projects: ps.map(p => projectView(user, p)),
@@ -297,7 +313,7 @@ export function createApi(ctx) {
     'settings.update': async (user, b) => {
       const s = S()
       const sec = String(b.section)
-      const perm = { desktop: 'org.manage', models: 'ai.policy', aiPolicy: 'ai.policy', sensitivity: 'settings.manage', materialRules: 'settings.manage', automation: 'settings.manage', push: 'integration.manage', schedules: 'settings.manage', watchlist: 'settings.manage', sso: 'integration.manage', toolknit: 'integration.manage', org: 'settings.manage', asr: 'settings.manage', market: 'integration.manage' }[sec]
+      const perm = { desktop: 'org.manage', models: 'ai.policy', aiPolicy: 'ai.policy', sensitivity: 'settings.manage', materialRules: 'settings.manage', automation: 'settings.manage', push: 'integration.manage', schedules: 'settings.manage', watchlist: 'settings.manage', sso: 'integration.manage', toolknit: 'integration.manage', org: 'settings.manage', asr: 'settings.manage', market: 'integration.manage', security: 'org.manage', sync: 'sync.manage' }[sec]
       if (!perm) throw fail('未知设置项')
       org.assert(user, perm)
       let value = b.value
@@ -309,12 +325,21 @@ export function createApi(ctx) {
         value = { ...s.toolknit, ...value, allowTools: (value.allowTools ?? s.toolknit?.allowTools ?? []).map(String).slice(0, 40) }
       }
       if (sec === 'asr' && value.python && !PYTHON_EXE.test(value.python)) throw fail('Python 路径应指向 python 可执行文件')
+      if (sec === 'security') {
+        const n = (k, lo, hi) => Math.min(hi, Math.max(lo, Math.round(Number(value[k] ?? SEC()[k]))))
+        value = { idleMinutes: n('idleMinutes', 5, 1440), sessionHours: n('sessionHours', 1, 720), maxFailures: n('maxFailures', 3, 20), lockMinutes: n('lockMinutes', 1, 1440), minPassword: n('minPassword', 8, 64), forceChangeGenerated: value.forceChangeGenerated ?? SEC().forceChangeGenerated }
+      }
+      if (sec === 'sync') {
+        if (value.role && !SYNC_ROLES[value.role]) throw fail('未知的同步角色')
+        if (value.serverUrl && !/^https:\/\/[^\s/]+|^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?/.test(value.serverUrl)) throw fail('云端服务器地址须为 https://（本机测试可用 http://127.0.0.1）')
+        value = { ...DEFAULT_SYNC, ...s.sync, ...value, collections: (value.collections ?? s.sync?.collections ?? SYNC_COLLECTIONS).filter(c => SYNC_COLLECTIONS.includes(c)), intervalMinutes: Math.min(1440, Math.max(5, Number(value.intervalMinutes ?? s.sync?.intervalMinutes ?? 15))), conflict: 'server-wins' }
+      }
       if (sec === 'push') value = { channels: (value.channels ?? []).map(c => ({ id: c.id ?? randomBytes(4).toString('hex'), name: String(c.name).slice(0, 30), type: c.type, enabled: !!c.enabled, kinds: c.kinds ?? [] })) }
       db.put('settings', { ...s, [sec]: sec === 'models' ? { ...s.models, ...value } : value }, meta(user, `修改设置：${sec}`, 'settings'))
       return settingsView(user)
     },
     'secret.set': async (user, b) => {
-      const allowed = { wisburgApiKey: 'integration.manage', deepseekApiKey: 'ai.policy', 'sso.clientSecret': 'integration.manage' }
+      const allowed = { wisburgApiKey: 'integration.manage', deepseekApiKey: 'ai.policy', 'sso.clientSecret': 'integration.manage', 'sync.deviceToken': 'sync.manage' }
       const key = String(b.key)
       const perm = allowed[key] ?? (/^push\.[a-z0-9]+\.(url|secret)$/.test(key) ? 'integration.manage' : null)
       if (!perm) throw fail('不允许的密钥项')
@@ -367,8 +392,13 @@ export function createApi(ctx) {
       if (!username) throw fail('账号必填')
       if (db.one('users', x => x.username === username && x.id !== u.id)) throw fail(`账号「${username}」已被使用`, 409)
       const next = { ...u, name: String(b.name ?? u.name).slice(0, 30), username, email: b.email ?? u.email, title: String(b.title ?? u.title ?? '').slice(0, 30), deptId: b.deptId ?? u.deptId, roles, disabled: !!b.disabled }
-      if (b.password && mode === 'saas') next.pw = hashPassword(String(b.password))
-      if (b.disabled || b.password) for (const [sid, s] of sessions) if (s.userId === u.id) sessions.delete(sid)
+      if (b.password && mode === 'saas') {
+        if (String(b.password).length < SEC().minPassword) throw fail(`密码至少 ${SEC().minPassword} 位`)
+        next.pw = hashPassword(String(b.password))
+        // 管理员设置的密码：对方首次登录须改成自己的密码（可在「云端与安全」关闭）
+        next.mustChange = u.id !== user.id && SEC().forceChangeGenerated
+      }
+      if (b.disabled || b.password) sessions.revokeUser(u.id)
       const { pw, ...safe } = db.put('users', next, meta(user, `维护人员「${next.name}」${b.disabled ? '（停用）' : ''}`, 'user'))
       return safe
     },
@@ -378,13 +408,23 @@ export function createApi(ctx) {
       const u = db.get('users', user.id)
       if (!checkPassword(String(b.old ?? ''), u.pw)) throw fail('原密码不正确', 403)
       const pw = String(b.password ?? '')
-      if (pw.length < 8) throw fail('新密码至少 8 位')
+      if (pw.length < SEC().minPassword) throw fail(`新密码至少 ${SEC().minPassword} 位`)
       if (pw === String(b.old)) throw fail('新密码不能与原密码相同')
-      db.put('users', { ...u, pw: hashPassword(pw) }, meta(user, '修改本人登录密码', 'user'))
-      const sid = /(?:^|;\s*)investai_sid=([a-f0-9]{48})/.exec(request.headers.get('cookie') ?? '')?.[1]
-      for (const [k, x] of sessions) if (x.userId === u.id && k !== sid) sessions.delete(k)
+      db.put('users', { ...u, pw: hashPassword(pw), mustChange: false }, meta(user, '修改本人登录密码', 'user'))
+      sessions.revokeUser(u.id, sidOf(request))
       return { ok: true }
     },
+    // 云端与安全：在线会话、设备令牌、同步配置
+    'security.revoke': (user, b) => {
+      org.assert(user, 'org.manage')
+      if (b.userId) sessions.revokeUser(String(b.userId)); else sessions.revokeId(String(b.id))
+      db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: user.name, action: '强制退出', target: b.userId ? db.get('users', b.userId)?.name ?? b.userId : '会话' })
+      return { ok: true }
+    },
+    'device.issue': (user, b) => sync.issue(user, b),
+    'device.revoke': (user, b) => sync.revoke(user, b.id),
+    'sync.push': () => { throw fail('推送同步为预留接口，尚未启用：当前版本只支持从云端服务器拉取（sync.pull）', 501) },
+    'sync.test': async (user, b) => sync.testRemote(user, { serverUrl: b.serverUrl, token: (await readSecrets())['sync.deviceToken'] }),
     'dept.save': (user, b) => { org.assert(user, 'org.manage'); return db.put('depts', { id: b.id ?? `d_${randomBytes(3).toString('hex')}`, name: String(b.name).slice(0, 30), parentId: b.parentId ?? null }, meta(user, '维护部门', 'dept')) },
     'history.rollback': (user, b) => {
       org.assert(user, 'history.rollback')
@@ -415,7 +455,7 @@ export function createApi(ctx) {
       db.put('kvstate', { id: 'persona', userId: b.userId }, meta(user, `切换演示身份为 ${db.get('users', b.userId).name}`, 'persona'))
       return { ok: true }
     },
-    logout: (user, b, request) => { const sid = /investai_sid=([a-f0-9]{48})/.exec(request.headers.get('cookie') ?? '')?.[1]; if (sid) sessions.delete(sid); return json({ ok: true }, 200, { 'set-cookie': 'investai_sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' }) },
+    logout: (user, b, request) => { sessions.revoke(sidOf(request)); return json({ ok: true }, 200, { 'set-cookie': `investai_sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure(request)}` }) },
   }
 
   function createCompany(user, b) {
@@ -429,6 +469,11 @@ export function createApi(ctx) {
   const GET = {
     rev: () => ({ rev: db.rev }),
     state: user => state(user),
+    'security.policy': () => ({ minPassword: SEC().minPassword }),
+    'security.sessions': user => { org.assert(user, 'org.manage'); return sessions.list().map(x => ({ ...x, userName: db.get('users', x.userId)?.name ?? x.userId })) },
+    devices: user => sync.list(user),
+    'sync.status': user => sync.status(user),
+    'sync.pull': (user, q) => sync.pull(user, { since: q.get('since'), limit: q.get('limit') }),
     project: (user, q) => projectDetail(user, q.get('id')),
     deliverable: (user, q) => deliverable(user, q.get('id')),
     'version.text': async (user, q) => { const d = deliverable(user, q.get('id')); return { text: org.redact(user, await deliverables.versionText(d, q.get('v'))) } },
@@ -522,13 +567,34 @@ export function createApi(ctx) {
         return json(await PUBLIC[op](body, q))
       }
       if (op === 'login' && mode === 'saas') {
-        const u = db.one('users', x => x.username === String(body.username ?? '') && !x.disabled)
-        if (!u || !checkPassword(String(body.password ?? ''), u.pw)) { await new Promise(r => setTimeout(r, 400)); throw fail('账号或密码错误', 401) }
-        db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: u.name, action: '登录', target: '密码登录' })
-        return json({ ok: true }, 200, { 'set-cookie': session(u) })
+        const name = String(body.username ?? '')
+        const ip = clientIp(request)
+        guard.check(name, ip)
+        const u = db.one('users', x => x.username === name && !x.disabled)
+        if (!u || !checkPassword(String(body.password ?? ''), u.pw)) {
+          const left = guard.failed(name, ip)
+          db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: name.slice(0, 30), action: '登录失败', target: ip || '未知地址' })
+          await new Promise(r => setTimeout(r, 400))
+          throw fail(left ? `账号或密码错误（再错 ${left} 次将暂时锁定）` : `账号或密码错误，已锁定 ${SEC().lockMinutes} 分钟`, left ? 401 : 429)
+        }
+        guard.passed(name, ip)
+        db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: u.name, action: '登录', target: ip ? `密码登录（${ip}）` : '密码登录' })
+        return json({ ok: true, mustChange: !!u.mustChange }, 200, { 'set-cookie': session(u, request) })
+      }
+      // 设备令牌（同步客户端）：只能调用同步接口，数据按签发给的那个人的权限过滤
+      const token = mode === 'saas' && bearer(request)
+      if (token) {
+        const auth = sync.authenticate(token)
+        if (!auth) return json({ error: '设备令牌无效、已过期或已吊销' }, 401)
+        if (!(op in DEVICE_OPS)) return json({ error: '设备令牌只能调用同步接口' }, 403)
+        if (DEVICE_OPS[op] && !auth.device.scopes.includes(DEVICE_OPS[op])) return json({ error: `该设备令牌没有「${DEVICE_SCOPES[DEVICE_OPS[op]]}」权限` }, 403)
+        const fn = request.method === 'POST' ? POST[op] : GET[op]
+        if (!fn) return json({ error: `未知接口 ${op}` }, 404)
+        return json(await fn(auth.user, request.method === 'POST' ? body : q, request))
       }
       const user = currentUser(request)
       if (!user) return json({ error: '请先登录', login: true, sso: !!S().sso?.enabled }, 401)
+      if (mode === 'saas' && user.mustChange && !MUST_CHANGE_OPS.has(op)) return json({ error: '请先修改初始密码', mustChange: true }, 403)
       if (op === 'file.raw') return await raw(user, q)
       const fn = request.method === 'POST' ? POST[op] : GET[op]
       if (!fn) return json({ error: `未知接口 ${op}` }, 404)
@@ -536,12 +602,12 @@ export function createApi(ctx) {
       return result instanceof Response ? result : json(result)
     } catch (e) {
       const status = e.status ?? 500
-      if (status >= 500) console.error('[investai]', e)
+      if (status >= 500 && status !== 501) console.error('[investai]', e)  // 501：预留接口，不是故障
       return json({ error: e.message || '服务异常', action: e.action }, status)
     }
   }
 
   // SSO 回调由 server.mjs 调用
-  handle.ssoSession = user => session(user)
+  handle.ssoSession = (user, request) => session(user, request)
   return handle
 }

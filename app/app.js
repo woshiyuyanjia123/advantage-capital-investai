@@ -410,6 +410,7 @@ Object.assign(ACT, {
     popup(`<div class="hd">${locked ? '身份已由管理员锁定' : '切换演示身份：每个身份看到的项目、字段和能做的操作都不同'}</div>${d.users.map(u => `<div class="it ${u.id === d.me.id ? 'on' : ''}" ${locked ? '' : `data-act="set-persona" data-id="${u.id}"`} title="${esc((u.roles ?? []).map(roleName).join('、'))}">${avatar(u.name, 22)}<div class="grow" style="min-width:0"><div>${esc(u.name)} <span class="dim">${esc(u.title)}</span></div><div class="dim ell" style="font-size:11px">${esc((u.roles ?? []).map(roleName).join('、'))}</div></div></div>`).join('')}`, r.right - 300, r.bottom + 6, 300)
   },
   'set-persona': async el => { closePopup(); await post('persona', { userId: el.dataset.id }); S.chat = []; S.project = null; await hooks.reload(); await loadChat(); if (S.view === 'project' && !proj(S.sel)) go('pipeline'); const c = D().caps; toast(`已切换为 ${D().me.name}（${c.roleNames.join('、')}）：数据范围 ${c.scopes.map(x => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[x])).join('、')}，AI ${AI_LEVEL[c.ai]}`) },
+  'force-logout': async () => { await post('logout'); location.reload() },
   'my-password': async () => {
     const r = await dialog(`<h3>修改密码</h3><label class="f">原密码<input class="input" type="password" name="old" autocomplete="current-password" required></label><label class="f">新密码（至少 8 位）<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required></label><label class="f">再次输入新密码<input class="input" type="password" name="again" autocomplete="new-password" required></label><div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">保存</button></div>`)
     if (!r) return
@@ -418,6 +419,17 @@ Object.assign(ACT, {
   },
   logout: async () => { await post('logout'); location.reload() },
 })
+
+/** 系统生成或管理员重置的密码：首次登录必须改成自己的密码，改完前服务端只放行状态、改密码与退出。 */
+async function forcePassword() {
+  const { minPassword = 8 } = await get('security.policy').catch(() => ({}))
+  for (;;) {
+    const r = await dialog(`<h3>请先设置自己的密码</h3><div class="infobox">当前密码由系统生成或管理员重置，继续使用前需要改成只有你知道的密码（至少 ${minPassword} 位）。</div><label class="f">当前密码<input class="input" type="password" name="old" autocomplete="current-password" required></label><label class="f">新密码<input class="input" type="password" name="password" autocomplete="new-password" required></label><label class="f">再次输入新密码<input class="input" type="password" name="again" autocomplete="new-password" required></label><div class="acts"><button class="btn" data-act="force-logout">退出登录</button><button class="btn pri" data-dlg="ok">保存并继续</button></div>`)
+    if (!r) continue
+    if (r.password !== r.again) { toast('两次输入的新密码不一致', 'deny'); continue }
+    if (await act('me.password', { old: r.old, password: r.password }, '密码已设置')) { await hooks.reload(); return }
+  }
+}
 
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]')
@@ -532,6 +544,7 @@ try {
   renderView()
   renderAI()
   await loadChat()
+  if (D().me.mustChange) await forcePassword()
   try { if (!localStorage.getItem('investai.tour.v2')) setTimeout(() => startTour(), 600) } catch { /* 无痕模式 */ }
 } catch (e) {
   if (!$('.login')) $('#view').innerHTML = `<div class="empty" style="padding:30px">加载失败：${esc(e.message)}</div>`

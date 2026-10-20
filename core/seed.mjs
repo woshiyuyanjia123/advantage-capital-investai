@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { DEFAULT_ROLES } from './org.mjs'
 import { defaultWorkflows, BUSINESS_TYPES } from './workflow.mjs'
 
-export const SCHEMA = 4
+export const SCHEMA = 5
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures')
 
 export const DEFAULT_SETTINGS = {
