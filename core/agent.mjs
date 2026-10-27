@@ -91,7 +91,7 @@ export function agentTools({ db, kb, org, wisburg, ai, route }, user, job, aiLev
   return tools.filter(t => t.level <= aiLevel)
 }
 
-export async function runAgent(ctx, { adapter, user, job, text, project, history = [], aiLevel = 1 }) {
+export async function runAgent(ctx, { adapter, user, job, text, project, context = '', aiLevel = 1 }) {
   const tools = agentTools(ctx, user, job, aiLevel)
   // 可选连接器：toolknit（MCP）。仅在管理员确认授权并启用、且当前 AI 参与级别为「授权执行」时加载。
   const tk = ctx.db.get('settings', 'main')?.toolknit
@@ -104,18 +104,19 @@ export async function runAgent(ctx, { adapter, user, job, text, project, history
       for (const t of mcp.tools.filter(x => allow.has(x.name)).slice(0, 40)) tools.push({ name: `toolknit_${t.name}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60), level: 3, label: `toolknit · ${t.name}`, description: `[外部连接器 toolknit] ${String(t.description ?? '').slice(0, 300)}`, parameters: t.inputSchema ?? obj({}), run: args => mcp.call(t.name, args) })
     } catch (e) { job.steps.push({ tool: 'toolknit', label: 'toolknit 连接器', ok: false, summary: `未能连接：${e.message}`, at: Date.now() }) }
   }
-  try { return await loop(ctx, { adapter, user, job, text, project, history, aiLevel, tools }) } finally { mcp?.close() }
+  try { return await loop(ctx, { adapter, user, job, text, project, context, aiLevel, tools }) } finally { mcp?.close() }
 }
 
-async function loop(ctx, { adapter, user, job, text, project, history, aiLevel, tools }) {
+async function loop(ctx, { adapter, user, job, text, project, context, aiLevel, tools }) {
   const byName = Object.fromEntries(tools.map(t => [t.name, t]))
   const hint = `\n\n[界面上下文] AI 参与级别：${['关闭', '辅助建议', '起草待确认', '授权执行'][aiLevel]}；模型路由：${ctx.route?.reason ?? ''}${project ? `；选中项目：${project.name}（id=${project.id}）` : ''}`
-  const messages = [...history, { role: 'user', text: text + hint }]
+  const messages = [{ role: 'user', text: `${context ? `【最近的对话（供理解指代，不是本轮指令）】\n${context}\n\n【本轮问题】\n` : ''}${text}${hint}` }]
   for (let step = 0; step < 10; step++) {
     if (job.abort.signal.aborted) return
     job.phase = 'generating'
     let live = ''
-    const r = await adapter.turn({ system: AGENT_SYSTEM, messages, tools, signal: job.abort.signal, maxTokens: 6000, onText: t => { live += t; job.text = live } })
+    // 额度要同时容纳思维链和 save_draft 里的完整正文（6000 时长稿件会被截断成不完整的工具参数）
+    const r = await adapter.turn({ system: AGENT_SYSTEM, messages, tools, signal: job.abort.signal, maxTokens: 32000, reasoning: 'high', onText: t => { live += t; job.text = live } })
     messages.push({ role: 'assistant', text: r.text, reasoning: r.reasoning, toolCalls: r.toolCalls, replay: r.replay })
     if (!r.toolCalls.length) { job.text = r.text; return }
     for (const call of r.toolCalls) {

@@ -83,7 +83,10 @@ const T = {
         <label class="f">路由模式<select class="select" id="mMode" ${canPolicy ? '' : 'disabled'}>${opts([['hybrid', '混合：按资料密级自动选择（推荐）'], ['local', '仅本地：所有内容只交给本机模型'], ['external', '外部优先：仍受密级限制']], s.models.mode)}</select></label>
         <label class="f">密级限制：该密级及以上的资料只交给本地模型<select class="select" id="mLevel" ${canPolicy ? '' : 'disabled'}>${opts([...LEVELS.map((l, i) => [i, `${l}及以上`]), [4, '不限制（全部允许外部模型，需机构授权）']], s.models.sensitiveLevel)}</select></label>
         <label class="f"><span><input type="checkbox" id="mApproved" ${s.models.external?.approved !== false ? 'checked' : ''} ${canPolicy ? '' : 'disabled'}> 机构已批准使用外部模型（取消则全部改为本地 / 离线）</span></label>
-        ${models.length ? `<label class="f">外部模型选择（来自 DSH 已配置供应商）<select class="select" id="mChoice">${opts(models.map(x => [`${x.provider}|${x.model}`, `${x.provider} · ${x.name}`]), s.models.external?.provider ? `${s.models.external.provider}|${s.models.external.model}` : '', '自动（优先 DeepSeek V4.1 Flash）')}</select></label>` : d.mode === 'dsh' ? `<div class="dim" style="font-size:12px;margin-bottom:8px">DSH 尚未配置模型供应商：在 DSH 设置 → 模型 中添加 DeepSeek API Key 后，这里可以选择模型。</div>` : `<label class="f">DeepSeek API Key（只保存在本机密钥文件，不进数据库）<div class="row"><input class="input grow" type="password" id="dskey" autocomplete="off" placeholder="${m.cloud.ok ? '已配置：输入新 Key 可替换' : '粘贴 DeepSeek API Key（platform.deepseek.com 获取）'}" ${canPolicy ? '' : 'disabled'}><button class="btn sm pri" data-act="secret" data-k="deepseekApiKey" data-src="dskey" ${canPolicy ? '' : 'disabled'}>保存</button></div></label>`}
+        ${m.cloud.lastError ? `<div class="dim" style="font-size:12px;margin-bottom:8px">最近一次调用出错（暂时性问题，下次会照常调用）：${esc(m.cloud.lastError)}</div>` : ''}
+        ${d.mode === 'dsh' ? (models.length ? `<label class="f">外部模型选择（来自 DSH 已配置供应商）<select class="select" id="mChoice">${opts(models.map(x => [`${x.provider}|${x.model}`, `${x.provider} · ${x.name}`]), s.models.external?.provider ? `${s.models.external.provider}|${s.models.external.model}` : '', '自动（优先 DeepSeek V4.1 Flash）')}</select></label>` : `<div class="dim" style="font-size:12px;margin-bottom:8px">DSH 尚未配置模型供应商：在 DSH 设置 → 模型 中添加 DeepSeek API Key 后，这里可以选择模型。</div>`)
+          : `<label class="f">DeepSeek API Key（只保存在本机密钥文件，不进数据库）<div class="row"><input class="input grow" type="password" id="dskey" autocomplete="off" placeholder="${m.cloud.ok || m.cloud.label ? '已配置：输入新 Key 可替换' : '粘贴 DeepSeek API Key（platform.deepseek.com 获取）'}" ${canPolicy ? '' : 'disabled'}><button class="btn sm pri" data-act="secret" data-k="deepseekApiKey" data-src="dskey" ${canPolicy ? '' : 'disabled'}>保存</button>${canPolicy ? '<button class="btn sm" data-act="model-test">测试连接</button>' : ''}</div></label>
+        ${models.length ? `<label class="f">DeepSeek 模型<select class="select" id="mChoice" ${canPolicy ? '' : 'disabled'}>${opts(models.map(x => [`${x.provider}|${x.model}`, x.name]), s.models.external?.model ? `deepseek|${s.models.external.model}` : '', '默认（DeepSeek V4.1 Flash）')}</select></label>` : ''}`}
         <label class="f">本地模型地址（OpenAI 兼容，仅限本机回环地址）<input class="input mono" id="mLocalUrl" value="${esc(s.models.local?.baseURL ?? '')}" placeholder="http://127.0.0.1:11434/v1" ${canPolicy ? '' : 'disabled'}></label>
         <label class="f">本地模型名称<input class="input mono" id="mLocalModel" value="${esc(s.models.local?.model ?? '')}" placeholder="qwen2.5:14b" ${canPolicy ? '' : 'disabled'}></label>
         ${canPolicy ? '<button class="btn sm pri" data-act="models-save">保存</button>' : ''}</div>
@@ -324,6 +327,13 @@ Object.assign(ACT, {
     const pol = { businessTypes: {}, workTypes: {}, levels: {} }
     for (const s of $$('[data-ap]')) if (s.value !== '') pol[s.dataset.ap][s.dataset.k] = Number(s.value)
     await saveSection('aiPolicy', pol)
+  },
+  'model-test': async el => {
+    el.disabled = true
+    toast('正在测试连接…')
+    const r = await act('ai.test', {})
+    el.disabled = false
+    if (r) { toast(r.ok ? `连接正常：${r.label}，用时 ${(r.ms / 1000).toFixed(1)} 秒` : `连接失败：${r.error}`, r.ok ? 'ok' : 'deny'); hooks.reload({ files: false }) }
   },
   // 集成
   secret: async el => { const inp = $(`#${el.dataset.src}`); const v = inp.value.trim(); if (!v) return toast('请输入内容', 'deny'); if (await act('secret.set', { key: el.dataset.k, value: v }, '已保存到本机密钥文件')) { inp.value = ''; hooks.reload({ files: false }) } },

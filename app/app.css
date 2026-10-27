@@ -279,7 +279,7 @@ table.t tr.click:hover td { background: #142140; cursor: pointer; }
 .modal { position: fixed; inset: 0; background: rgba(2,6,15,.6); display: grid; place-items: center; z-index: 50; }
 .dialog { width: 440px; max-width: calc(100vw - 32px); background: #131D33; border: 1px solid var(--line2); border-radius: 12px; padding: 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
 .dialog h3 { margin: 0 0 10px; font-size: 15px; } .dialog p { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; }
-.dialog .f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+.dialog .f, .box .f { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
 .dialog .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .dialog .warnbox { background: #2A1519; border: 1px solid #7F1D1D; color: #FCA5A5; border-radius: 8px; padding: 9px 11px; font-size: 12.5px; margin-bottom: 10px; }
 .drop { position: fixed; inset: 0; z-index: 60; background: rgba(37,99,235,.14); border: 2px dashed var(--blue); display: grid; place-items: center; pointer-events: none; }

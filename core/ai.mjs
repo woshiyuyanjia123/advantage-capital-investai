@@ -14,6 +14,8 @@ export { dshLlm, openaiLlm, PREFERRED } from './llm.mjs'
 import { VOCAB } from './vocab.mjs'
 const LEVEL = VOCAB.level
 const fail = (m, status = 400) => Object.assign(new Error(m), { status })
+// 每份资料送进提示词的长度：外部模型（DeepSeek 上下文 1M）给足原文；本地模型上下文通常较小，保持 7000 字
+const clip = (s, route) => String(s.text ?? '').slice(0, route === 'external' ? 20000 : 7000)
 
 const SYSTEM_DRAFT = `你是投资管理机构的成果起草助手。规则：
 1. 只使用【资料】中的事实，每条事实句末标注来源编号，如 [1]；数字必须与原文一致。
@@ -59,7 +61,8 @@ export function composeOffline({ title, outline, sources, fundLine, note }) {
   const used = new Set()
   const usedN = new Set()
   const pool = sources.filter(s => !s.wisburg).flatMap(s => sentences(s.text).map(x => ({ x, n: s.n })))
-  for (const sec of outline) {
+  // 「待核实事项」统一放在文末（下方固定生成），大纲里同名章节不再重复输出
+  for (const sec of outline.filter(o => !/^待核实/.test(o.title))) {
     out.push(`## ${sec.title}`)
     const hints = [...(HINTS.find(([re]) => re.test(sec.title))?.[1] ?? []), ...(sec.points ?? []).flatMap(p => tokens(p).filter(t => t.length >= 2))]
     if (/财务|数据|收入|盈利/.test(sec.title)) {
@@ -130,7 +133,7 @@ export class AI {
     if (!info.ok) return info
     const h = this.health.get(info.label)
     if (h?.failure && Date.now() - h.failure.at < 300000) return { ok: false, label: info.label, note: `${info.label} 调用失败：${h.failure.message}` }
-    return { ...info, verified: !!h?.verified }
+    return { ...info, verified: !!h?.verified, ...(h?.lastError && Date.now() - h.lastError.at < 600000 ? { lastError: h.lastError.message } : {}) }
   }
 
   async status() {
@@ -161,8 +164,38 @@ export class AI {
       for await (const t of adapter.stream(opts)) yield t
       this.health.set(label, { verified: true })
     } catch (e) {
-      if (!opts.signal?.aborted) this.health.set(label, { failure: { at: Date.now(), message: /api key/i.test(e.message) ? '未配置 API Key' : String(e.message).slice(0, 160) } })
+      if (!opts.signal?.aborted) this.noteFailure(label, e)
       throw e
+    }
+  }
+
+  /**
+   * 记录模型调用失败。只有配置类错误（Key 无效、余额不足、模型名不存在）才在 5 分钟内改走离线引擎；
+   * 限流、超时、网络抖动只记下来、下次照常调用（以前任何一次失败都会让之后 5 分钟的起草、问答、预审全部变成离线引擎）。
+   */
+  noteFailure(label, e) {
+    if (!label) return
+    const message = /api key/i.test(e.message) && !e.status ? '未配置 API Key' : String(e.message).slice(0, 160)
+    this.health.set(label, e.permanent ? { failure: { at: Date.now(), message } } : { verified: this.health.get(label)?.verified, lastError: { at: Date.now(), message } })
+  }
+  /** 改了 Key 或模型设置后清除失败记录并立即重读密钥。 */
+  resetHealth() {
+    this.health.clear()
+    this.cloud.refresh?.()
+  }
+  /** 「测试连接」：发一条很短的请求，验证 Key、模型名与网络。 */
+  async testModel() {
+    this.resetHealth()
+    const info = await this.cloud.info().catch(e => ({ ok: false, note: e.message }))
+    if (!info.ok) return { ok: false, error: info.note }
+    const at = Date.now()
+    try {
+      const reply = await complete(this.cloud, { system: '你是连接测试助手。', user: '只回复两个字：正常', maxTokens: 20, reasoning: 'off', signal: AbortSignal.timeout(30000) })
+      this.health.set(info.label, { verified: true })
+      return { ok: true, label: info.label, ms: Date.now() - at, reply: reply.slice(0, 40) }
+    } catch (e) {
+      this.noteFailure(info.label, e)
+      return { ok: false, label: info.label, error: e.name === 'TimeoutError' ? '30 秒内没有响应（检查网络或代理）' : e.message }
     }
   }
 
@@ -197,7 +230,7 @@ export class AI {
   finish(job, patch) {
     Object.assign(job, patch, { finishedAt: Date.now() })
     this.record(job)
-    setTimeout(() => this.live.delete(job.id), 120000)
+    setTimeout(() => this.live.delete(job.id), 120000).unref?.()
   }
   addChat(userId, msg) {
     const doc = this.db.get('chats', userId) ?? { id: userId, messages: [] }
@@ -216,7 +249,8 @@ export class AI {
     const sources = []
     for (const f of picked) {
       const r = await this.kb.read(f.id, user)
-      sources.push({ n: sources.length + 1, file: f, fileId: f.id, path: r.path, level: f.level ?? 1, offline: r.offline, text: this.org.redact(user, r.text.slice(0, 7000)) })
+      // 保留较长原文：送进提示词时再按模型裁剪（clip），离线引擎与引用核对也能用到完整内容
+      sources.push({ n: sources.length + 1, file: f, fileId: f.id, path: r.path, level: f.level ?? 1, offline: r.offline, text: this.org.redact(user, r.text.slice(0, 30000)) })
     }
     try {
       if ((await this.wisburg?.status())?.configured) {
@@ -230,7 +264,8 @@ export class AI {
     } catch (e) { sources.warn = e.message }
     const refs = this.kb.files().filter(f => f.mountId === 'm_tpl' && f.rel.startsWith('历史成果/') && (f.name.includes(type) || (WORK_TYPES[type]?.format === 'pptx' && f.ext === '.pptx'))).slice(0, 2)
     const styleRefs = []
-    for (const f of refs) { const t = await this.kb.cached(f.id); styleRefs.push({ name: f.name, headings: [...t.matchAll(/^#\s*第\d+页\s*\n+([^\n]+)/gm)].map(m => m[1]).concat([...t.matchAll(/^(?:[一二三四五六七八九十]+、|##\s*)(.+)$/gm)].map(m => m[1])).slice(0, 12) }) }
+    // 第 1 页是封面（如「某半导体项目 立项报告」），不是章节，不能进大纲
+    for (const f of refs) { const t = await this.kb.cached(f.id); styleRefs.push({ name: f.name, headings: [...t.matchAll(/^#\s*第(\d+)页\s*\n+([^\n]+)/gm)].filter(m => m[1] !== '1').map(m => m[2].trim()).concat([...t.matchAll(/^(?:[一二三四五六七八九十]+、|##\s*)(.+)$/gm)].map(m => m[1])).slice(0, 12) }) }
     const sg = this.kb.files().find(f => f.mountId === 'm_tpl' && f.name === '写作规范.md')
     const styleGuide = sg ? (await this.kb.cached(sg.id)).slice(0, 1200) : ''
     const views = this.db.find('views', v => (v.scope === 'industry' && (company?.industry ?? '').includes(v.target)) || (v.scope === 'company' && v.target === company?.short)).map(v => `${v.target}：${v.stance}。${v.thesis}`)
@@ -252,9 +287,10 @@ export class AI {
     if (r.adapter) {
       try {
         const prompt = `项目：${p.name}（${ctx.company?.industry ?? ''}，阶段：${this.db.get('workflows', p.workflowId)?.stages.find(s => s.id === p.stageId)?.name}）\n成果：${type}（${{ pptx: 'PPT 演示，每章节约一页', docx: 'Word 文档', xlsx: 'Excel 表格' }[fmt]}）\n工作目的：${purpose || `用于${type}相关讨论与决策`}\n可用资料：${ctx.sources.map(s => s.path).join('；')}\n机构历史成果结构（风格参考）：${ctx.styleRefs.map(s => `${s.name}：${s.headings.join(' / ')}`).join('\n') || '无'}\n机构观点：${ctx.views.join('；') || '无'}`
-        const out = parseJson(await complete(r.adapter, { system: SYSTEM_PLAN, user: prompt, maxTokens: 1500, signal: AbortSignal.timeout(90000) }))
+        // 结构化输出不需要思考模式：DeepSeek 默认开启思考且思维链计入 max_tokens，1500 的额度常被思考用完、JSON 被截断
+        const out = parseJson(await complete(r.adapter, { system: SYSTEM_PLAN, user: prompt, maxTokens: 3000, reasoning: 'off', signal: AbortSignal.timeout(90000) }))
         if (out?.outline?.length) return { outline: out.outline.slice(0, 16), reason: out.reason ?? '', engine: r.label, route: r }
-      } catch (e) { this.health.set(r.label, { failure: { at: Date.now(), message: e.message } }) }
+      } catch (e) { this.noteFailure(r.label, e) }
     }
     // 离线：以机构历史成果结构为骨架，按资料情况增删
     const base = ctx.styleRefs[0]?.headings.filter(h => !/页$/.test(h)).slice(0, 10)
@@ -327,17 +363,18 @@ export class AI {
             const pub = ctx.sources.filter(s => (s.level ?? 1) === 0)
             if (pub.length) {
               job.engine = `混合：外部（仅公开资料）+ ${route.label}`
-              external = await complete(this.cloud, { system: SYSTEM_CHAT, user: `只根据以下公开资料，提炼与「${ctx.company?.industry ?? p.name}」相关的行业要点（不涉及任何具体项目）：\n${pub.map(s => `[${s.n}] ${s.path}\n${s.text}`).join('\n\n')}`, maxTokens: 1200, signal: job.abort.signal })
+              external = await complete(this.cloud, { system: SYSTEM_CHAT, user: `只根据以下公开资料，提炼与「${ctx.company?.industry ?? p.name}」相关的行业要点（不涉及任何具体项目）：\n${pub.map(s => `[${s.n}] ${s.path}\n${clip(s, 'external')}`).join('\n\n')}`, maxTokens: 4000, reasoning: 'off', signal: job.abort.signal })
             }
           }
           const userPrompt = opts.section !== undefined
-            ? `下面是现有成果全文。只改写第 ${opts.section + 1} 个 ## 章节，其他章节原样保留，输出完整全文。\n改写要求：${opts.prompt}\n\n【现有全文】\n${base}\n\n【资料】\n${ctx.sources.map(s => `[${s.n}] ${s.path}\n${s.text}`).join('\n\n')}`
+            ? `下面是现有成果全文。只改写第 ${opts.section + 1} 个 ## 章节，其他章节原样保留，输出完整全文。\n改写要求：${opts.prompt}\n\n【现有全文】\n${base}\n\n【资料】\n${ctx.sources.map(s => `[${s.n}] ${s.path}\n${clip(s, route.route)}`).join('\n\n')}`
             : [`任务：为「${p.name}」编制《${d.type}》（${{ pptx: 'PPT：每个 ## 标题为一页，每页 3–6 条要点', docx: 'Word 文档', xlsx: 'Excel：用 Markdown 表格输出，每张表前加 ## 标题' }[fmt]}）。`, opts.purpose ? `工作目的：${opts.purpose}` : '', opts.prompt ? `用户要求：${opts.prompt}` : '', ctx.fundLine,
               `【大纲】\n${outline.map((o, i) => `${i + 1}. ${o.title}${o.points?.length ? `：${o.points.join('；')}` : ''}`).join('\n')}`,
               ctx.styleGuide ? `【机构写作规范】\n${ctx.styleGuide}` : '', ctx.views.length ? `【机构观点】\n${ctx.views.join('\n')}` : '',
               external ? `【外部模型提炼的公开行业要点】\n${external}` : '',
-              `【资料】\n${ctx.sources.map(s => `[${s.n}] ${s.path}${s.wisburg ? '（外部研究）' : ''}\n${s.text}`).join('\n\n')}`].filter(Boolean).join('\n\n')
-          for await (const t of this.modelStream(route.label, route.adapter, { system: SYSTEM_DRAFT, user: userPrompt, signal: job.abort.signal, maxTokens: 6000 })) { if (job.abort.signal.aborted) break; job.text += t }
+              `【资料】\n${ctx.sources.map(s => `[${s.n}] ${s.path}${s.wisburg ? '（外部研究）' : ''}\n${clip(s, route.route)}`).join('\n\n')}`].filter(Boolean).join('\n\n')
+          // 起草保留思考模式（质量更好），额度要同时容纳思维链与全文：6000 时长文常在中途被截断
+          for await (const t of this.modelStream(route.label, route.adapter, { system: SYSTEM_DRAFT, user: userPrompt, signal: job.abort.signal, maxTokens: 32000, reasoning: 'high' })) { if (job.abort.signal.aborted) break; job.text += t }
           text = job.text
         } catch (e) {
           if (job.abort.signal.aborted || job.text) throw e
@@ -348,7 +385,9 @@ export class AI {
       if (!viaModel) {
         job.engine = `离线引擎${route.route === 'offline' ? '' : '（模型不可用）'}`
         if (opts.section !== undefined) throw fail('章节改写需要可用的模型（离线引擎不支持改写）', 409)
-        const r = composeOffline({ title: `${p.name} ${d.type}`, outline, sources: ctx.sources, fundLine: ctx.fundLine, note: route.route === 'offline' ? `离线引擎生成：${route.reason}。内容为资料原文摘录，需人工改写并核实。` : undefined })
+        // 因密级策略走离线时告诉用户怎么改：配置了外部模型也不会用于机密资料，这是策略而不是故障
+        const policyHint = route.route === 'offline' && ctx.levelMax >= (this.settings.models.sensitiveLevel ?? 2) && (await this.adapterInfo(this.cloud)).ok ? '如需由模型起草：配置本地模型，或经机构授权后在「系统配置 → AI 策略与模型」调整密级限制。' : ''
+        const r = composeOffline({ title: `${p.name} ${d.type}`, outline, sources: ctx.sources, fundLine: ctx.fundLine, note: route.route === 'offline' ? `离线引擎生成：${route.reason}。内容为资料原文摘录，需人工改写并核实。${policyHint}` : undefined })
         for (let i = 0; i < r.text.length && !job.abort.signal.aborted; i += 120) { job.text += r.text.slice(i, i + 120); await new Promise(res => setTimeout(res, 8)) }
         text = r.text
       }
@@ -413,7 +452,7 @@ export class AI {
     const route = await this.route(Math.max(ownLevel, ...sources.map(s => s.level ?? 1)))
     const safe = route.route === 'external' ? this.org.redactAll(text) : this.org.redact(user, text)
     if (route.adapter) {
-      try { modelNote = await complete(route.adapter, { system: SYSTEM_REVIEW, user: `成果：${p.name} · ${d.type}\n\n${safe.slice(0, 15000)}`, maxTokens: 1500, signal: AbortSignal.timeout(120000) }) } catch (e) { modelNote = `（模型预审未完成：${e.message.slice(0, 80)}）` }
+      try { modelNote = await complete(route.adapter, { system: SYSTEM_REVIEW, user: `成果：${p.name} · ${d.type}\n\n${safe.slice(0, 15000)}`, maxTokens: 8000, reasoning: 'low', signal: AbortSignal.timeout(180000) }) } catch (e) { this.noteFailure(route.label, e); modelNote = `（模型预审未完成：${e.message.slice(0, 80)}）` }
     }
     const verdict = issues.length ? '建议修改' : '通过'
     const review = { at: Date.now(), by: route.adapter ? route.label : '规则预审', verdict, issues, citeCheck: { total: check.total, verified: check.verified }, modelNote }
@@ -447,7 +486,7 @@ export class AI {
         if (route.adapter) {
           try {
             const prompt = `${p ? `当前项目：${p.name}\n` : ''}问题：${text}\n\n【资料】\n${sources.map(s => `[${s.n}] ${s.path}\n${s.text}`).join('\n\n') || '（无匹配资料）'}`
-            for await (const t of this.modelStream(route.label, route.adapter, { system: SYSTEM_CHAT, user: prompt, signal: job.abort.signal, maxTokens: 1800 })) job.text += t
+            for await (const t of this.modelStream(route.label, route.adapter, { system: SYSTEM_CHAT, user: prompt, signal: job.abort.signal, maxTokens: 8000, reasoning: 'low' })) job.text += t
             done = true
           } catch (e) { if (job.abort.signal.aborted || job.text) throw e; job.fallback = String(e.message).slice(0, 160) }
         }
@@ -469,20 +508,24 @@ export class AI {
     const route = await this.route(this.settings.models.mode === 'local' ? 3 : 1)
     if (!route.adapter || typeof route.adapter.turn !== 'function') return this.answer(user, text, intent)
     const job = this.newJob(user, 'agent', { title: text.slice(0, 40), projectId: intent.project?.id, engine: `${route.label} · 智能体`, route: { route: route.route, reason: route.reason }, aiLevel: lv })
+    // 最近几轮对话作为背景文字放进本轮提问，不以 assistant 消息回放：DeepSeek 思考模式下带工具的请求要求每条历史 assistant 消息
+    // 都带完整思维链（reasoning_content），缺了直接返回 400。以前被拒绝的指令（「帮我表决」等）留下的回复就会触发这个错误；
+    // 而智能体自己的回答只记了任务 ID、没有正文，等于从来没进过上下文。
     const doc = this.db.get('chats', user.id)
-    const history = (doc?.messages ?? []).slice(-7, -1).flatMap(m => m.role === 'user' ? [{ role: 'user', text: m.text }] : m.text ? [{ role: 'assistant', text: m.text }] : [])
+    // 末尾两条是本轮的提问与本任务自己，不算历史
+    const context = (doc?.messages ?? []).slice(-10, -2).map(m => m.role === 'user' ? `用户：${m.text}` : `助手：${String(m.text ?? (m.jobId ? this.db.get('jobs', m.jobId)?.text ?? '' : '')).slice(0, 1500)}`).filter(l => l !== '助手：').join('\n')
     void (async () => {
       try {
-        await runAgent({ db: this.db, kb: this.kb, org: this.org, wisburg: this.wisburg, ai: this, route }, { adapter: route.adapter, user, job, text, project: intent.project, history, aiLevel: lv })
+        await runAgent({ db: this.db, kb: this.kb, org: this.org, wisburg: this.wisburg, ai: this, route }, { adapter: route.adapter, user, job, text, project: intent.project, context, aiLevel: lv })
         if (job.abort.signal.aborted) return
         this.health.set(route.label, { verified: true })
         if (!job.saved) job.cites = job.sources.filter(s => job.text.includes(`[${s.n}]`)).map(s => ({ n: s.n, fileId: s.fileId ?? null, wisburg: s.wisburg, path: s.path }))
         this.finish(job, { status: 'done', phase: job.saved ? 'review' : 'done' })
       } catch (e) {
         if (job.abort.signal.aborted) return
-        this.health.set(route.label, { failure: { at: Date.now(), message: /api key/i.test(e.message) ? '未配置 API Key' : String(e.message).slice(0, 160) } })
+        this.noteFailure(route.label, e)
         if (!job.text && !job.steps.length) {
-          this.finish(job, { status: 'failed', phase: 'failed', error: `智能体不可用（${this.health.get(route.label).failure.message}），已改用检索问答` })
+          this.finish(job, { status: 'failed', phase: 'failed', error: `智能体不可用（${/api key/i.test(e.message) && !e.status ? '未配置 API Key' : String(e.message).slice(0, 160)}），已改用检索问答` })
           await this.answer(user, text, intent)
           return
         }
