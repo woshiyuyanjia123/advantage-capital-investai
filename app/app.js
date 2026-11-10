@@ -5,6 +5,14 @@ import '/api/investai?asset=views/work.js'
 import '/api/investai?asset=views/project.js'
 import '/api/investai?asset=views/data.js'
 import '/api/investai?asset=views/admin.js'
+import '/api/investai?asset=views/nb-api-modal.js'
+import '/api/investai?asset=views/nb-shelf.js'
+import '/api/investai?asset=views/nb-studio-ppt.js'
+import '/api/investai?asset=views/nb-studio-word.js'
+import '/api/investai?asset=views/nb-studio-audio.js'
+import '/api/investai?asset=views/nb-boards.js'
+import '/api/investai?asset=views/nb-workspace.js'
+import '/api/investai?asset=views/nb-flow-board.js'
 
 const hash = location.hash.slice(1)
 if (hash) [S.view, S.sub] = hash.split(':')
@@ -37,11 +45,9 @@ function renderHdr() {
   const w = d.wisburg
   const route = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }[d.model.mode] ?? d.model.mode
   $('#hdr').innerHTML = `
-    <div class="logo"><span class="mk">A /</span><span class="nm">深蓝投研工作台</span><span class="ver">${esc(d.settings.org?.name ?? '')} · ${VERSION}</span></div>
-    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、公司、资料，或直接向 AI 提问…" autocomplete="off"><span class="kbd">⌘ K</span></div>
-    <div class="stat" title="${esc(nas?.path ?? '')}"><span class="dot ${nas?.online ? 'ok' : 'bad'}"></span><div><b>资料库</b><span class="${nas?.online ? 'ok' : 'bad'}">${nas?.online ? `${d.kpi.kbFiles} 份可见` : '未连接'}</span></div></div>
-    <div class="stat" title="${esc(d.model.note || '')} · 机密及以上资料${d.model.sensitiveLevel >= 4 ? '允许' : '仅'}本地处理"><span class="dot ${mc}"></span><div><b>${esc(route)}</b><span style="color:${mc === 'ok' ? 'var(--green)' : 'var(--amber)'}">${esc(mt)}</span></div></div>
-    <div class="stat s3" title="${esc(w.lastError?.message ?? (w.configured ? '智堡开放接口' : '未配置'))}"><span class="dot ${w.configured && !w.lastError ? 'ok' : w.configured ? 'warn' : 'bad'}"></span><div><b>智堡数据</b><span class="${w.configured && !w.lastError ? 'ok' : 'bad'}">${w.configured ? (w.lastError ? '异常' : '已接入') : '未配置'}</span></div></div>
+    <div class="logo"><span class="mk">N /</span><span class="nm">NotebookLM · 企业 FDE</span><span class="ver">${esc(d.settings.org?.name ?? '')} · DSH 插件版</span></div>
+    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或直接提问…" autocomplete="off"><span class="kbd">⌘ K</span></div>
+    <button class="nb-api-pill" data-act="nb-api" title="点击配置本地离线 API / DSH / 云端 API"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
     <button class="btn ghost ico" data-act="help" title="帮助：快速上手、名词解释、常见问题">${icon('info', 17)}</button>
     <button class="btn ghost ico bellbtn" data-act="notifications" title="通知">${icon('bell', 17)}${d.unread ? `<i>${d.unread > 99 ? '99+' : d.unread}</i>` : ''}</button>
     <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>
@@ -55,18 +61,12 @@ function renderHdr() {
 // ───────── 左导航 ─────────
 export const NAV = () => {
   const d = D()
-  const myTodo = d.kpi.pending
   return [
-    ['workbench', 'home', '工作台', myTodo || null],
-    ['pipeline', 'grid', '项目管理', d.projects.filter(p => p.status === 'active').length],
-    ['meetings', 'mic', '会议纪要'],
-    ['extract', 'extract', '智能提取'],
-    ['companies', 'building', '公司库', d.companies.length],
-    ['research', 'industry', '研究与数据'],
-    ['knowledge', 'kb', '资料库', d.kpi.kbFiles],
-    ['templates', 'tpl', '模板与规范'],
-    ['tasks', 'cal', '任务'],
-    ['settings', 'set', '系统配置'],
+    ['workbench', 'grid', '① 项目书架 (图2)', d.projects.filter(p => p.status === 'active').length],
+    ['notebook', 'spark', '② Notebook 制作台 (图1)'],
+    ['flowboard', 'flow', '③ 流程提交与权限看板'],
+    ['knowledge', 'kb', '项目资料库', d.kpi.kbFiles],
+    ['settings', 'set', '系统与本地API'],
   ]
 }
 function renderNav() {
@@ -81,8 +81,9 @@ function renderNav() {
       <p>${caps.categories.length ? `可见敏感字段：${esc(caps.categories.map(c => ({ amount: '金额', valuation: '估值', terms: '条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }[c])).join('、'))}` : '敏感字段（金额/估值/条款）已对你脱敏'}</p></div>`
 }
 function renderChrome() {
+  const hideRight = !S.aiOpen || ['notebook', 'workbench', 'flowboard'].includes(S.view)
   $('#app').classList.toggle('embed', EMBED)
-  $('#app').classList.toggle('ai-off', !S.aiOpen)
+  $('#app').classList.toggle('ai-off', hideRight)
   renderHdr(); renderNav()
 }
 
@@ -105,12 +106,12 @@ async function runSearch() {
 // ───────── 路由（DSH 内嵌时与宿主侧栏双向同步） ─────────
 function go(view, { sub, fromHost, id } = {}) {
   if (view === 'assistant') { S.aiOpen = true; S.atab = 'chat'; renderChrome(); renderAI(); $('#prompt')?.focus(); return }
-  if (view === 'project' && id) { S.sel = id; S.project = null; sub = id }
+  if (['project', 'notebook', 'flowboard'].includes(view) && id) { S.sel = id; S.project = null; sub = id }
   S.sub = sub ?? (view === S.view ? S.sub : '')
   const changed = S.view !== view
   S.view = view
   closePopup()
-  renderNav()
+  renderChrome()
   renderView()
   history.replaceState(null, '', `#${view}${S.sub ? `:${S.sub}` : ''}`)
   if (EMBED && !fromHost && changed) parent.postMessage({ type: 'investai:view', view: view === 'project' ? 'pipeline' : view }, location.origin)

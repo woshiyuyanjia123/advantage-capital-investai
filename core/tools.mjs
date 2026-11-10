@@ -4,6 +4,7 @@
 import { WORK_TYPES } from './workflow.mjs'
 import { viewer } from './projection.mjs'
 import { RESOURCES } from './wisburg.mjs'
+import { computeFlowMetrics } from './nb-flow.mjs'
 
 const output = { schema: {}, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] }
 const obj = (properties, required = []) => ({ type: 'object', additionalProperties: false, properties, required })
@@ -85,8 +86,12 @@ export function registerTools(ctx, ready) {
       markdown: str('成果正文 Markdown，引用资料请标注 [n]'),
     }, ['projectId', 'deliverableType', 'markdown']),
     async run(core, a, u) {
-      const r = await core.ai.saveVersion(u, String(a.projectId), a.deliverableType, String(a.markdown).slice(0, 400000), { engine: 'DSH 会话', sources: [] })
-      return { saved: r.path, version: r.version, status: '草稿（待人工审核）' }
+      const r = await core.ai.saveVersion(u, String(a.projectId), a.deliverableType, String(a.markdown).slice(0, 400000), { engine: 'DSH 插件提交', sources: [] })
+      const p = core.db.get('projects', String(a.projectId))
+      const rec = core.db.get('kvstate', `sub_${p.id}`)?.list ?? []
+      core.db.put('kvstate', { id: `sub_${p.id}`, list: [{ id: `sub_${Date.now()}`, at: Date.now(), by: u.name, stage: core.engine.stageOf(p)?.name, channel: 'dsh-plugin', summary: `DSH 插件提交「${a.deliverableType}」v${r.version}` }, ...rec].slice(0, 50) }, { actor: u, reason: 'DSH 插件提交', action: 'plugin.submit' })
+      const flow = computeFlowMetrics(core.db, core.engine, core.db.get('projects', p.id))
+      return { saved: r.path, version: r.version, overallPct: flow.overallPct, stagePct: flow.curStagePct, status: '草稿已通过 DSH 插件提交（待人工确认）' }
     },
   })
 }

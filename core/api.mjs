@@ -19,6 +19,12 @@ import { createMarket } from './market.mjs'
 import { viewer } from './projection.mjs'
 import { VOCAB } from './vocab.mjs'
 import { createSessionStore, createLoginGuard, createSync, DEFAULT_SECURITY, DEFAULT_SYNC, SYNC_ROLES, SYNC_COLLECTIONS, DEVICE_SCOPES } from './cloud.mjs'
+import { probeLocalModels, quickConnectApi } from './nb-api.mjs'
+import { computeFlowMetrics, listNotes, saveNote, deleteNote } from './nb-flow.mjs'
+import { slidesFromMd, slidesToMd, transcribeAudioLocal, handlePluginSubmit } from './nb-studio.mjs'
+import { listProjectArtifacts, openProjectFolderOrFile } from './nb-folder.mjs'
+import { buildFollowUps, generateStudioArtifact } from './nb-studio-gen.mjs'
+import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -95,7 +101,8 @@ export function createApi(ctx) {
     return { id: p.id, name: p.name, companyId: p.companyId, company: c?.short, industry: c?.industry, businessType: p.businessType, businessName: BUSINESS_TYPES.find(b => b.id === p.businessType)?.name, workflowId: p.workflowId, workflowVersion: wf?.version,
       stageId: p.stageId, stage: st?.name, stageKind: st?.kind, stageIndex: wf?.stages.findIndex(s => s.id === p.stageId), stageCount: wf?.stages.length, statusLabel: p.statusLabel, status: p.status, progress: p.progress,
       owner: p.owner, ownerName: db.get('users', p.owner)?.name, deptId: p.deptId, members: p.members, grants: p.grants ?? [], tags: p.tags, desc: p.desc, fields: fieldView(user, p), updatedAt: p.updatedAt, createdAt: p.createdAt,
-      deliverables: dls.map(d => ({ id: d.id, type: d.type, format: d.format, status: d.status, v: d.versions.length, generating: !!d.generating })),
+      deliverables: dls.map(d => ({ id: d.id, type: d.type, format: d.format, status: d.status, v: d.versions.length, generating: !!d.generating, checkout: !!d.checkout })),
+      flow: computeFlowMetrics(db, engine, p),
       pendingApproval: !!db.one('approvals', a => a.projectId === p.id && a.status === 'pending') }
   }
   const visibleProjects = user => db.all('projects').filter(p => org.seesProject(user, p))
@@ -104,7 +111,7 @@ export function createApi(ctx) {
 
   function settingsView(user) {
     const s = S()
-    const admin = org.can(user, 'settings.manage') || org.can(user, 'ai.policy')
+    const admin = mode !== 'saas' || org.can(user, 'settings.manage') || org.can(user, 'ai.policy')
     return { org: s.org, models: { mode: s.models.mode, sensitiveLevel: s.models.sensitiveLevel, external: s.models.external, local: admin ? s.models.local : undefined }, sensitivity: s.sensitivity, materialRules: admin ? s.materialRules : undefined, aiPolicy: s.aiPolicy, automation: s.automation,
       security: org.can(user, 'org.manage') ? SEC() : { minPassword: SEC().minPassword }, sync: org.can(user, 'sync.manage') ? { ...DEFAULT_SYNC, ...s.sync, roles: SYNC_ROLES, available: SYNC_COLLECTIONS, scopes: DEVICE_SCOPES } : undefined,
       push: admin ? { channels: s.push.channels } : undefined, schedules: s.schedules, watchlist: s.watchlist, sso: admin ? s.sso : { enabled: s.sso.enabled }, toolknit: s.toolknit, market: s.market, asr: asrRuntime(s), desktop: s.desktop ?? { personaSwitch: true } }
@@ -180,6 +187,9 @@ export function createApi(ctx) {
       company: p.companyId ? projection.company(viewer.human(user), db.get('companies', p.companyId)) : null,
       comments: db.get('comments', p.id)?.list ?? [],
       tasks: db.find('tasks', t => t.projectId === p.id),
+      notes: listNotes(db, p.id),
+      artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p),
+      followUps: buildFollowUps(projectView(user, p), '', kb.list(user, { companyId: p.companyId }).slice(0, 3).map(f => f.name)),
       history: db.history('projects', p.id, 60),
       canVote: db.find('approvals', a => a.projectId === p.id && a.status === 'pending' && a.voters.includes(user.id)).map(a => a.id),
     }
@@ -213,7 +223,25 @@ export function createApi(ctx) {
     'ai.generate': async (user, b) => ai.poll((await ai.generate(user, b)).id),
     'ai.rewrite': async (user, b) => { const d = deliverable(user, b.deliverableId); return ai.poll((await ai.generate(user, { projectId: d.projectId, deliverableId: d.id, type: d.type, section: Number(b.section), prompt: String(b.instruction ?? '') })).id) },
     'ai.prereview': async (user, b) => ai.preReview(deliverable(user, b.id), user),
-    'ai.test': async user => { org.assert(user, 'ai.policy'); return ai.testModel() },
+    'ai.test': async user => { if (mode === 'saas') org.assert(user, 'ai.policy'); return ai.testModel() },
+    'nb.api.connect': async (user, b) => { if (mode === 'saas') org.assert(user, 'ai.policy'); return quickConnectApi({ db, ai, mode }, user, b) },
+    'nb.note.save': (user, b) => { const p = project(user, b.projectId); return saveNote(db, user, p.id, b) },
+    'nb.note.del': (user, b) => { const p = project(user, b.projectId); return deleteNote(db, user, p.id, b.id) },
+    'nb.plugin.submit': (user, b) => handlePluginSubmit({ db, ai, deliverables, engine }, user, project(user, b.projectId), b),
+    'nb.slides.save': async (user, b) => {
+      const p = project(user, b.projectId)
+      const d = b.deliverableId ? deliverable(user, b.deliverableId) : deliverables.ensure(p.id, b.workType || '立项报告', { format: 'pptx' }, user)
+      const md = slidesToMd(b.title || d.title, b.slides ?? [])
+      return deliverables.saveText(user, d.id, md, b.note || '左上方 PPT 工坊本地修改保存')
+    },
+    'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, meetings, settings: S() }, user, b),
+    'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables }, user, project(user, b.projectId), b),
+    'nb.flow.submit': (user, b) => submitArtifactToNode({ db, deliverables, lifecycle }, user, project(user, b.projectId), b),
+    'nb.folder.open': (user, b) => {
+      const p = project(user, b.projectId)
+      const ws = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
+      return listProjectArtifacts(db, ws, p).then(a => openProjectFolderOrFile(b.filePath || a.folderPath))
+    },
 
     'project.create': (user, b) => projectView(user, engine.create(user, { name: b.name, companyId: b.companyId ?? createCompany(user, b), businessType: b.businessType ?? 'financial', fields: b.fields, tags: b.tags, desc: b.desc })),
     'project.update': (user, b) => {
@@ -539,7 +567,15 @@ export function createApi(ctx) {
     meta: () => ({ vocab: VOCAB, roles: db.all('roles').map(r => ({ id: r.id, name: r.name })), workTypes: WORK_TYPES, businessTypes: BUSINESS_TYPES, schemas: Object.fromEntries(Object.entries(SCHEMAS).map(([k, v]) => [k, { name: v.name, desc: v.desc }])), fillFields: FILL_FIELDS, ssoPresets: SSO_PRESETS, audio: AUDIO, wisburg: Object.fromEntries(Object.entries(RESOURCES).map(([k, v]) => [k, v.label])) }),
     logs: user => { org.assert(user, 'settings.manage'); return { sched: db.all('schedlog').sort((a, b) => b.at - a.at).slice(0, 40), push: db.all('pushlog').sort((a, b) => b.at - a.at).slice(0, 40), last: Object.fromEntries((S().schedules ?? []).map(s => [s.id, scheduler.last(s.id)])) } },
     secrets: async user => { org.assert(user, 'integration.manage'); return Object.fromEntries(Object.keys(await readSecrets()).map(k => [k, true])) },
-    models: user => { org.assert(user, 'ai.policy'); return ai.cloud.models() },
+    models: user => { if (mode === 'saas') org.assert(user, 'ai.policy'); return ai.cloud.models() },
+    'nb.local.probe': (user, q) => probeLocalModels(q.get('url') || ''),
+    'nb.notes': (user, q) => listNotes(db, project(user, q.get('projectId')).id),
+    'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
+    'nb.slides': async (user, q) => {
+      const d = deliverable(user, q.get('id'))
+      const text = org.redact(user, await deliverables.versionText(d, q.get('v')))
+      return { id: d.id, title: d.title, v: d.versions.length, checkout: d.checkout ?? null, slides: slidesFromMd(text, d.title) }
+    },
     'wisburg.list': (user, q) => { org.assert(user, 'research.view'); return wisburg.list(q.get('resource') || 'reports', { query: q.get('q') || undefined, after: q.get('after') || undefined, first: q.get('first') || 15, startTime: q.get('days') ? new Date(Date.now() - Number(q.get('days')) * 864e5).toISOString() : undefined }) },
     'wisburg.detail': (user, q) => { org.assert(user, 'research.view'); return wisburg.detail(q.get('resource'), q.get('id')) },
     metrics2: () => { const m = process.memoryUsage(); return { rss: m.rss, load: loadavg()[0], cpus: cpus().length, running: [...ai.live.values()].filter(j => j.status === 'running').length } },

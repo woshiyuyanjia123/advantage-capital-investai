@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from './index.mjs'
 import { openaiLlm, secretLlm, normalizeModel, DEFAULT_MODEL } from './llm.mjs'
+import { createHybridCloudLlm } from './nb-api.mjs'
 import { readSecrets } from './notify.mjs'
 import { hashPassword } from './api.mjs'
 
@@ -23,7 +24,8 @@ export async function startServer({ dir, desktop = false, demoAccounts = false, 
   // 指定了自定义接口地址时按环境变量直连；否则使用 DeepSeek，Key 来自环境变量或界面中保存的密钥，模型可在界面中选择（环境变量指定时以环境变量为准）
   let core = null
   const chosen = () => { const m = env.INVESTAI_LLM_MODEL ? '' : core?.db.get('settings', 'main')?.models?.external?.model; return /^deepseek-/.test(m ?? '') ? m : undefined }
-  const llm = env.INVESTAI_LLM_BASE_URL ? openaiLlm({ baseURL, apiKey, model }) : secretLlm({ readSecrets, envKey: apiKey, baseURL, model, getModel: chosen })
+  const baseCloud = env.INVESTAI_LLM_BASE_URL ? openaiLlm({ baseURL, apiKey, model }) : secretLlm({ readSecrets, envKey: apiKey, baseURL, model, getModel: chosen })
+  const llm = createHybridCloudLlm({ dshAdapter: baseCloud, readSecretsFn: readSecrets })(() => core?.db.get('settings', 'main'))
   core = await createCore({ dir, mode: desktop ? 'desktop' : 'saas', llm })
 
   if (!desktop) {

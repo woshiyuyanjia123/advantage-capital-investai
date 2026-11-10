@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { join, dirname, extname } from 'node:path'
 import { renderDocx, renderPptx, renderXlsx, blocks, extractAny } from './office.mjs'
+import { ensureProjectFolder } from './nb-folder.mjs'
 import { WORK_TYPES } from './workflow.mjs'
 
 const fail = (m, status = 400) => Object.assign(new Error(m), { status })
@@ -65,8 +66,14 @@ export function createDeliverables({ db, kb, org, events, lifecycle }) {
     if (!buf) buf = await render(d.format, { title: d.title, subtitle: `${p.name} · v${v} · ${LABEL.draft}`, markdown })
     if (text === undefined) text = (await extractAny(buf, fileExt)).text
     const saved = await kb.writeWorkspace(`${base}${fileExt}`, buf, { by: user.name })
-    const mdRel = `${projectDir(p)}/.versions/${d.type}-v${v}.md`
     const ws = db.one('mounts', x => x.kind === 'workspace')
+    const { root: projFolder } = await ensureProjectFolder(db, ws.path, p)
+    const outPath = join(projFolder, `${d.type}-v${v}${fileExt}`)
+    await writeFile(outPath, buf)
+    const recKey = `artifacts_${p.id}`
+    const prevArt = db.get('kvstate', recKey)?.list ?? []
+    db.putQuiet('kvstate', { id: recKey, list: [{ id: saved.id, fileId: saved.id, name: `${d.type}-v${v}${fileExt}`, ext: fileExt, kind: d.format, bytes: buf.length, fullPath: outPath, folderPath: projFolder, sourceCount: sources, summary: note || `${d.type} v${v}`, by: user.name, at: Date.now() }, ...prevArt.filter(x => x.name !== `${d.type}-v${v}${fileExt}`)].slice(0, 60) })
+    const mdRel = `${projectDir(p)}/.versions/${d.type}-v${v}.md`
     await mkdir(dirname(join(ws.path, mdRel)), { recursive: true })
     await writeFile(join(ws.path, mdRel), text ?? '')
     const version = { v, fileId: saved.id, path: saved.display, ext: fileExt, mdRel, by: user.name, byId: user.id, engine: engine ?? '人工', at: Date.now(), cites, note, sources, outline, citeCheck, review, bytes: buf.length }

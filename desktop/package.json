@@ -1,8 +1,8 @@
 {
-  "name": "investai-workbench",
-  "productName": "InvestAI",
-  "version": "2.4.0",
-  "description": "深蓝投研工作台（InvestAI）独立桌面版：投资管理全流程 + 四层权限 + AI 协作。不依赖 DeepSeek Harness，可与其同时安装。",
+  "name": "dsh-notebooklm-fde",
+  "productName": "DSH NotebookLM FDE",
+  "version": "3.0.0",
+  "description": "NotebookLM × WorkBuddy 企业 FDE 项目管理工作台（内置 DSH 插件自动挂载 + 本地离线/云端 API）",
   "author": "InvestAI",
   "license": "UNLICENSED",
   "private": true,
@@ -26,10 +26,10 @@
     "resedit": "2.0.3"
   },
   "build": {
-    "appId": "com.investai.workbench",
-    "productName": "InvestAI",
-    "copyright": "InvestAI",
-    "artifactName": "InvestAI-${version}-${os}-${arch}.${ext}",
+    "appId": "com.dsh.notebooklm.fde",
+    "productName": "DSH NotebookLM FDE",
+    "copyright": "NotebookLM FDE",
+    "artifactName": "DSH-NotebookLM-FDE-Setup-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -80,8 +80,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "InvestAI 投研工作台",
-      "uninstallDisplayName": "InvestAI 投研工作台",
+      "shortcutName": "NotebookLM · 企业FDE工作台 (DSH插件版)",
+      "uninstallDisplayName": "NotebookLM · 企业FDE工作台 (DSH插件版)",
       "deleteAppDataOnUninstall": false
     },
     "afterPack": "scripts/after-pack.cjs"

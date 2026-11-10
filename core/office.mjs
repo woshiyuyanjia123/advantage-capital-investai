@@ -2,6 +2,7 @@
 // 依赖均为宽松许可：docx(MIT)、pptxgenjs(MIT)、exceljs(MIT)、pdfjs-dist(Apache-2.0)。
 import { deflateRawSync, inflateRawSync, crc32 } from 'node:zlib'
 import { officeText } from './zip.mjs'
+import { renderProPptx } from './nb-ppt-pro.mjs'
 import { fileURLToPath } from 'node:url'
 import { join, sep } from 'node:path'
 
@@ -26,8 +27,8 @@ export function blocks(md) {
       out.push({ t: 'table', head, rows: body })
       continue
     }
-    const li = l.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)/)
-    if (li) { out.push({ t: 'li', text: li[1] }); continue }
+    const li = l.match(/^(\s*)(?:[-*+]|\d+[.)、])\s+(.*)/)
+    if (li) { out.push({ t: 'li', text: li[2], indent: li[1].replace(/\t/g, '    ').length }); continue }
     if (/^>\s?/.test(l)) { out.push({ t: 'quote', text: l.replace(/^>\s?/, '') }); continue }
     out.push({ t: 'p', text: l.trim() })
   }
@@ -63,47 +64,152 @@ export async function renderDocx({ title, subtitle, markdown, footer }) {
 }
 
 // ───────── PPT ─────────
-/** Markdown → 幻灯片：每个 ## 一页；列表成要点；表格成表；超长内容自动续页。 */
-export function markdownToSlides(md) {
-  const slides = []
+// 版面（LAYOUT_WIDE 13.33 × 7.5 英寸）：标题区 0.35–1.05，正文区 1.2–6.85，页脚 7.05。
+const PPT = { W: 13.33, X: 0.6, CW: 12.1, TOP: 1.2, BOTTOM: 6.85 }
+const PPT_BODY = PPT.BOTTOM - PPT.TOP
+
+/** 估算文字的「视觉宽度」（以一个汉字为 1）：中文/全角按 1，英文数字按 0.55。 */
+function visualLen(s) {
+  let n = 0
+  for (const ch of String(s)) n += /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF\u3000-\u303F]/.test(ch) ? 1 : 0.55
+  return n
+}
+/** 估算一段文字在给定宽度（英寸）、字号下占几行。 */
+function lineCount(text, widthIn, fontPt) {
+  const perLine = Math.max(4, Math.floor((widthIn - 0.35) / (fontPt / 72)))
+  return Math.max(1, Math.ceil(visualLen(text) / perLine))
+}
+const itemFont = it => it.kind === 'head' ? 16 : it.kind === 'quote' ? 12 : it.small ? 12 : it.level ? 14 : 15
+const itemHeight = (it, w) => lineCount(it.text, w - (it.level ? 0.4 : 0), itemFont(it)) * itemFont(it) * 1.3 / 72 + 0.09
+
+/** Markdown → 章节：每个 # / ## 一章；### 及以下作为章内小标题；列表、段落、引用、表格都保留，不丢内容。 */
+function markdownSections(md) {
+  const sections = []
+  let deckTitle
   let cur = null
+  const start = title => { cur = { title, items: [], tables: [] }; sections.push(cur) }
   for (const b of blocks(md)) {
-    if (b.t === 'h' && b.level <= 2) { if (b.level === 1 && !slides.length && !cur) { slides.title = plain(b.text); continue } cur = { title: plain(b.text), bullets: [], tables: [] }; slides.push(cur); continue }
-    if (!cur) { cur = { title: slides.title ?? '概览', bullets: [], tables: [] }; slides.push(cur) }
+    if (b.t === 'h' && b.level <= 2) {
+      if (b.level === 1 && deckTitle === undefined && !sections.length) { deckTitle = plain(b.text); continue }
+      start(plain(b.text)); continue
+    }
+    if (!cur) start(deckTitle ?? '概览')
+    const small = /引用来源|参考资料/.test(cur.title)
     if (b.t === 'table') cur.tables.push(b)
-    else if (b.t === 'h') cur.bullets.push({ text: plain(b.text), bold: true })
-    else cur.bullets.push({ text: plain(b.text) })
+    else if (b.t === 'h') cur.items.push({ kind: 'head', text: plain(b.text) })
+    else if (b.t === 'li') cur.items.push({ kind: 'bullet', text: plain(b.text), level: b.indent >= 2 ? 1 : 0, small })
+    else if (b.t === 'quote') cur.items.push({ kind: 'quote', text: plain(b.text) })
+    else cur.items.push({ kind: 'para', text: plain(b.text), small })
   }
+  return { sections, deckTitle }
+}
+
+/** 表格按可用高度拆页（表头每页重复），不再截断第 12 行之后的数据。 */
+function tableChunks(t, widthIn, availFirst, availNext) {
+  const cols = Math.max(1, t.head.length)
+  const colW = columnWidths(t, widthIn)
+  const rowH = cells => Math.max(...cells.map((c, i) => lineCount(plain(c ?? ''), colW[i], 11))) * 11 * 1.25 / 72 + 0.12
+  const headH = rowH(t.head)
+  const chunks = []
+  let rows = []
+  let used = headH
+  let avail = availFirst
+  for (const r of t.rows) {
+    const cells = t.head.map((_, i) => r[i] ?? '')
+    const h = rowH(cells)
+    if (rows.length && used + h > avail) { chunks.push({ rows, h: used }); rows = []; used = headH; avail = availNext }
+    rows.push(cells); used += h
+  }
+  chunks.push({ rows, h: used })
+  return { chunks, colW, cols }
+}
+function columnWidths(t, widthIn) {
+  const n = Math.max(1, t.head.length)
+  const want = t.head.map((h, i) => Math.min(30, Math.max(visualLen(plain(h)), ...t.rows.map(r => visualLen(plain(r[i] ?? ''))), 2)))
+  const total = want.reduce((a, b) => a + b, 0)
+  let w = want.map(x => Math.max(0.8, widthIn * x / total))
+  const scale = widthIn / w.reduce((a, b) => a + b, 0)
+  w = w.map(x => x * scale)
+  return w.length === n ? w : Array(n).fill(widthIn / n)
+}
+
+/**
+ * Markdown → 幻灯片描述：[{ title, items, table?, cont }]。
+ * 按估算高度自动分页（长段落、长列表、长表格都会续页），保证每一行内容都在 PPT 里。
+ */
+export function markdownToSlides(md) {
+  const { sections, deckTitle } = markdownSections(md)
   const out = []
-  for (const s of slides) {
-    for (let i = 0; i < Math.max(1, Math.ceil(s.bullets.length / 7)); i++) out.push({ title: i ? `${s.title}（续）` : s.title, bullets: s.bullets.slice(i * 7, i * 7 + 7), tables: i ? [] : s.tables })
+  for (const s of sections) {
+    const pages = []
+    let page = { items: [], h: 0 }
+    for (const it of s.items) {
+      const h = itemHeight(it, PPT.CW)
+      if (page.items.length && page.h + h > PPT_BODY) { pages.push(page); page = { items: [], h: 0 } }
+      page.items.push(it); page.h += h
+    }
+    if (page.items.length || !s.tables.length) pages.push(page)
+    for (const t of s.tables) {
+      const last = pages.at(-1)
+      const room = last ? PPT_BODY - last.h - (last.items.length ? 0.2 : 0) : PPT_BODY
+      const { chunks, colW } = tableChunks(t, PPT.CW, room > 1.2 ? room : PPT_BODY, PPT_BODY)
+      chunks.forEach((c, i) => {
+        if (i === 0 && last && room > 1.2 && c.h <= room && !last.table) { last.table = { head: t.head, rows: c.rows, colW, y: last.items.length ? last.h + 0.2 : 0 }; last.h += c.h + 0.2; return }
+        pages.push({ items: [], h: c.h, table: { head: t.head, rows: c.rows, colW, y: 0 } })
+      })
+    }
+    pages.forEach((p, i) => out.push({ title: i ? `${s.title}（续）` : s.title, items: p.items, table: p.table, bullets: p.items.map(x => ({ text: x.text, bold: x.kind === 'head' })) }))
   }
-  out.title = slides.title
+  out.title = deckTitle
   return out
 }
 
-export async function renderPptx({ title, subtitle, markdown, slides: given }) {
+export async function renderPptx({ title, subtitle, markdown, slides: given, sources = [], theme = 'mck' }) {
+  const list = given ?? markdownToSlides(markdown)
+  return renderProPptx({ title, subtitle, slides: list.map(s => ({ title: s.title, bullets: (s.items ?? s.bullets ?? []).map(x => x.text).filter(Boolean) })), sources, theme })
+}
+export async function renderPptxLegacy({ title, subtitle, markdown, slides: given }) {
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
-  pptx.defineSlideMaster({ title: 'IA', background: { color: 'FFFFFF' }, objects: [{ rect: { x: 0, y: 0, w: 13.33, h: 0.12, fill: { color: '1D4ED8' } } }, { text: { text: 'InvestAI · 内部资料', options: { x: 0.4, y: 7.05, w: 6, h: 0.3, fontSize: 9, color: '94A3B8', fontFace: FONT } } }], slideNumber: { x: 12.4, y: 7.05, w: 0.6, h: 0.3, fontSize: 9, color: '94A3B8' } })
+  pptx.title = String(title ?? '')
+  pptx.company = 'InvestAI'
+  pptx.defineSlideMaster({ title: 'IA', background: { color: 'FFFFFF' }, objects: [{ rect: { x: 0, y: 0, w: PPT.W, h: 0.12, fill: { color: '1D4ED8' } } }, { text: { text: 'InvestAI · 内部资料', options: { x: 0.4, y: 7.05, w: 6, h: 0.3, fontSize: 9, color: '94A3B8', fontFace: FONT } } }], slideNumber: { x: 12.4, y: 7.05, w: 0.6, h: 0.3, fontSize: 9, color: '94A3B8' } })
   const cover = pptx.addSlide()
   cover.background = { color: '0F172A' }
-  cover.addText(title, { x: 0.8, y: 2.6, w: 11.7, h: 1.1, fontSize: 36, bold: true, color: 'FFFFFF', fontFace: FONT })
-  if (subtitle) cover.addText(subtitle, { x: 0.8, y: 3.8, w: 11.7, h: 0.6, fontSize: 16, color: '93C5FD', fontFace: FONT })
+  cover.addText(String(title ?? ''), { x: 0.8, y: 2.4, w: 11.7, h: 1.3, fontSize: visualLen(title) > 26 ? 30 : 36, bold: true, color: 'FFFFFF', fontFace: FONT, fit: 'shrink', valign: 'bottom' })
+  if (subtitle) cover.addText(String(subtitle), { x: 0.8, y: 3.8, w: 11.7, h: 0.6, fontSize: 16, color: '93C5FD', fontFace: FONT })
+  cover.addText(new Date().toLocaleDateString('zh-CN'), { x: 0.8, y: 6.4, w: 6, h: 0.4, fontSize: 12, color: '64748B', fontFace: FONT })
   const list = given ?? markdownToSlides(markdown)
+  if (!list.length) list.push({ title: '内容', items: [{ kind: 'para', text: '（本版本暂无正文内容，待补充）' }] })
   for (const s of list) {
     const sl = pptx.addSlide({ masterName: 'IA' })
-    sl.addText(s.title, { x: 0.5, y: 0.35, w: 12.3, h: 0.7, fontSize: 24, bold: true, color: '0F172A', fontFace: FONT })
-    let y = 1.2
-    if (s.bullets?.length) {
-      const h = Math.min(5.6, 0.48 * s.bullets.length + 0.2)
-      sl.addText(s.bullets.map(b => ({ text: b.text, options: { bullet: !b.bold, bold: !!b.bold, fontSize: b.bold ? 16 : 15, color: '1E293B', breakLine: true, paraSpaceAfter: 6 } })), { x: 0.6, y, w: s.tables?.length ? 6.2 : 12.1, h, fontFace: FONT, valign: 'top' })
-      if (!s.tables?.length) y += h
+    sl.addText(String(s.title ?? ''), { x: 0.5, y: 0.3, w: 12.3, h: 0.75, fontSize: visualLen(s.title) > 34 ? 20 : 24, bold: true, color: '0F172A', fontFace: FONT, fit: 'shrink', valign: 'middle' })
+    // 兼容旧调用方式：只给 bullets 的幻灯片
+    const items = s.items ?? (s.bullets ?? []).map(b => ({ kind: b.bold ? 'head' : 'bullet', text: b.text }))
+    let bodyH = 0
+    if (items.length) {
+      bodyH = Math.min(PPT_BODY, items.reduce((a, it) => a + itemHeight(it, PPT.CW), 0) + 0.1)
+      sl.addText(items.map(it => ({
+        text: it.text,
+        options: {
+          bullet: it.kind === 'bullet' ? (it.level ? { indent: 18 } : true) : false,
+          indentLevel: it.kind === 'bullet' && it.level ? 1 : 0,
+          bold: it.kind === 'head', italic: it.kind === 'quote',
+          fontSize: itemFont(it), color: it.kind === 'quote' ? '64748B' : it.kind === 'head' ? '1D4ED8' : '1E293B',
+          breakLine: true, paraSpaceAfter: 5,
+        },
+      })), { x: PPT.X, y: PPT.TOP, w: PPT.CW, h: bodyH, fontFace: FONT, valign: 'top', fit: 'shrink', margin: 2 })
+    }
+    if (s.table) {
+      const t = s.table
+      const rows = [t.head.map(c => ({ text: plain(c), options: { bold: true, fill: { color: 'E8EEF7' }, color: '0F172A' } })), ...t.rows.map(r => r.map(c => ({ text: plain(c ?? '') })))]
+      sl.addTable(rows, { x: PPT.X, y: PPT.TOP + (t.y ?? (items.length ? bodyH + 0.2 : 0)), w: PPT.CW, colW: t.colW, fontSize: 11, fontFace: FONT, color: '1E293B', valign: 'middle', border: { type: 'solid', color: 'CBD5E1', pt: 0.5 }, margin: 0.05 })
     }
     for (const t of s.tables ?? []) {
-      const rows = [t.head.map(c => ({ text: plain(c), options: { bold: true, fill: { color: 'E8EEF7' } } })), ...t.rows.slice(0, 12).map(r => t.head.map((_, i) => ({ text: plain(r[i] ?? '') })))]
-      sl.addTable(rows, { x: s.bullets?.length ? 7 : 0.6, y: 1.2, w: s.bullets?.length ? 5.8 : 12.1, fontSize: 11, fontFace: FONT, border: { type: 'solid', color: 'CBD5E1', pt: 0.5 } })
+      // 旧调用方式（直接传 tables）：同样完整输出，不截断
+      const rows = [t.head.map(c => ({ text: plain(c), options: { bold: true, fill: { color: 'E8EEF7' } } })), ...t.rows.map(r => t.head.map((_, i) => ({ text: plain(r[i] ?? '') })))]
+      sl.addTable(rows, { x: PPT.X, y: PPT.TOP + bodyH + 0.2, w: PPT.CW, fontSize: 11, fontFace: FONT, border: { type: 'solid', color: 'CBD5E1', pt: 0.5 }, autoPage: true, autoPageRepeatHeader: true, newSlideStartY: PPT.TOP })
     }
     if (s.notes) sl.addNotes(s.notes)
   }

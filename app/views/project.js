@@ -162,8 +162,7 @@ export async function openDeliverable(pid, did, v) {
     <div class="body"><div class="md doc">${md(text, ver.cites)}</div>
       ${ver.cites?.length ? `<div class="sec">引用来源（${ver.cites.length}）</div><div class="srcs">${ver.cites.map(c => c.wisburg ? `<button class="src" data-act="wis" data-res="${esc(c.wisburg.resource)}" data-id="${esc(c.wisburg.id)}">[${c.n}] 🌐 ${esc(c.wisburg.title ?? c.path)}</button>` : c.fileId ? `<button class="src" data-act="file" data-id="${c.fileId}">[${c.n}] ${esc(String(c.path).split('/').pop())}</button>` : `<span class="src">[${c.n}] ${esc(c.path)}</span>`).join('')}</div>` : ''}</div>
     <footer>
-      <button class="btn sm" data-act="dl-download" title="下载真实 ${esc(d.format.toUpperCase())} 文件">${icon('download', 13)}下载 ${esc(d.format.toUpperCase())}</button>
-      <button class="btn sm" data-act="dl-print" title="排版后用系统打印另存为 PDF">${icon('print', 13)}导出 PDF</button>
+      <button class="btn sm" data-act="nb-open-folder" data-p="${pid}">📂 打开项目专属文件夹</button>
       ${editable && latest ? `${d.checkout ? `<button class="btn sm pri" data-act="dl-checkin">提交编辑</button>` : `<button class="btn sm" data-act="dl-checkout" title="用本机 Word / PowerPoint / Excel / WPS 打开">${icon('open', 13)}Office 编辑</button>`}
         <button class="btn sm" data-act="dl-edit">在线编辑</button>${sections.length ? gated(C.aiWrite, `<button class="btn sm" data-act="dl-rewrite">${icon('spark', 13)}AI 改写章节</button>`) : ''}` : ''}
       ${editable && !latest ? `<button class="btn sm" data-act="dl-restore">恢复为新版本</button>` : ''}

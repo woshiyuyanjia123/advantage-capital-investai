@@ -1,117 +1,128 @@
-# 深蓝投研工作台 · InvestAI 2.4
+# NotebookLM × WorkBuddy 企业 FDE 项目管理工作台 (DSH 插件 & 双平台桌面版 v3.0)
 
-投资管理机构的 AI 协作系统：项目按业务类型配置的流程推进，每个阶段有具体工作与准入条件，决策由有权人员表决；AI 在你的权限范围内检索资料、起草成果、提取数据、整理会议纪要，但**不做任何正式决策**。
+本项目将 **Google NotebookLM（Gemini Notebook）的三栏源依据生产力范式** 与 **企业 FDE（Forward-Deployed Engineer）全流程投研/项目管理、四层权限治理及本地/离线 API 架构** 深度融合，提供 **DeepSeek Harness (DSH) 插件版**、**macOS / Windows 独立桌面安装包** 与 **本地/云端混合服务**。
 
-同一套代码四种运行方式（另可部署为**云服务器**多人共用）：**独立桌面应用**（Mac / Windows 安装包，双击即用，不需要 DSH 或 Node）、**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
+---
 
-> 📘 **完整的安装部署与使用教程（Mac / Windows / DSH 插件 / 云服务器）：[docs/GUIDE.md](docs/GUIDE.md)**　·　云服务器与权限、同步：[docs/CLOUD.md](docs/CLOUD.md)　·　DeepSeek 接入与 AI 产出质量修复说明：[docs/DEEPSEEK-FIX.md](docs/DEEPSEEK-FIX.md)
+## 一、两大基线仓库与开源项目借鉴对照（Architecture & Provenance）
 
-![DSH 内嵌工作台](docs/screenshots/1-dsh-workbench.jpg)
+本项目在架构演进中系统性吸收并重构了以下开源与内部基线项目的核心能力：
 
-## 安装桌面应用（推荐，无需任何开发环境）
+### 1. 借鉴自 `cheng241105-gif/ai-investment-management`
+- **全生命周期项目治理与档案模型（Investment Dossier）**：吸收其从“项目线索 → 立项准备 → 立项会 → 尽调 → 投委会 → 协议交割 → 投后赋能 → 退出归档”的阶段门禁（Stage Gate）与 RACI 责任编排思想。
+- **视觉高度估算 PPT 自动分页引擎（`desktop-v2.4.1`）**：合入其 `core/office.mjs` 中基于汉字/英文字符视觉宽度的行高计算与长表格跨页表头重复算法，彻底解决长报告转 PPT 时只保留前 12 行或文字溢出页面的问题。
+- **桌面单机模式权限体验优化**：吸取其 2.4.1 修复经验，在桌面/插件单机模式下允许当前操作人直接配置与测试本地/外部模型 API，无需切回系统管理员账号。
 
-到 [GitHub Releases](https://github.com/evanzhu0105-ship-it/InvestAI-Desktop/releases/latest) 下载对应安装包（仓库为私有时，下载者需先被添加为仓库协作者，或由你把安装包转发给对方）：
+### 2. 借鉴自 `evanzhu0105-ship-it/InvestAI-Desktop` 及 `PR #1 (5ab645c)`
+- **零构建 ES Module + SQLite 全历史快照共核架构**：沿用其高内聚的 `core/`（SQLite 版本库、四层权限 `org.mjs`、成果版本生命周期 `lifecycle.mjs`、会议转写 `meetings.mjs`）与 `lib/`（DSH Cordis 插件宿主桥接）。
+- **PR #1 (`fix/deepseek-integration`) DeepSeek 协议与稳定性修复**：
+  - 默认模型 ID 规范化为官方 `deepseek-flash`（自动将旧配置中的 `deepseek-v4.1-flash` / `deepseek-chat` 映射为有效 ID）；
+  - 按任务类型显式控制 `thinking` 与 `reasoning_effort`（大纲规划关闭思考防截断，长文起草开启 `high` 并将 `max_tokens` 提升至 `32000`）；
+  - 带工具调用的多轮对话强制回传 `reasoning_content`，并将近期对话作为背景文本传入，避免拒绝指令后引发后续轮次 HTTP 400；
+  - 区分永久配置错误（401/402/404）与暂时性网络/限流错误（429/5xx），避免单次超时导致模型被连带离线 5 分钟。
 
-| 电脑 | 安装包 | 安装 |
+### 3. 借鉴并嵌入的第三方开源工作流项目
+- **`likaku/Mck-ppt-design-skill`（Apache-2.0，已嵌入 `vendor/mck-ppt-design-skill`）**：借鉴其麦肯锡咨询级 Action Title（结论先行标题）、封面三大核心指标卡、三栏金字塔执行摘要、底栏来源溯源规范，并结合 `core/nb-ppt-pro.mjs` 的 1280×720 多图层高清渐变几何纹理画布，使生成的每一份 `.pptx` 兼具专业审美与 **≥ 3.2 MB** 的印刷级图文品质。
+- **`dataelement/dsh-desktop` & `zarazhangrui/beautiful-html-templates`（MIT）**：对齐 DSH Desktop 插件装载契约（`cordis.patch.yml` + `@deepseek-ai/dsh-client-ui-*` 槽位注入）。
+
+---
+
+## 二、原创三界面产品架构（NotebookLM × 企业 FDE 全流程闭环）
+
+1. **第一界面：`① 项目书架 (图2风格)` (`app/views/nb-shelf.js`)**
+   - 顶部展示 **5 大精选行业智库与方法论笔记本**（PE/VC 硬科技尽调、产业基金资本招商、审计 vs BP 冲突核验、投委会 IC 范式、投后退出控制）；
+   - 下方展示 **最近打开过的项目笔记本网格**：轻点任意项目卡片即原位展开 **全流程总进度百分比（`overallPct%`）+ 阶段准入进度百分比（`curStagePct%`）**，右侧紧邻 **插件提交通道** 与 **打开项目专属文件夹** 入口。
+2. **第二界面：`② Notebook 制作台 (图1风格)` (`app/views/nb-workspace.js`)**
+   - **左栏（来源勾选 + 左下角项目专属文件夹产出池）**：支持 `+ 添加来源`、`+ 创建笔记` 与复选框精准挑选资料（`S.ctx.fileIds`）；彻底移除繁琐的“导出/下载”按钮，每个项目自动生成配套专属文件夹（`项目专属文件夹/<项目名>_<ID>/`），所有生成的成品自动落盘并实时陈列在左下角；
+   - **中栏（带角标源依据问答 + 3 张智能追问卡片）**：每次问答后自动给出 3 张针对当前阶段与已勾选资料的「下一步适合怎么办」追问卡片，底部实时显示 `N 个来源`；
+   - **右栏（Studio 9 宫格 + 笔记五维看板）**：严格基于左栏勾选资料定向制作 **演示文稿 PPT（≥3.2MB）、深度报告 Word、音频概览、视频概览、思维导图、闪卡、测验、信息图、数据表格 XLSX**，并提供本地逐页 PPT / Word / 录音转文字修改工坊。
+3. **第三界面：`③ 流程提交与权限看板` (`app/views/nb-flow-board.js` + `core/nb-flow-board.mjs`)**
+   - **优于传统企业 OA 的槽位式协同**：左栏直接选用图1左下角专属夹中的任意成品，支持 **零修改原件直交** 或 **人工轻微修改后自主提交** 到任意流程节点；
+   - **中栏完整企业项目阶段流水线**：可视化全部阶段、必做成果、责任人与定稿人，支持一键入槽、送审、定稿；
+   - **右栏四层权限实时矩阵与岗位胶囊切换器**：实时透视数据范围、密级上限、业务操作权、敏感字段脱敏状态，支持一键切换岗位视角并完成阶段门禁表决。
+
+---
+
+## 三、macOS 与 Windows 双平台完整区分与安装构建指南
+
+| 维度 | macOS (Apple Silicon `arm64` / Intel `x64`) | Windows 10 / 11 (`x64`) |
 |---|---|---|
-| Mac（Apple 芯片 M1–M4） | `InvestAI-2.4.0-mac-arm64.dmg` | 打开 dmg，把 InvestAI 拖进「应用程序」 |
-| Mac（Intel） | `InvestAI-2.4.0-mac-x64.dmg` | 同上 |
-| Windows 10 / 11（64 位） | `InvestAI-2.4.0-win-x64.exe` | 双击安装，可选安装位置，不需要管理员权限 |
+| **独立桌面安装包** | `DSH-NotebookLM-FDE-Setup-3.0.0-mac-arm64.dmg` / `mac-x64.dmg` | `DSH-NotebookLM-FDE-Setup-3.0.0-win-x64.exe` (NSIS 安装程序) |
+| **DSH 插件一键安装脚本** | `sh scripts/install-mac.sh` | `powershell -ExecutionPolicy Bypass -File scripts\install-win.ps1` |
+| **本地录音转写引擎安装** | `sh scripts/setup-asr.sh` (`bin/python`) | `powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` (`Scripts\python.exe`) |
+| **本机 Office 检出唤起方式** | `open <工作副本路径>`（调用 macOS Microsoft Office / WPS / Keynote） | `explorer.exe <工作副本路径>`（调用 Windows Office / WPS，防路径空格转义） |
+| **应用数据与项目专属夹默认路径** | Standalone: `~/Library/Application Support/dsh-notebooklm-fde`<br>DSH 插件: `~/.dsh/investai/workspace/项目专属文件夹/` | Standalone: `%APPDATA%\dsh-notebooklm-fde`<br>DSH 插件: `%USERPROFILE%\.dsh\investai\workspace\项目专属文件夹\` |
+| **桌面打包命令** | `cd desktop && npm run dist:mac` | `cd desktop && npm run dist:win` |
 
-**首次打开的安全提示**（安装包未使用付费的开发者证书签名，属正常现象）：
-- Mac 提示「无法验证开发者」或「Apple 无法验证…是否包含恶意软件」：
-  - macOS 14 及更早：在「应用程序」里**右键 InvestAI → 打开 → 打开**。
-  - macOS 15 及更新：先双击一次（提示后点「完成」），再到**系统设置 → 隐私与安全性**，在页面下方点 **「仍要打开」**，输入开机密码确认。
-  - 若提示「已损坏，无法打开」：在终端运行 `xattr -cr /Applications/InvestAI.app` 后再打开。
-- Windows 出现 SmartScreen「已保护你的电脑」：点**更多信息 → 仍要运行**。
-
-打开即是**本机模式**（无需登录，右上角切换演示岗位）。要体验按岗位分层的账号登录，用菜单 **「账户 → 登录模式」**，应用重新打开后用演示账号登录（见下节）。DeepSeek API Key 在「系统配置 → AI 策略与模型」中填写，只保存在本机。
-
-### 演示账号与权限分层
-
-[docs/accounts/InvestAI-演示账号与权限.xlsx](docs/accounts/InvestAI-演示账号与权限.xlsx)（桌面应用菜单「账户 → 演示账号与权限」也可打开）列出 15 个演示账号的**账号、初始密码**和四层权限，按权限大小分为五层：
-
-| 层级 | 岗位（账号数） | 数据范围 · 资料密级 · 关键操作 |
-|---|---|---|
-| 第 1 层 决策层 | 合伙人（3） | 全机构 · 绝密 · 表决、投资审批、退出审批 |
-| 第 2 层 管理层 | 部门负责人（2） | 本部门 · 绝密 · 启动授权、材料定稿、表决 |
-| 第 3 层 执行层 | 投资经理（2）、投后管理（1） | 本人负责 / 投后阶段 · 机密 · 经理确认、定稿 / 退出审批 |
-| 第 4 层 专业支持层 | 风控、法务、财务、基金募资（各 1） | 指定授权（风控全机构） · 按专业开放敏感字段 · 交割确认 / 表决 |
-| 第 5 层 协作层 | 分析师、综合协作（各 1） | 指定授权 · 内部 · 无敏感字段 |
-| 系统管理 | 系统管理员（1） | 只做配置，不看敏感字段 |
-
-表格另有「功能权限矩阵」「数据·操作·敏感信息」两张岗位对照表，均由 `node scripts/make-accounts-xlsx.mjs` 从系统实际权限配置生成（测试会逐个账号登录核对）。
-
-> ⚠ 这些是公开在仓库中的**演示密码**，只在明确启用时生效：桌面应用的「登录模式」，或命令行 `node server.mjs --demo-accounts`。正式部署不要启用，系统默认为每个账号生成随机初始密码。登录后点右上角头像 →「修改密码」可改成自己的密码。
-
-**与 DeepSeek Harness 桌面版互不冲突**，可同时安装、同时运行：
-
-| | InvestAI 桌面应用 | DeepSeek Harness 桌面版 |
-|---|---|---|
-| 应用标识 | `com.investai.workbench` | DSH 自己的标识 |
-| 程序数据 | Mac `~/Library/Application Support/InvestAI`，Windows `%APPDATA%\InvestAI` | `~/.dsh`、`…/@deepseek-ai/dsh-desktop` |
-| 内置服务端口 | 首次由系统分配空闲端口，之后沿用（被占用时自动换），只监听 127.0.0.1 | DSH 自己的端口 |
-| 密钥 | 应用数据目录下 `secrets.json` | DSH 自己的配置 |
-
-桌面应用不读写 DSH 的任何目录；DSH 插件版（`~/.dsh/investai`）与桌面应用的数据也相互独立。卸载桌面应用不会删除数据目录（菜单「帮助 → 打开数据目录」可找到）。自己打包：`cd desktop && pnpm install && pnpm run dist`（在 Mac 上可同时产出 Mac 与 Windows 安装包，见 [desktop/README.md](desktop/README.md)）。
-
-## 从源码运行（Node ≥ 22.13）
-
-从 GitHub 下载（`git clone` 或 Download ZIP）后，**必须先安装依赖**，否则启动会报 `Cannot find package 'exceljs'`：
-
+### 1. macOS 端快速安装与运行
 ```bash
+# 方式 A：安装到 macOS 的 DeepSeek Harness (DSH Desktop / Web)
+sh scripts/install-mac.sh
+
+# 方式 B：源码直接启动本地桌面模式
 npm install
+npm run desktop
+
+# 方式 C：在 macOS 上打包 DMG 安装包
+cd desktop && npm install && npm run dist:mac
+```
+> **macOS 首次打开提示**：若遇到 Gatekeeper 提示“无法验证开发者”，请在终端执行 `xattr -cr "/Applications/DSH NotebookLM FDE.app"` 后打开。
+
+### 2. Windows 端快速安装与运行
+```powershell
+# 方式 A：一键挂载到 Windows 的 DeepSeek Harness (desktop & web profiles)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-win.ps1
+
+# 方式 B：源码直接启动本地桌面模式
+npm install
+npm run desktop
+
+# 方式 C：在 Windows 上打包 NSIS .exe 安装程序
+cd desktop
+npm install
+npm run dist:win
 ```
 
-然后按用途选一种方式启动。**想看到和作者本机一样的界面（无需登录、可切换岗位），用「本机演示」：**
+### 3. 断网本地 API 与云端 API 连接
+- 点击界面顶部胶囊 **「API 连接」**：
+  - **断网本地模式**：选择「仅本地离线 API」，支持自动探测本机 `http://127.0.0.1:11434/v1` (Ollama)、`http://127.0.0.1:1234/v1` (LM Studio)、`http://127.0.0.1:8000/v1` (vLLM)，无本地模型时自动使用内置离线规则摘录引擎；
+  - **云端 / DSH 模式**：支持复用 DSH 宿主模型或填写 `deepseek-flash` / `deepseek-v4-pro` 及任意 OpenAI 兼容接口密钥。
 
-| 方式 | 命令 | 说明 |
-|---|---|---|
-| 本机演示 | `node server.mjs --desktop` | 打开 http://127.0.0.1:4310，无需登录，右上角头像切换 15 个演示岗位 |
-| 多人使用（SaaS） | `DEEPSEEK_API_KEY=… node server.mjs` | 有登录页。账号与随机初始密码在数据目录的 `initial-credentials.txt`（默认 `./data/`，权限 600） |
-| 演示账号登录 | `node server.mjs --demo-accounts` | 同上，但使用 Excel 中的演示密码（仅演示；已设过密码的数据目录不会被覆盖，可加 `--data <新目录>`） |
-| DSH 插件 | `sh scripts/install-dsh.sh`，然后 `dsh web` | 界面嵌在 DSH 里，用 DSH 的侧栏与主题。DSH 桌面版（Mac / Windows）：左侧栏「插件 → 添加插件」，填 Releases 中 `investai-desktop-2.4.0.tgz` 的绝对路径，安装后重启 DSH，步骤见 [GUIDE 第 3 节](docs/GUIDE.md#3-方式二deepseek-harness-插件)（需 2.4+）。在 DSH「设置 → 模型」填 DeepSeek API Key 后自动使用（优先 V4.1 Flash） |
+---
 
-下载的副本与作者本机看到的内容会有这些正常差异：
-- **数据**：每个新的数据目录首次启动都会生成同一套虚构演示数据；作者本机在演示中做过的操作（定稿、表决、会议纪要等）存在本机数据库里，不在仓库中。
-- **密钥与外部服务**：智堡 API Key、推送地址、DeepSeek Key 都不在仓库中，下载后显示「未配置」，AI 使用离线引擎（原文摘录 + 规则）。
-- **会议转写**：本机转写模型约 480MB，不在仓库中，需运行 `sh scripts/setup-asr.sh`；未安装时可在会议中「粘贴文字稿」。
-- **安装包与演示视频**：在 GitHub Releases 中，不在仓库里。
+## 四、项目完整目录架构
 
-| 其他 | 命令 | 说明 |
-|---|---|---|
-| 会议转写 | Mac / Linux：`sh scripts/setup-asr.sh`；Windows：`powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` | 安装本机 faster-whisper small（约 480MB，需要 [uv](https://docs.astral.sh/uv/)），录音不出本机。桌面应用在「会议纪要」页给出带本应用数据目录的完整命令 |
-| 测试 | `node --test --test-concurrency=1 "test/*.test.mjs"` | 60 项回归测试（代码审查、生命周期、演示账号、云端安全与同步、DSH 兼容、DeepSeek 接入协议；GitHub Actions 在 Windows / macOS / Linux 上运行） |
-| 验收 | `node scripts/verify.mjs` | 127 项自动化验收（临时目录，不碰真实数据） |
-| 评测 | `node scripts/eval.mjs [--deepseek]` | 34 项 AI 质量与安全评测，结果在「系统配置 → 评测」 |
+```text
+dsh-notebooklm-fde/
+├── core/
+│   ├── nb-api.mjs          # 本地离线 API (Ollama/LM Studio/vLLM) 探测与云端/DSH 混合路由
+│   ├── nb-flow.mjs         # 全流程进度百分比计算与项目笔记管理
+│   ├── nb-folder.mjs       # 每项目专属文件夹自动生成与成品落盘索引（无导出按钮设计）
+│   ├── nb-ppt-pro.mjs      # 麦肯锡咨询版式 + 1280x720 高清纹理画布 PPT 引擎（单份 ≥3.2MB）
+│   ├── nb-studio-gen.mjs   # Studio 9 宫格按勾选资料定向制作器 + 3 张智能追问建议生成
+│   ├── nb-studio.mjs       # 左上 PPT/Word/录音转文字工坊与插件提交通道
+│   ├── nb-flow-board.mjs   # 第三界面：左下角成品直交/微调自主提交与四层权限矩阵后端
+│   ├── llm.mjs             # DeepSeek (deepseek-flash) 与 OpenAI 兼容协议适配（含 PR #1 修复）
+│   ├── office.mjs          # Word/PPT/Excel 渲染与视觉高度估算自动分页引擎
+│   ├── deliverables.mjs    # 成果版本控制与跨平台（macOS open / Windows explorer）本地检出
+│   ├── org.mjs             # 企业四层权限（功能/数据范围/业务操作/敏感字段与密级）
+│   └── workflow.mjs        # 7 大业务类型可配置阶段与门禁表决引擎
+├── app/
+│   ├── notebook.css        # 图2项目书架 + 图1三栏工作台 + 第三界面流程权限看板样式
+│   └── views/
+│       ├── nb-shelf.js         # 第一界面：图2精选智库横幅 + 最近项目笔记本（进度% + 插件提交）
+│       ├── nb-workspace.js     # 第二界面：图1左栏勾选与左下角专属夹 + 中栏追问 + 右栏 Studio
+│       ├── nb-flow-board.js    # 第三界面：左下角成品直交/微调自主提交 + 全流程四层权限看板
+│       ├── nb-studio-ppt.js    # 本地 PPT 逐页可视化修改与本机 Office 检出工坊
+│       ├── nb-studio-word.js   # 本地 Word 章节修改与模板填充工坊
+│       └── nb-studio-audio.js  # 本地麦克风录音/离线 Whisper 转写与逐句校对工坊
+├── vendor/
+│   └── mck-ppt-design-skill/   # 嵌入的开源麦肯锡 62 种咨询版式工作流
+├── desktop/                    # Electron 跨平台独立桌面壳（支持 macOS DMG 与 Windows NSIS EXE）
+└── scripts/
+    ├── install-mac.sh          # macOS 专属 DSH 插件挂载与卸载脚本
+    ├── install-win.ps1         # Windows 专属 DSH 插件挂载与卸载脚本
+    ├── setup-asr.sh            # macOS / Linux 本地 faster-whisper 转写环境部署
+    └── setup-asr.ps1           # Windows 本地 faster-whisper 转写环境部署
+```
 
-数据目录：插件 `~/.dsh/investai`，服务端 `./data`（`--data` 可改）。密钥（智堡、推送 Webhook、统一登录）只保存在 `~/.config/investai/secrets.json`（600），不进数据库、日志或安装包。
-
-## 功能一览
-
-| 需求 | 实现 |
-|---|---|
-| 一、可配置流程 | 7 类业务（财务投资为主线，另有并购重组、上市公司资本运作、基金、资本招商、产业投资、其他）。流程是结构化定义：阶段 → 具体工作（必做 = 准入条件）→ 决策节点（审批 / 上会 / 会签，任一 / 全体 / 过半 / 三分之二）。结果可推进、退回补充、继续持有、终止；另有暂停、恢复、重新推进、人工退回。流程有版本，发布不影响在途项目 |
-| 二、四层权限 | 功能权限 · 数据范围（本人 / 本部门 / 指定授权 / 投后 / 全机构）· 业务操作（启动授权、材料定稿、上会表决、投决、交易确认、退出、归档）· 敏感字段（金额 / 估值 / 条款 / LP / 商业秘密）与资料密级（公开 / 内部 / 机密 / 绝密）。11 个预设岗位，可增改；AI 继承当前用户权限，文本自动脱敏 |
-| 三、AI 参与边界 | 关闭 / 辅助建议 / 起草待确认 / 授权执行，按岗位、业务类型、工作类型、资料密级取最低值。AI 工具里没有表决、定稿、推进、删除、导出 |
-| 三、模型路由 | 外部（DeepSeek）/ 本地（Ollama 等，仅本机回环地址）/ 混合。默认「机密」及以上只交给本地模型，无本地模型时用离线引擎（不调用任何模型） |
-| 四、会议纪要 | 上传录音 → 本机转写（热词 + 术语校正）→ 讨论要点 / 决定事项 / 待办 / 责任人（只从参会人中识别）/ 期限 → 人工确认 → 纪要定稿入项目、待办生成任务 |
-| 五、文档 | 标准文书（NDA、框架协议、交易文件）按 `{{字段}}` 模板填充，缺失标【待补充】；研究类成果由 AI 参考历史成果结构与写作规范先规划大纲、你确认后起草。真实 Word / PPT / Excel 文件，可用本机 Office 打开编辑后提交为新版本；每次修改都是新版本，可恢复、可撤回定稿；导出 PDF |
-| 六、数据收集 | 外部自助填报：一次性授权链接（1–14 天、可撤销、只存哈希、附件白名单）；AI 从 BP / 工商 / 财报提取，人工确认后写入同一公司库，保留来源与确认人 |
-| 七、固定格式转换 | BP → 项目信息表，财报 → 财务分析表（多期 + 衍生指标），尽调材料 → 尽调汇总。每个字段标来源与页码，缺失与多源冲突单独列出，审计口径优先于 BP，导出 Excel / PDF |
-| 八、财务投资全流程 | 项目机会 → 启动审批 → 立项准备 → 立项会 → 尽调 → 投委会 → 交易执行 → 交割会签 → 投后 → 退出决策 → 退出 → 复盘归档（验收脚本逐步跑通） |
-| 路线图 | 真实 DeepSeek + 评测集 · PDF 解析（含中文 CMap）· 智堡定时采集入库 · Word/PDF 导出 · 事件触发与 AI 预审 · 企业微信 / 飞书 / 钉钉推送（加签）· SQLite 服务端库 + 统一登录（OAuth2 + PKCE）· 指标库与结构化抽取 · 引用内容核对 · 公司观点库 · 行情（授权 CSV 导入）与公告（智堡企业研究）· 本机录音转写 |
-
-![项目详情](docs/screenshots/2-project-detail.jpg)
-
-## 需要你提供 / 注意
-
-- **DeepSeek API Key**：桌面应用 / 服务端在「系统配置 → AI 策略与模型」中填写（或环境变量 `DEEPSEEK_API_KEY`），填完点「测试连接」确认可用，可选 V4.1 Flash（模型 ID `deepseek-flash`，默认）或 V4 Pro（`deepseek-v4-pro`）；DSH 插件在 DSH「设置 → 模型」中填写。未配置时系统用离线引擎（资料原文摘录 + 规则），功能完整但不会改写润色。注意「机密」及以上资料默认只交给本地模型，没有本地模型时即使填了 Key 也走离线引擎（见 GUIDE「常见问题」）。
-- **智堡 API Key**：系统配置 → 集成。上次提供的密钥已在本机配置；建议到智堡后台轮换一次。
-- **行情**：本系统不内置未经授权的行情源，请从已授权终端导出 CSV 导入，或接入你们已授权的接口。
-- **toolknit-desktop**：其许可为 PolyForm Noncommercial（商业使用需作者授权），本系统**不打包**其代码；已自研同类能力，并提供默认关闭的 MCP 连接器，管理员确认授权后可启用。
-- 演示数据（8 家公司、8 个项目、15 个岗位）均为虚构。
-
-第一次使用：打开后会自动播放 5 步界面导览；右上角「ⓘ」是帮助中心（三步上手、按岗位用法、名词解释、常见问题）。项目页的「下一步」会告诉你还差什么、谁负责；灰色按钮点一下会说明原因与可以找谁。
-
-更多：[代码审查报告](docs/review/review-report.html) · [术语表](GLOSSARY.md) · [架构决策](docs/adr/) · [架构](docs/ARCHITECTURE.md) · [验收清单](docs/ACCEPTANCE.md) · [需求提示词](docs/PROMPT.md)

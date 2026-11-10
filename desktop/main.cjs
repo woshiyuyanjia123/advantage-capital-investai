@@ -9,7 +9,31 @@ const net = require('node:net')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
-const TITLE = 'InvestAI 投研工作台'
+const TITLE = 'NotebookLM · 企业 FDE 工作台 (DSH 插件版)'
+
+function syncDshPlugin(silent = false) {
+  try {
+    const dshHome = process.env.DSH_HOME || path.join(require('node:os').homedir(), '.dsh')
+    const pluginDir = path.join(__dirname, 'app-src')
+    const spec = 'link:' + pluginDir.replace(/\\/g, '/')
+    const id = '@local/investai-desktop'
+    let count = 0
+    for (const prof of ['desktop', 'web']) {
+      const pkgPath = path.join(dshHome, 'profiles', prof, 'package.json')
+      if (!fs.existsSync(pkgPath)) continue
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+      const linkDir = path.join(dshHome, 'profiles', prof, 'node_modules', '@local', 'investai-desktop')
+      fs.mkdirSync(path.dirname(linkDir), { recursive: true })
+      try { if (fs.lstatSync(linkDir).isSymbolicLink()) fs.unlinkSync(linkDir) } catch {}
+      if (!fs.existsSync(linkDir)) fs.symlinkSync(pluginDir, linkDir, 'junction')
+      pkg.dependencies = { ...(pkg.dependencies || {}), [id]: spec }
+      if (pkg.dsh?.profile?.bundles && !pkg.dsh.profile.bundles.includes(id)) pkg.dsh.profile.bundles.push(id)
+      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+      count++
+    }
+    if (!silent) dialog.showMessageBox(win, { title: TITLE, message: count ? `已挂载插件到 ${count} 个本机 DSH Profile，重启 DSH 即可生效。` : '未检测到 ~/.dsh/profiles，当前以本地离线一体模式运行。' })
+  } catch (e) { if (!silent) dialog.showErrorBox('DSH 插件挂载失败', String(e.message || e)) }
+}
 let win = null
 let server = null
 
@@ -49,6 +73,7 @@ async function boot() {
   const login = prefs.loginMode === true
   server = await startServer({ dir: path.join(userData, 'data'), desktop: !login, demoAccounts: login, host: '127.0.0.1', port: await freePort(prefs.port) })
   if (server.port !== prefs.port) writePrefs({ port: server.port })
+  syncDshPlugin(true)
   buildMenu(userData, login)
   createWindow()
 }
@@ -101,7 +126,7 @@ function buildMenu(userData, login) {
       { type: 'separator' },
       { label: '演示账号与权限（Excel）', click: () => void shell.openPath(accountsXlsx()) },
     ] },
-    { label: '帮助', submenu: [{ label: '打开数据目录', click: () => void shell.openPath(userData) }, { label: '在浏览器中打开', click: () => void shell.openExternal(`${server.url}/api/investai?asset=index.html`) }, ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: '退出' }])] },
+    { label: '帮助', submenu: [{ label: '一键挂载/更新到本机 DSH 插件', click: () => syncDshPlugin(false) }, { label: '打开数据目录', click: () => void shell.openPath(userData) }, { label: '在浏览器中打开', click: () => void shell.openExternal(`${server.url}/api/investai?asset=index.html`) }, ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: '退出' }])] },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
