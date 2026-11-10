@@ -4,6 +4,7 @@ import { sheetsFromMarkdown } from './deliverables.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
 import { buildComprehensiveMarkdown, buildRichPptSlides } from './nb-deep-doc.mjs'
 import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml, synthesizeDeepSeekSection } from './nb-nlm-pipeline.mjs'
+import { buildEquityResearchMemoHtml } from './nb-equity-memo.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
   const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
@@ -62,6 +63,10 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     const sheets = [...baseSheets, { name: '4-勾选资料逐条溯源台账', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '提取事实与量化指标', key: 'finding', width: 64 }, { header: '对应勾选来源', key: 'src', width: 32 }, { header: '核对状态', key: 'status', width: 14 }], rows }]
     const buf = await renderXlsx({ title: `${p.name} · 四维投研核验数据表`, sheets })
     return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_数据表格_${stamp}.xlsx`, buffer: buf, kind: 'xlsx', sourceCount: docs.length, summary: `四工作表核验台账 XLSX（源自 ${docs.length} 份勾选资料）` })
+  }
+  if (kind === 'ic_memo') {
+    const html = buildEquityResearchMemoHtml(p, docs, user)
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_投委会备忘录_IC_Memo_${stamp}.html`, buffer: Buffer.from(html, 'utf8'), kind: 'ic_memo', sourceCount: docs.length, summary: `九章券商深度研报级 IC 投资备忘录（含蓝军反驳与 Verdict Box）` })
   }
   const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与双人对谈', video: '视频概览脚本' }
   const label = labelMap[kind] || '专项成果'

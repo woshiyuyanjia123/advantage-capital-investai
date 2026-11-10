@@ -101,17 +101,18 @@ function renderRightNotes(x, p) {
     flashcards: '🗂️ 翻转闪卡规范：6–12 张 2 列网格主动回忆卡 · 正面核心核验问题，点击翻转展示底稿原文答案与出处',
     quiz: '❓ 核验测验规范：4–8 道底稿实证选择题 · 点击选项即刻判分并弹出原文核对依据',
     infographic: '📊 信息图规范：3 列核心量化指标渐流光卡 + 2 列事实证据 Bento 网格 · 零虚构数字',
+    ic_memo: '📜 投决备忘录 (IC Memo) 规范：深海蓝 #1a1a4e + 米白纸面 · 罗马章节 I–IX · 5-KPI横条 + 技术三立柱 + 蓝军反驳视角(Red-Flag) + Verdict Box 明确裁定（拒绝主观打星）',
   }
   const studioBtns = [
-    ['audio', '#38BDF8', '🎙️ 音频概览'],
+    ['ic_memo', '#A78BFA', '📜 投决备忘录'],
     ['ppt', '#C084FC', '🖼️ 演示文稿'],
-    ['video', '#4ADE80', '🎬 视频概览'],
-    ['mindmap', '#818CF8', '🌿 思维导图'],
-    ['word', '#F472B6', '📄 报告'],
-    ['flashcards', '#FB923C', '🗂️ 闪卡'],
-    ['quiz', '#60A5FA', '❓ 测验'],
-    ['infographic', '#FBBF24', '📊 信息图'],
+    ['word', '#F472B6', '📄 尽调报告'],
     ['table', '#34D399', '📋 数据表格'],
+    ['mindmap', '#818CF8', '🌿 思维导图'],
+    ['audio', '#38BDF8', '🎙️ 音频概览'],
+    ['video', '#4ADE80', '🎬 视频概览'],
+    ['flashcards', '#FB923C', '🗂️ 核验闪卡'],
+    ['quiz', '#60A5FA', '❓ 答辩测验'],
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>

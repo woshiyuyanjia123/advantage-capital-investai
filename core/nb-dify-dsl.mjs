@@ -8,6 +8,15 @@ import { submitArtifactToNode } from './nb-flow-board.mjs'
 
 export const DIFY_WORKFLOW_TEMPLATES = [
   {
+    id: 'ac_equity_memo',
+    name: '投委会(IC)九章深度研报备忘录流 (I–IX)',
+    category: '投委会决策汇报',
+    targetKind: 'ic_memo',
+    usageCount: 165,
+    nodes: ['底稿事实/推理/判断三段式抽取', '技术与产品三立柱定量核验', '竞争对标矩阵构建', '蓝军反驳视角(Red-Flag)质询', 'Verdict Box明确决策裁定'],
+    desc: '遵循专业券商深度研报范式（深海蓝 #1a1a4e + 米白纸面 + 罗马章节 I–IX + 5-KPI横条 + 蓝军反驳矩阵 + 首席分析师签名），拒绝主观星级打分。',
+  },
+  {
     id: 'ac_dd_word',
     name: '尽调报告多维穿行核验流',
     category: '股权与Pre-IPO尽调',
