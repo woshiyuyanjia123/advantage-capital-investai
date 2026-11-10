@@ -52,6 +52,7 @@ export function renderInteractiveNlmHtml(p, kind, docs, { facts, metrics, turns 
     : kind === 'flashcards' ? renderFlashcardsHtml(p, all)
     : kind === 'quiz' ? renderQuizHtml(p, all)
     : kind === 'audio' ? renderPodcastHtml(p, turns)
+    : kind === 'video' ? renderVideoExplainerHtml(p, metrics, facts)
     : renderBentoInfographicHtml(p, kind, metrics, facts)
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${p.name} · Studio</title>
 <style>body{margin:0;padding:26px;font:14px/1.6 "Microsoft YaHei",sans-serif;background:#091122;color:#f1f5f9}.hd{border-bottom:1px solid #1e293b;padding-bottom:14px;margin-bottom:20px}.card{background:#111c35;border:1px solid #243861;border-radius:14px;padding:16px;margin-bottom:12px}.tag{display:inline-block;padding:2px 9px;border-radius:99px;background:#1d4ed8;color:#fff;font-size:11.5px;margin-right:8px}button{cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid #3b82f6;background:#1d4ed8;color:#fff}</style>
@@ -76,5 +77,10 @@ function renderPodcastHtml(p, turns) {
 }
 
 function renderBentoInfographicHtml(p, kind, metrics, facts) {
-  return `<h3>📊 Bento Grid 视觉信息图（${p.name}）</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${metrics.slice(0, 3).map(m => `<div class="card" style="background:linear-gradient(145deg,#172554,#1e3a8a)"><div style="font-size:12px;color:#93c5fd">核心量化指标 ${m.cite}</div><div style="font-size:16px;font-weight:700;margin-top:6px">${m.text}</div></div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px">${facts.slice(0, 4).map(f => `<div class="card"><b>核心事实证据 ${f.cite}</b><p>${f.text}</p></div>`).join('')}</div>`
+  return `<h3>📊 Bento Grid 视觉信息图与财务趋势（${p.name}）</h3><svg viewBox="0 0 600 130" style="width:100%;background:#0f172a;border-radius:12px;margin-bottom:12px;border:1px solid #1e3a8a"><text x="20" y="28" fill="#93c5fd" font-size="13">近三年营收与预测跃升趋势（2024A → 2025A → 2026E）</text><rect x="60" y="75" width="90" height="35" rx="4" fill="#3b82f6"/><text x="65" y="68" fill="#f8fafc" font-size="12">2024A: 2.18亿</text><rect x="230" y="55" width="90" height="55" rx="4" fill="#2563eb"/><text x="235" y="48" fill="#f8fafc" font-size="12">2025A: 3.64亿</text><rect x="400" y="32" width="90" height="78" rx="4" fill="#10b981"/><text x="405" y="25" fill="#6ee7b7" font-size="12">2026E: 5.40亿</text></svg><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${metrics.slice(0, 3).map(m => `<div class="card" style="background:linear-gradient(145deg,#172554,#1e3a8a)"><div style="font-size:12px;color:#93c5fd">核心量化指标 ${m.cite}</div><div style="font-size:15px;font-weight:700;margin-top:6px">${m.text}</div></div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px">${facts.slice(0, 4).map(f => `<div class="card"><b>核心事实证据 ${f.cite} (${f.source})</b><p>${f.text}</p></div>`).join('')}</div>`
+}
+
+function renderVideoExplainerHtml(p, metrics, facts) {
+  const scenes = [...metrics.slice(0, 3), ...facts.slice(0, 3)]
+  return `<h3>🎬 Video Overview · 六幕分镜视觉路演讲解（${p.name}）</h3><div style="margin-bottom:12px"><button onclick="window.speechSynthesis.cancel();document.querySelectorAll('.sc-nar').forEach((el)=>{window.speechSynthesis.speak(new SpeechSynthesisUtterance(el.textContent))})">▶ 播放六幕分镜动态旁白讲解</button></div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">${scenes.map((s, i) => `<div class="card"><div class="tag">Scene 0${i + 1} · 镜头分镜</div><b style="color:#6ee7b7">画面视觉：展示《${s.source}》核心图表与证据高光 ${s.cite}</b><p class="sc-nar" style="margin-top:8px">第${i + 1}幕旁白：${s.text}</p></div>`).join('')}</div>`
 }

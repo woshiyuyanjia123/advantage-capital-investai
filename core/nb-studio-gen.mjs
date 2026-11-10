@@ -1,7 +1,8 @@
 // Studio 8 大加工成品定向生成器（严格按勾选 fileIds 提炼 + 自动落盘项目专属文件夹 + 智能追问建议）
 import { renderDocx, renderPptx, renderXlsx } from './office.mjs'
+import { sheetsFromMarkdown } from './deliverables.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
-import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
+import { buildComprehensiveMarkdown, buildRichPptSlides } from './nb-deep-doc.mjs'
 import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml } from './nb-nlm-pipeline.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
@@ -17,8 +18,14 @@ export function buildFollowUps(p, question = '', checkedNames = []) {
 export async function generateStudioArtifact({ db, kb, org, deliverables }, user, p, b) {
   const kind = String(b.kind || 'ppt')
   const theme = String(b.theme || 'mck')
-  const allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
-  const picked = (b.fileIds?.length ? allFiles.filter(f => b.fileIds.includes(f.id)) : allFiles).slice(0, 12)
+  let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
+  if (!allFiles.some(f => f.mountId !== 'm_ws')) {
+    await kb.scanAll().catch(() => {})
+    allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
+  }
+  const rawSources = allFiles.filter(f => f.mountId !== 'm_ws')
+  const pool = rawSources.length ? rawSources : allFiles
+  const picked = (b.fileIds?.length ? allFiles.filter(f => b.fileIds.includes(f.id)) : pool).slice(0, 12)
   const docs = []
   for (const f of picked) {
     const r = await kb.read(f.id, user).catch(() => null)
@@ -29,12 +36,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
   const ws = db.one('mounts', x => x.kind === 'workspace')
   const stamp = new Date().toISOString().slice(0, 10)
   if (kind === 'ppt') {
-    const slides = docs.length ? docs.slice(0, 6).map((d, i) => ({
-      title: `${i + 1}. 源自《${d.name.replace(/\.[^.]+$/, '')}》的核心研判`,
-      bullets: d.text.split(/\n|。/).map(s => s.trim()).filter(s => s.length > 10 && s.length < 95).slice(0, 5),
-    })) : [{ title: `${p.name} 核心投资逻辑与准入进展`, bullets: ['行业高景气度与技术壁垒突出', '财务表现稳健，现金流匹配估值区间', '下一步推进投委会表决门禁'] }]
+    const slides = buildRichPptSlides(p, docs, snippets)
     const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成`, slides, sources: srcNames, theme })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `麦肯锡咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · 源自 ${docs.length} 份勾选资料）` })
+    const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
+    await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: 'Studio 麦肯锡8页PPT引擎', sources: docs.length, note: '8页麦肯锡咨询版式PPT' })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `麦肯锡咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份勾选资料）` })
   }
   if (kind === 'word' || kind === 'report') {
     const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets)
@@ -44,9 +50,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
     return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${docs.length} 个来源 · 完整八章深度报告` })
   }
   if (kind === 'table' || kind === 'xlsx') {
+    const baseSheets = sheetsFromMarkdown(buildComprehensiveMarkdown(p, '尽调清单', docs, snippets), '核验表')
     const rows = (snippets.length ? snippets : ['核心指标正常 [1]']).map((s, i) => ({ idx: `E-${i + 1}`, finding: s, src: srcNames[i % Math.max(1, srcNames.length)] || '项目资料', status: '已溯源核对' }))
-    const buf = await renderXlsx({ title: `${p.name} · 勾选资料结构化数据表`, sheets: [{ name: '核验数据表', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '提取事实与指标', key: 'finding', width: 64 }, { header: '对应勾选来源', key: 'src', width: 32 }, { header: '状态', key: 'status', width: 14 }], rows }] })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_数据表格_${stamp}.xlsx`, buffer: buf, kind: 'xlsx', sourceCount: docs.length, summary: `结构化数据表 XLSX（源自 ${docs.length} 份勾选资料）` })
+    const sheets = [...baseSheets, { name: '4-勾选资料逐条溯源台账', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '提取事实与量化指标', key: 'finding', width: 64 }, { header: '对应勾选来源', key: 'src', width: 32 }, { header: '核对状态', key: 'status', width: 14 }], rows }]
+    const buf = await renderXlsx({ title: `${p.name} · 四维投研核验数据表`, sheets })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_数据表格_${stamp}.xlsx`, buffer: buf, kind: 'xlsx', sourceCount: docs.length, summary: `四工作表核验台账 XLSX（源自 ${docs.length} 份勾选资料）` })
   }
   const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与双人对谈', video: '视频概览脚本' }
   const label = labelMap[kind] || '专项成果'
