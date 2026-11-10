@@ -26,6 +26,7 @@ import { listProjectArtifacts, openProjectFolderOrFile } from './nb-folder.mjs'
 import { buildFollowUps, generateStudioArtifact } from './nb-studio-gen.mjs'
 import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
 import { getOsState, dispatchAgentOs, inlineCoCreateRewrite, toggleAutoTask } from './nb-qwen-os.mjs'
+import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow } from './nb-dify-dsl.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -242,6 +243,7 @@ export function createApi(ctx) {
     'nb.os.dispatch': (user, b) => dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
     'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
+    'nb.dify.run': (user, b) => runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
     'nb.folder.open': (user, b) => {
       const p = project(user, b.projectId)
       const ws = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
@@ -577,6 +579,10 @@ export function createApi(ctx) {
     'nb.notes': (user, q) => listNotes(db, project(user, q.get('projectId')).id),
     'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
+    'nb.dify.templates': (user, q) => {
+      const p = q.get('projectId') ? project(user, q.get('projectId')) : null
+      return { templates: DIFY_WORKFLOW_TEMPLATES, sampleYaml: exportDifyDslYaml(q.get('tplId') || 'dify_word_bridge', p || {}) }
+    },
     'nb.slides': async (user, q) => {
       const d = deliverable(user, q.get('id'))
       const text = org.redact(user, await deliverables.versionText(d, q.get('v')))

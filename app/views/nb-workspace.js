@@ -1,5 +1,5 @@
 // 优势资本投研 三栏项目工作空间：左栏（左上本地 PPT/Word/录音转文字工坊 + 左下资料源）| 中栏（流程进度%+插件提交 + 对话）| 右栏（笔记与各种看板）
-import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, levelTag } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, levelTag, drawer, drawerHead } from '/api/investai?asset=ui.js'
 
 async function loadNbProject() {
   if (!S.sel) S.sel = D()?.projects?.[0]?.id
@@ -114,6 +114,7 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
+      <button class="btn sm pri" data-act="nb-dify-open" data-p="${p.id}">🔗 Dify工作流</button>
       <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 录音转写</button>
       <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订PPT</button>
       <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订文书</button></div>
@@ -192,6 +193,31 @@ Object.assign(ACT, {
   'nb-cfg-mb': el => { S.studioCfg ??= {}; S.studioCfg.targetMB = Number(el.value) || 6; if ($('#nbMbVal')) $('#nbMbVal').textContent = `~${S.studioCfg.targetMB} MB` },
   'nb-cfg-theme': el => { S.studioCfg ??= {}; S.studioCfg.theme = el.value || 'mck' },
   'nb-cfg-den': el => { S.studioCfg ??= {}; S.studioCfg.density = el.value || 'standard' },
+  'nb-dify-open': async el => {
+    const pid = el.dataset.p || S.sel
+    const data = await get('nb.dify.templates', { projectId: pid })
+    S.difySt = { pid, tpls: data.templates || [], curId: data.templates?.[0]?.id || 'dify_word_bridge', yaml: data.sampleYaml || '', trace: null }
+    renderDifyDrawer()
+  },
+  'nb-dify-tpl': async el => {
+    const pid = S.difySt?.pid || S.sel
+    const data = await get('nb.dify.templates', { projectId: pid, tplId: el.value })
+    S.difySt = { ...S.difySt, curId: el.value, yaml: data.sampleYaml || '', trace: null }
+    renderDifyDrawer()
+  },
+  'nb-dify-run': async () => {
+    const st = S.difySt || { pid: S.sel, curId: 'dify_word_bridge' }
+    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
+    toast('🔗 正在按 Dify DSL 节点拓扑执行工作流并渲染成果…')
+    const r = await act('nb.dify.run', { projectId: st.pid, workflowId: st.curId, dslYaml: $('#nbDifyYaml')?.value, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density, autoSubmit: !!$('#nbDifyAutoSub')?.checked })
+    if (r) {
+      S.difySt.trace = r.trace
+      toast(`✅ Dify工作流「${r.workflowName}」执行完毕，已产出《${r.artifact.name}》`, 'ok')
+      S.project = await get('project', { id: st.pid })
+      renderDifyDrawer()
+      hooks.refresh()
+    }
+  },
   'nb-make': async el => {
     const k = el.dataset.k
     const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
@@ -232,3 +258,24 @@ Object.assign(ACT, {
 document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); S.centerTab === 'im' ? ACT['nb-os-send']({ dataset: { p: S.sel } }) : ACT['nb-chat-send']() } })
 document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (a?.startsWith('nb-cfg-') && ACT[a]) ACT[a](e.target) })
 VIEWS.notebook = renderNbWorkspace
+
+function renderDifyDrawer() {
+  const st = S.difySt || { tpls: [], curId: 'dify_word_bridge', yaml: '' }
+  const cur = st.tpls.find(t => t.id === st.curId) || st.tpls[0] || {}
+  drawer(`${drawerHead('🔗 Dify DSL 投研工作流编排中心 (兼容 DifyAIA v0.2.0)', '内置本地零依赖 Sidecar 渲染桥接：无需额外部署 Python Flask 即可直接执行 Dify 工作流并产出 Word / PPT / Excel / 导图 / 压力测试')}
+    <div class="body">
+      <label class="f">选择预置投研 Dify 工作流模板（或直接在下方粘贴任意 Dify .yml DSL）
+        <select class="select" data-act="nb-dify-tpl">${st.tpls.map(t => `<option value="${t.id}" ${t.id === st.curId ? 'selected' : ''}>${esc(t.name)}（源自 ${esc(t.origin)}）</option>`).join('')}</select></label>
+      <div class="box" style="margin:8px 0"><b>节点拓扑流（Workflow Graph Nodes）</b>
+        <div class="row" style="flex-wrap:wrap;margin-top:6px">${(cur.nodes || []).map((n, i) => `<span class="pill st-3">${i + 1}. ${esc(n)}</span>`).join(' → ')}</div>
+        <div class="dim" style="margin-top:6px;font-size:11.5px">${esc(cur.desc || '')}</div></div>
+      ${st.trace ? `<div class="box" style="margin:8px 0;border-color:#10B981"><b>✅ 节点执行追踪</b><div class="row" style="flex-wrap:wrap;margin-top:6px">${st.trace.map(t => `<span class="tag blue">✓ ${esc(t.node)} (${t.ms}ms)</span>`).join('')}</div></div>` : ''}
+      <label class="f">Dify Workflow DSL (v0.2.0 YAML · 可直接修改节点或导入外部 .yml)
+        <textarea class="input area mono" id="nbDifyYaml" style="height:210px">${esc(st.yaml)}</textarea></label>
+      <div class="row" style="margin-top:10px">
+        <label class="dim"><input type="checkbox" id="nbDifyAutoSub" checked> 执行完成后自动报送至当前阶段复核节点</label>
+        <span class="grow"></span>
+        <button class="btn pri" data-act="nb-dify-run">▶ 立即运行此 Dify 工作流</button>
+      </div>
+    </div>`, true)
+}
