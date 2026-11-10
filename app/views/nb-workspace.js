@@ -1,11 +1,18 @@
 // 优势资本投研 三栏项目工作空间：左栏（左上本地 PPT/Word/录音转文字工坊 + 左下资料源）| 中栏（流程进度%+插件提交 + 对话）| 右栏（笔记与各种看板）
 import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, levelTag, drawer, drawerHead } from '/api/investai?asset=ui.js'
 
+function getRawSourceFiles(x) {
+  const all = x?.files ?? []
+  const raw = all.filter(f => f.mountId !== 'm_ws' && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
+  return raw.length ? raw : all
+}
+
 async function loadNbProject() {
   if (!S.sel) S.sel = D()?.projects?.[0]?.id
   if (!S.sel) return
   S.project = await get('project', { id: S.sel }).catch(e => ({ error: e.message }))
-  if (S.project?.files && !S.ctx.fileIds.length) S.ctx.fileIds = S.project.files.slice(0, 6).map(f => f.id)
+  const raw = getRawSourceFiles(S.project)
+  if (raw.length && !raw.some(f => S.ctx.fileIds.includes(f.id))) S.ctx.fileIds = raw.map(f => f.id)
   if (S.view === 'notebook') renderNbWorkspace($('#view'))
   hooks.renderAI?.()
 }
@@ -19,70 +26,65 @@ export function renderNbWorkspace(v) {
   const x = S.project
   if (x.error) { v.innerHTML = `<div class="page"><div class="empty">${esc(x.error)}</div></div>`; return }
   const p = x.project
+  const rawFiles = getRawSourceFiles(x)
+  if (rawFiles.length && !rawFiles.some(f => S.ctx.fileIds.includes(f.id))) S.ctx.fileIds = rawFiles.map(f => f.id)
   const f = p.flow ?? { overallPct: p.progress ?? 0, curStagePct: 0, stageDetails: [], submissions: [] }
   const checked = new Set(S.ctx.fileIds)
   v.innerHTML = `<div class="nb-ws">
-    ${renderLeftPane(x, p, checked)}
-    ${renderCenterPane(x, p, f)}
+    ${renderLeftPane(rawFiles, p, checked)}
+    ${renderCenterPane(x, p, f, rawFiles)}
     ${renderRightNotes(x, p)}
   </div>`
 }
 
-function renderLeftPane(x, p, checked) {
+function renderLeftPane(rawFiles, p, checked) {
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>项目底稿资料 (${x.files.length})</b><span class="grow"></span>
+    <div class="nb-col-hd"><b style="white-space:nowrap">项目底稿资料 (${rawFiles.length})</b><span class="grow"></span>
       <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 项目档案室</button></div>
     <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 上传底稿</button>
       <button class="btn sm pri" data-act="nb-tyc-open" data-p="${p.id}">🔍 天眼查穿透</button>
       <button class="btn sm" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 纪要</button></div>
-    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">勾选底稿以定向编制右侧工作成果</span><span class="grow"></span>
-      <label class="dim" style="font-size:11.5px;cursor:pointer"><input type="checkbox" class="ck" data-act="nb-src-all" ${checked.size && checked.size === x.files.length ? 'checked' : ''}> 全选</label></div>
-    <div class="nb-sources">${x.files.map((f, idx) => `<label class="nb-src-row">
+    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">已勾选 ${checked.size} 份原始底稿参与编制</span><span class="grow"></span>
+      <label class="dim" style="font-size:11.5px;cursor:pointer"><input type="checkbox" class="ck" data-act="nb-src-all" ${checked.size && checked.size >= rawFiles.length ? 'checked' : ''}> 全选</label></div>
+    <div class="nb-sources">${rawFiles.map((f, idx) => `<label class="nb-src-row">
       <span class="mono dim">${idx + 1}</span>${ficon(f.ext, true)}<span class="ell grow" title="${esc(f.name)}">${esc(f.name)}</span>
-      <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}></label>`).join('') || '<div class="empty">请点击上方「+ 上传底稿资料」</div>'}
+      <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}></label>`).join('') || '<div class="empty">请点击上方「+ 上传底稿」</div>'}
     </div>
   </div>`
 }
 
-function renderCenterPane(x, p, f) {
+function renderCenterPane(x, p, f, rawFiles) {
   const d = D()
   const msgs = S.chat.slice(-16)
   const chk = x.deliverables.find(z => z.checkout)
-  const os = x.osState ?? { messages: [], autoTasks: [] }
-  S.centerTab ??= 'im'
   return `<div class="nb-col">
     <div class="nb-flow-strip">
-      <div class="row"><button class="btn ghost sm" data-act="go" data-view="workbench">${icon('left', 13)}投研项目总览</button>
-        <b class="ell" style="font-size:14.5px">${esc(p.name)}</b><span class="pill st-3">${esc(p.stage)} · 全周期进度 ${f.overallPct}%</span>
+      <div class="row" style="flex-wrap:nowrap">
+        <button class="btn ghost sm" style="white-space:nowrap" data-act="go" data-view="workbench">${icon('left', 13)}项目总览</button>
+        <b class="ell" style="font-size:14.5px">${esc(p.name)}</b>
+        <span class="pill st-3" style="white-space:nowrap">${esc(p.stage)} · ${f.overallPct}%</span>
         <span class="grow"></span>
-        <button class="btn sm ${S.centerTab === 'im' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="im">💬 项目组协同流 (IM×成果共创)</button>
-        <button class="btn sm ${S.centerTab === 'qa' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="qa">✨ 底稿溯源研判</button>
-        <button class="nb-api-pill" data-act="nb-api"><span class="dot ${d.model.ok ? 'ok' : 'warn'}"></span><span>${esc(d.model.ok ? d.model.label : '本地离线引擎')}</span></button></div>
+        ${chk ? `<button class="btn sm pri" style="white-space:nowrap" data-act="nb-plug-sub" data-p="${p.id}" data-d="${chk.id}" data-ch="local-checkin">回传修订件</button>` : ''}
+        <button class="btn sm pri" style="white-space:nowrap" data-act="nb-flowboard" data-p="${p.id}">阶段门禁与投决 ›</button>
+      </div>
       <div class="nb-stage-bar"><i style="width:${f.overallPct}%"></i></div>
-      <div class="row" style="flex-wrap:wrap">
-        <span class="dim" style="font-size:11px">⚡ 机构自动化协同流：</span>
-        ${(os.autoTasks ?? []).map(at => `<button class="btn sm ${at.enabled ? 'pri' : 'ghost'}" style="padding:2px 7px;font-size:10.5px" data-act="nb-os-at" data-p="${p.id}" data-id="${at.id}" title="${esc(at.desc)}">${at.enabled ? '✓ ' : ''}${esc(at.name)}</button>`).join('')}
-        <span class="grow"></span>
-        ${chk ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-d="${chk.id}" data-ch="local-checkin">回传本地修订件</button>` : ''}
+      <div class="row" style="flex-wrap:wrap;gap:4px">
+        ${f.stageDetails.map(st => `<span class="nb-st-node ${st.state}">${st.state === 'done' ? '✓' : st.index + 1}. ${esc(st.name)} <b>${st.pct}%</b></span>`).join('')}
       </div>
     </div>
-    <div class="abody" style="flex:1;padding:14px;overflow:auto">
-      ${S.centerTab === 'im' ? (os.messages ?? []).map(m => `<div class="msg ${m.role === 'agent' ? 'ai' : 'me'}" style="margin-bottom:10px;border-left:3px solid ${m.role === 'agent' ? '#3B82F6' : '#10B981'}">
-        <div class="row" style="margin-bottom:4px"><b style="font-size:12px">${esc(m.sender)}</b><span class="tag blue">${esc(m.badge || '群协同')}</span></div>
-        <div class="md">${md(m.text || '')}</div>
-        ${m.actions?.length ? `<div class="row" style="flex-wrap:wrap;margin-top:6px">${m.actions.map(a => `<span class="pill st-3" style="font-size:10.5px">${esc(a)}</span>`).join('')}</div>` : ''}
-      </div>`).join('') : (msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
-        <div class="dim" style="font-size:11px;margin-bottom:3px">${m.role === 'user' ? esc(d.me.name) : '优势资本 · 智能投研助手'}</div>
-        <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于勾选来源深度分析…' : ''))}</div>
-        ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 保存到笔记</button></div>` : ''}</div>`).join('')
-        : `<div class="box"><b>基于已勾选 ${S.ctx.fileIds.length} 个来源的深度工作流</b></div>`)}
-      <div class="nb-follow-grid">${(x.followUps ?? []).map(q => `<button class="nb-follow-card" data-act="nb-q" data-q="${esc(q)}"><span>${esc(q)}</span><span class="dim">↳ 点击在群内一键执行跨工具任务</span></button>`).join('')}</div>
+    <div class="abody" style="flex:1;padding:16px;overflow:auto">
+      ${msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
+        <div class="dim" style="font-size:11px;margin-bottom:4px">${m.role === 'user' ? esc(d.me.name) : '优势资本 · 底稿溯源投研助手'}</div>
+        <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于已勾选底稿深度研判…' : ''))}</div>
+        ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 存入尽调纪要</button></div>` : ''}</div>`).join('')
+        : `<div class="box" style="margin-bottom:14px"><b>✨ 底稿溯源深度研判（已锚定左侧勾选的 ${S.ctx.fileIds.length || rawFiles.length} 份原始底稿）</b>
+          <div class="dim" style="margin-top:6px;line-height:1.6">向 AI 提问任何有关财务勾稽、客户合同、估值条款或潜在诉讼的问题，回答将逐句标注 <code>[n]</code> 底稿出处；也可直接点击下方推荐追问或右侧九宫格一键编制专业成果。</div></div>`}
+      <div class="nb-follow-grid">${(x.followUps ?? []).map(q => `<button class="nb-follow-card" data-act="nb-q" data-q="${esc(q)}"><span>${esc(q)}</span><span class="dim">↳ 点击基于已勾选底稿立即深度研判</span></button>`).join('')}</div>
     </div>
     <div class="composer" style="padding:10px 14px;border-top:1px solid var(--line)"><div class="row">
-      <input class="input grow" id="nbChatInput" placeholder="在项目群说一句话：让 Agent 同时改文档、更新表格、发群消息并提交业务流程…">
-      <span class="dim" style="font-size:12px">${S.ctx.fileIds.length} 个来源</span>
-      <button class="btn pri" data-act="nb-os-send" data-p="${p.id}">⚡ 群聊协同执行</button>
-      <button class="btn ghost ico" data-act="nb-chat-send" title="纯问答">${icon('send', 14)}</button></div></div>
+      <input class="input grow" id="nbChatInput" placeholder="围绕左侧已勾选底稿提问（自动标注 [1][2] 原文出处）…">
+      <span class="dim" style="font-size:12px;white-space:nowrap">${S.ctx.fileIds.length || rawFiles.length} 份底稿</span>
+      <button class="btn pri" style="white-space:nowrap" data-act="nb-chat-send">${icon('send', 13)} 提问研判</button></div></div>
   </div>`
 }
 
@@ -115,17 +117,17 @@ function renderRightNotes(x, p) {
     ['quiz', '#60A5FA', '❓ 答辩测验'],
   ]
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
-      <button class="btn sm ghost" data-act="nb-dify-open" data-p="${p.id}" title="机构标准工作流模板与AI配额治理">🏛️ 模板与配额</button>
-      <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}" title="多模态语音降噪与四路意图路由">🎙️ 语音路由</button>
-      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">PPT工坊</button>
-      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">文书工坊</button></div>
+    <div class="nb-col-hd"><b style="white-space:nowrap">投研成果编制中心</b><span class="grow"></span>
+      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-dify-open" data-p="${p.id}">🏛️ 模板与配额</button>
+      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 语音路由</button></div>
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
     <div style="padding:6px 12px;border-top:1px solid var(--line);background:#0B1528;font-size:11.5px">
-      <div class="row" style="cursor:pointer" data-act="nb-cfg-toggle">
-        <span>🎛️ 规格：<b style="color:#60A5FA">${cfg.pageCount}页/章</b> · <b style="color:#34D399">~${cfg.targetMB}MB</b> · <span class="dim">${cfg.theme === 'swiss' ? '瑞士网格' : cfg.theme === 'emerald' ? '黑金翡翠' : '麦肯锡深海蓝'}</span></span>
-        <span class="grow"></span><span class="lnk">${S.showStudioCfg ? '收起参数 ▴' : '调节页数/大小 ▾'}</span>
+      <div class="row" style="flex-wrap:nowrap">
+        <span style="cursor:pointer" data-act="nb-cfg-toggle">🎛️ 规格：<b style="color:#60A5FA">${cfg.pageCount}页/章</b> · <b style="color:#34D399">~${cfg.targetMB}MB</b> <span class="lnk">${S.showStudioCfg ? '▴' : '▾'}</span></span>
+        <span class="grow"></span>
+        <button class="btn sm ghost" style="padding:2px 6px;font-size:11px" data-act="nb-studio-ppt" data-p="${p.id}">PPT工坊</button>
+        <button class="btn sm ghost" style="padding:2px 6px;font-size:11px" data-act="nb-studio-word" data-p="${p.id}">文书工坊</button>
       </div>
       ${S.showStudioCfg ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
         <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(4–24)</span></span><span class="grow"></span>
@@ -191,9 +193,9 @@ Object.assign(ACT, {
     }
   },
   'nb-src-ck': el => { const s = new Set(S.ctx.fileIds); el.checked ? s.add(el.dataset.id) : s.delete(el.dataset.id); S.ctx.fileIds = [...s]; hooks.refresh() },
-  'nb-src-all': el => { const all = S.project?.files?.map(f => f.id) ?? []; S.ctx.fileIds = el?.checked === false ? [] : (S.ctx.fileIds.length === all.length ? [] : all); hooks.refresh() },
-  'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; S.centerTab === 'im' ? ACT['nb-os-send'](el) : ACT['nb-chat-send']() } },
-  'nb-chat-send': () => { const v = $('#nbChatInput')?.value?.trim(); if (!v) return; S.centerTab = 'qa'; hooks.fill(v); hooks.send(); $('#nbChatInput').value = ''; hooks.refresh() },
+  'nb-src-all': el => { const all = getRawSourceFiles(S.project).map(f => f.id); S.ctx.fileIds = el?.checked === false ? [] : (S.ctx.fileIds.length >= all.length ? [] : all); hooks.refresh() },
+  'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; ACT['nb-chat-send']() } },
+  'nb-chat-send': () => { const v = $('#nbChatInput')?.value?.trim(); if (!v) return; hooks.fill(v); hooks.send(); $('#nbChatInput').value = ''; hooks.refresh() },
   'nb-note-add': async el => {
     const r = await act('nb.note.save', { projectId: el.dataset.p, title: `投研笔记 ${new Date().toLocaleTimeString('zh-CN')}`, content: '# 新建投研笔记\n\n- 记录尽调关键发现与看板待办', board: 'tasks' }, '✅ 已新建笔记')
     if (r) { S.project.notes = r; hooks.refresh() }
@@ -297,7 +299,7 @@ Object.assign(ACT, {
   },
 })
 
-document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); S.centerTab === 'im' ? ACT['nb-os-send']({ dataset: { p: S.sel } }) : ACT['nb-chat-send']() } })
+document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ACT['nb-chat-send']() } })
 document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (a?.startsWith('nb-cfg-') && ACT[a]) ACT[a](e.target) })
 VIEWS.notebook = renderNbWorkspace
 

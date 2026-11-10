@@ -48,10 +48,9 @@ function renderHdr() {
     <div class="logo"><span class="mk">AC /</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')} · DSH 插件版</span></div>
     <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或直接提问…" autocomplete="off"><span class="kbd">⌘ K</span></div>
     <button class="nb-api-pill" data-act="nb-api" title="点击配置本地离线 API / DSH / 云端 API"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
-    <button class="btn ghost ico" data-act="help" title="帮助：快速上手、名词解释、常见问题">${icon('info', 17)}</button>
+    <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span>设置与帮助</span></button>
     <button class="btn ghost ico bellbtn" data-act="notifications" title="通知">${icon('bell', 17)}${d.unread ? `<i>${d.unread > 99 ? '99+' : d.unread}</i>` : ''}</button>
-    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>
-    ${!S.aiOpen ? `<button class="btn ghost ico" data-act="ai-toggle" title="打开 AI 协作">${icon('bot', 17)}</button>` : ''}`
+    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>`
   const input = $('#gsearch')
   input.value = searchTerm
   input.addEventListener('input', () => { searchTerm = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 180) })
@@ -82,7 +81,8 @@ function renderNav() {
 }
 function renderChrome() {
   const hideRight = !S.aiOpen || ['notebook', 'workbench', 'flowboard'].includes(S.view)
-  $('#app').classList.toggle('embed', EMBED)
+  const full3Col = ['notebook', 'flowboard'].includes(S.view)
+  $('#app').classList.toggle('embed', EMBED || full3Col)
   $('#app').classList.toggle('ai-off', hideRight)
   renderHdr(); renderNav()
 }
@@ -452,6 +452,17 @@ document.addEventListener('keydown', e => {
 ACT.explain = el => toast(el.dataset.why ?? '当前不可操作', 'deny')
 ACT.help = () => openHelp()
 ACT['tour-start'] = () => { closeDrawer(); startTour() }
+ACT['top-settings-menu'] = el => {
+  const r = el.getBoundingClientRect()
+  popup(`<div class="hd">⚙️ 系统设置 · 账户 · 帮助中心</div>
+    <div class="it" data-act="nb-api">${icon('spark', 14)}<div class="grow"><b>AI 模型与 API 路由设置</b><div class="dim" style="font-size:11px">配置 DeepSeek / 本地 Ollama / 混合路由</div></div></div>
+    <div class="it" data-act="persona">${icon('users', 14)}<div class="grow"><b>账户与岗位视角切换</b><div class="dim" style="font-size:11px">切换 15 个一级市场岗位体验四层权限</div></div></div>
+    <div class="it" data-act="go" data-view="settings">${icon('set', 14)}<div class="grow"><b>机构治理与系统配置</b><div class="dim" style="font-size:11px">人员角色、流程模板、密级规则与审计</div></div></div>
+    <div class="it" data-act="go" data-view="knowledge">${icon('kb', 14)}<div class="grow"><b>全机构底稿资料库</b><div class="dim" style="font-size:11px">管理 NAS 挂载目录与项目原始底稿</div></div></div>
+    <div class="it" data-act="rescan">${icon('refresh', 14)}<div class="grow"><b>重新扫描本地底稿目录</b><div class="dim" style="font-size:11px">同步最新放入文件夹的 PDF/Word/Excel</div></div></div>
+    <div class="it" data-act="help">${icon('info', 14)}<div class="grow"><b>使用帮助与一级市场术语指南</b><div class="dim" style="font-size:11px">快速上手、名词解释与常见问题</div></div></div>
+    <div class="it" data-act="tour-start">${icon('play', 14)}<div class="grow"><b>重新播放界面导览</b></div></div>`, r.right - 290, r.bottom + 6, 290)
+}
 
 const ROLE_GUIDE = [
   ['项目经理 / 投资经理', '在「项目管理」录入项目机会 → 打开项目，按「下一步」逐项完成：AI 起草或上传成果 → 提交审核 → 定稿 → 发起决策。会议录音在「会议纪要」整理。'],

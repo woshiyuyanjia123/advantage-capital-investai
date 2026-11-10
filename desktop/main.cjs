@@ -97,8 +97,10 @@ const accountsXlsx = () => path.join(__dirname, 'app-src', 'docs', 'accounts', '
 function createWindow() {
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 680, title: TITLE, show: false, backgroundColor: '#0A1120',
+    autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   })
+  win.setMenuBarVisibility(false)
   const origin = server.url
   const internal = url => url.startsWith(origin) || url === 'about:blank' || url === ''
   // 打印 / 导出 PDF 会打开空白窗口；其他外部链接交给系统浏览器
@@ -115,6 +117,10 @@ function createWindow() {
 }
 
 function buildMenu(userData, login) {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null)
+    return
+  }
   const isMac = process.platform === 'darwin'
   const template = [
     ...(isMac ? [{ label: app.name, submenu: [{ role: 'about', label: `关于 ${TITLE}` }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { role: 'hideOthers', label: '隐藏其他' }, { type: 'separator' }, { role: 'quit', label: '退出' }] }] : []),

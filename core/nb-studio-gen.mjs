@@ -5,6 +5,7 @@ import { writeProjectArtifact } from './nb-folder.mjs'
 import { buildComprehensiveMarkdown, buildRichPptSlides } from './nb-deep-doc.mjs'
 import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml, synthesizeDeepSeekSection } from './nb-nlm-pipeline.mjs'
 import { buildEquityResearchMemoHtml } from './nb-equity-memo.mjs'
+import { planPptDeckWithAi } from './nb-ppt-ai.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
   const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
@@ -29,7 +30,8 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
   }
   const rawSources = allFiles.filter(f => f.mountId !== 'm_ws')
   const pool = rawSources.length ? rawSources : allFiles
-  const picked = (b.fileIds?.length ? allFiles.filter(f => b.fileIds.includes(f.id)) : pool).slice(0, 12)
+  const matched = b.fileIds?.length ? allFiles.filter(f => b.fileIds.includes(f.id)) : []
+  const picked = (matched.length ? matched : pool).slice(0, 12)
   const docs = []
   for (const f of picked) {
     const r = await kb.read(f.id, user).catch(() => null)
@@ -40,14 +42,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
   const ws = db.one('mounts', x => x.kind === 'workspace')
   const stamp = new Date().toISOString().slice(0, 10)
   if (kind === 'ppt') {
-    const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
-    const aiBullets = aiSec ? aiSec.split('\n').map(s => s.replace(/^[-*#\d.]+\s*/, '').trim()).filter(s => s.length > 14 && s.length < 95).slice(0, 5) : []
-    const slides = buildRichPptSlides(p, docs, snippets, { pageCount, density })
-    if (aiBullets.length >= 3) slides.splice(1, 0, { title: `DeepSeek 实时底稿交叉核验：${p.name}核心财务与估值博弈`, bullets: aiBullets })
-    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `基于已勾选 ${docs.length} 份来源 · 规格：${pageCount}页 / 目标~${targetMB}MB`, slides, sources: srcNames, theme, pageCount, targetMB, density })
+    const plan = await planPptDeckWithAi(ai, p, docs, { pageCount, density, userPrompt: b.prompt })
+    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `基于已勾选 ${docs.length} 份底稿 AI 深度编排 · 规格：${pageCount}页 / 目标~${targetMB}MB`, slides: plan.slides, sources: srcNames, theme, pageCount, targetMB, density })
     const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
-    await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: `Studio ${pageCount}页麦肯锡PPT引擎`, sources: docs.length, note: `${pageCount}页 · ${(buf.length / 1048576).toFixed(2)}MB` })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${pageCount}页_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `${pageCount} 页麦肯锡 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份来源）` })
+    await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: `DeepSeek AI 麦肯锡多版式PPT架构师 (${pageCount}页)`, sources: docs.length, note: `${pageCount}页 · ${(buf.length / 1048576).toFixed(2)}MB` })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${pageCount}页_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `${pageCount} 页 AI 咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份来源）` })
   }
   if (kind === 'word' || kind === 'report') {
     const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)

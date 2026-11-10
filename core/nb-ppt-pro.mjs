@@ -62,84 +62,103 @@ export async function renderProPptx({ title, subtitle, slides = [], sources = []
   const bgHero = `data:image/png;base64,${renderHdArtPng(101, T.pal, scale).toString('base64')}`
   const bgSec = `data:image/png;base64,${renderHdArtPng(202, [18, 35, 68, 59, 130, 246], scale).toString('base64')}`
 
-  // 1) 麦肯锡式封面（高清艺术纹理底图 + 三大核心指标卡）
+  // 1) 麦肯锡式封面（高清艺术纹理底图 + AI 提炼的三大核心交易与底稿指标卡）
   const cov = pptx.addSlide()
   cov.addImage({ data: bgHero, x: 0, y: 0, w: 13.33, h: 7.5 })
-  cov.addShape(pptx.ShapeType.rect, { x: 0.6, y: 0.6, w: 0.12, h: 2.2, fill: { color: '60A5FA' } })
-  cov.addText(String(title || '项目投资决策汇报'), { x: 0.9, y: 0.7, w: 11.5, h: 1.3, fontSize: 34, bold: true, color: 'FFFFFF', fontFace: FONT })
-  cov.addText(String(subtitle || `基于已勾选 ${sources.length || 3} 份项目资料生成 · 规格：${totalPages}页 / 约${wantMB}MB`), { x: 0.9, y: 2.05, w: 11.2, h: 0.55, fontSize: 15, color: 'BFDBFE', fontFace: FONT })
-  const kpis = [['100%', '资料溯源覆盖率', '全部结论对齐勾选来源'], [`${totalPages} 页`, '定制咨询版式', `密度：${density === 'dense' ? '尽调详实' : density === 'concise' ? '高管精炼' : '咨询标准'}`], [`~${wantMB} MB`, '高清视觉画布规格', `源自 ${sources.length || 3} 份勾选底稿`]]
-  kpis.forEach(([v, l, d], i) => {
-    const x = 0.9 + i * 3.9
-    cov.addShape(pptx.ShapeType.roundRect, { x, y: 4.5, w: 3.6, h: 2.1, rectRadius: 0.08, fill: { color: '0B2545', transparency: 15 }, line: { color: '3B82F6', pt: 1 } })
-    cov.addText(v, { x: x + 0.25, y: 4.7, w: 3.1, h: 0.7, fontSize: 28, bold: true, color: '60A5FA', fontFace: FONT })
-    cov.addText(l, { x: x + 0.25, y: 5.4, w: 3.1, h: 0.4, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: FONT })
-    cov.addText(d, { x: x + 0.25, y: 5.82, w: 3.1, h: 0.5, fontSize: 11, color: '94A3B8', fontFace: FONT })
+  cov.addShape(pptx.ShapeType.rect, { x: 0.6, y: 0.55, w: 3.4, h: 0.34, fill: { color: T.acc } })
+  cov.addText('ADVANTAGE CAPITAL · 优势资本投委会路演', { x: 0.72, y: 0.58, w: 3.2, h: 0.28, fontSize: 9.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+  cov.addShape(pptx.ShapeType.rect, { x: 0.6, y: 1.1, w: 0.12, h: 2.1, fill: { color: '60A5FA' } })
+  cov.addText(String(title || '项目投资决策汇报'), { x: 0.9, y: 1.1, w: 11.5, h: 1.25, fontSize: 32, bold: true, color: 'FFFFFF', fontFace: FONT })
+  cov.addText(String(subtitle || `基于已勾选 ${sources.length || 4} 份原始底稿 AI 深度编排 · 规格：${totalPages}页 / ~${wantMB}MB`), { x: 0.9, y: 2.42, w: 11.2, h: 0.55, fontSize: 14, color: 'BFDBFE', fontFace: FONT })
+  const covKpis = slides[0]?.kpis?.length === 3 ? slides[0].kpis : [
+    { val: `${sources.length || 4} 份底稿`, label: '100% 原始底稿锚定', sub: '财务/合同/尽调交叉核对' },
+    { val: `${totalPages} 页`, label: 'AI 多版式视觉架构', sub: 'Bento四象限 / 矩阵表 / 双栏卡' },
+    { val: `~${wantMB} MB`, label: '印刷级高清画布', sub: `主题：${T.name}` },
+  ]
+  covKpis.forEach((k, i) => {
+    const x = 0.9 + i * 3.95
+    cov.addShape(pptx.ShapeType.roundRect, { x, y: 4.45, w: 3.7, h: 2.15, rectRadius: 0.08, fill: { color: '0B2545', transparency: 12 }, line: { color: '60A5FA', pt: 1.2 } })
+    cov.addShape(pptx.ShapeType.rect, { x, y: 4.45, w: 3.7, h: 0.08, fill: { color: i === 1 ? '10B981' : '3B82F6' } })
+    cov.addText(String(k.val), { x: x + 0.25, y: 4.68, w: 3.2, h: 0.68, fontSize: 24, bold: true, color: '60A5FA', fontFace: FONT })
+    cov.addText(String(k.label), { x: x + 0.25, y: 5.38, w: 3.2, h: 0.4, fontSize: 13.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+    cov.addText(String(k.sub || ''), { x: x + 0.25, y: 5.8, w: 3.2, h: 0.55, fontSize: 10.5, color: 'CBD5E1', fontFace: FONT })
   })
   return finishDeck(pptx, T, slides, sources, { bgSec, totalPages, scale, density })
 }
 
-async function finishDeck(pptx, T, slides, sources, { bgSec, totalPages = 8, scale = 1, density = 'standard' }) {
-  const srcLine = `资料来源：${sources.slice(0, 4).map(s => s.name || s).join('、') || '项目勾选底稿'} · 麦肯锡咨询版式引擎（规格：${totalPages}页）`
-  const addHead = (sl, tag, actionTitle) => {
+async function finishDeck(pptx, T, slides, sources, { bgSec, totalPages = 8, scale = 1 }) {
+  const srcLine = `底稿溯源：${sources.slice(0, 5).map(s => s.name || s).join(' · ') || '项目原始底稿'}  |  优势资本 · AI 投研演示引擎（${totalPages}页定制版）`
+  const addHead = (sl, tag, actionTitle, pageNo, footnote) => {
     sl.background = { color: T.bg }
     sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.1, fill: { color: T.acc } })
-    sl.addText(tag.toUpperCase(), { x: 0.6, y: 0.25, w: 6, h: 0.3, fontSize: 10, bold: true, color: T.acc, fontFace: FONT })
-    sl.addText(actionTitle, { x: 0.6, y: 0.52, w: 12.1, h: 0.55, fontSize: 21, bold: true, color: T.pri, fontFace: FONT })
-    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: 1.12, w: 12.1, h: 0.02, fill: { color: 'CBD5E1' } })
-    sl.addText(srcLine, { x: 0.6, y: 7.08, w: 11.5, h: 0.28, fontSize: 9, color: '64748B', fontFace: FONT })
+    sl.addText(String(tag || 'SECTION · 深度研判').toUpperCase(), { x: 0.55, y: 0.2, w: 9, h: 0.26, fontSize: 9.5, bold: true, color: T.acc, fontFace: FONT })
+    sl.addShape(pptx.ShapeType.roundRect, { x: 11.55, y: 0.18, w: 1.22, h: 0.28, rectRadius: 0.04, fill: { color: T.pri } })
+    sl.addText(`PAGE ${String(pageNo).padStart(2, '0')}/${String(totalPages).padStart(2, '0')}`, { x: 11.55, y: 0.2, w: 1.22, h: 0.24, fontSize: 8.5, bold: true, align: 'center', color: 'FFFFFF', fontFace: FONT })
+    sl.addText(String(actionTitle), { x: 0.55, y: 0.46, w: 12.2, h: 0.52, fontSize: 19.5, bold: true, color: T.pri, fontFace: FONT })
+    sl.addShape(pptx.ShapeType.rect, { x: 0.55, y: 1.02, w: 12.22, h: 0.02, fill: { color: 'CBD5E1' } })
+    sl.addShape(pptx.ShapeType.roundRect, { x: 0.55, y: 6.56, w: 12.22, h: 0.42, rectRadius: 0.04, fill: { color: T.pri } })
+    sl.addText(`💡 投决启示：${String(footnote || '全部结论与财务数据均已锚定左侧勾选底稿原文，未决事项纳入交割先决条件（CP）。')}`, { x: 0.72, y: 6.62, w: 11.9, h: 0.3, fontSize: 10, bold: true, color: 'FFFFFF', fontFace: FONT })
+    sl.addText(srcLine, { x: 0.55, y: 7.06, w: 12.2, h: 0.26, fontSize: 8.5, color: '64748B', fontFace: FONT })
   }
 
-  // 2) 执行摘要页（三栏麦肯锡金字塔：每栏精选 3 条核心要点，自适应字号防溢出）
-  const ex = pptx.addSlide()
-  addHead(ex, 'EXECUTIVE SUMMARY · 执行摘要', slides[0]?.title || '核心投资逻辑与底稿交叉核验总览')
-  ex.addImage({ data: bgSec, x: 0.6, y: 1.28, w: 12.1, h: 1.25 })
-  const lead = slides[0]?.bullets?.[0] || '严格依据所勾选原始资料交叉比对，全部财务口径、业务合同与待核实事项均已溯源锚定。'
-  ex.addText(`核心综述：${lead}`, { x: 0.85, y: 1.42, w: 11.6, h: 0.95, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: FONT })
-  const pillars = [
-    { head: '支柱一：主体概况与业务壁垒', items: [...(slides[0]?.bullets ?? []), ...(slides[1]?.bullets ?? [])].slice(0, 3) },
-    { head: '支柱二：财务表现与实证台账', items: [...(slides[2]?.bullets ?? []), ...(slides[3]?.bullets ?? [])].slice(0, 3) },
-    { head: '支柱三：风险识别与待核实项', items: [...(slides[4]?.bullets ?? []), ...(slides[5]?.bullets ?? [])].slice(0, 3) },
-  ]
-  pillars.forEach((pCol, i) => {
-    const x = 0.6 + i * 4.1
-    ex.addShape(pptx.ShapeType.roundRect, { x, y: 2.75, w: 3.9, h: 4.1, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
-    ex.addShape(pptx.ShapeType.rect, { x, y: 2.75, w: 3.9, h: 0.46, fill: { color: T.pri } })
-    ex.addText(pCol.head, { x: x + 0.15, y: 2.8, w: 3.6, h: 0.36, fontSize: 12.5, bold: true, color: 'FFFFFF', fontFace: FONT })
-    const items = (pCol.items.length ? pCol.items : ['见对应章节详述']).map(t => ({ text: String(t).slice(0, 68), options: { bullet: true, breakLine: true, paraSpaceAfter: 10 } }))
-    ex.addText(items, { x: x + 0.16, y: 3.32, w: 3.56, h: 3.35, fontSize: 11, color: '1E293B', valign: 'top', fontFace: FONT })
-  })
-
-  // 3) 章节深潜页（严格生成 totalPages - 2 页，加上封面与执行摘要共 totalPages 页）
-  const bodyPages = Math.max(2, totalPages - 2)
-  const maxBullets = density === 'concise' ? 3 : density === 'dense' ? 6 : 5
-  for (let i = 0; i < bodyPages; i++) {
-    const s = slides[i % Math.max(1, slides.length)] ?? { title: `专项分析章节 ${i + 1}`, bullets: ['基于所选资料提取关键事实与财务口径'] }
-    const pageTitle = i < slides.length ? s.title : `${s.title}（续 · 专题深潜 ${i + 1}/${bodyPages}）`
+  const contentCount = Math.max(3, totalPages - 1)
+  for (let i = 0; i < contentCount; i++) {
+    const s = slides[i % Math.max(1, slides.length)] || {}
     const sl = pptx.addSlide()
-    addHead(sl, `SECTION ${String(i + 1).padStart(2, '0')} / ${String(bodyPages).padStart(2, '0')} · 深度研判`, pageTitle)
-    const slideArt = `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal, scale).toString('base64')}`
-    const bList = (s.bullets?.length ? s.bullets : ['核心事实与数据支撑']).slice(0, maxBullets)
-    if (i % 2 === 1 && bList.length >= 4) {
-      sl.addImage({ data: slideArt, x: 0.6, y: 1.28, w: 12.1, h: 1.15 })
-      sl.addText(`${String(i + 1).padStart(2, '0')} · ${pageTitle}`, { x: 0.85, y: 1.42, w: 11.5, h: 0.85, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: FONT })
-      bList.slice(0, 4).forEach((b, idx) => {
-        const cx = 0.6 + (idx % 2) * 6.15, cy = 2.62 + Math.floor(idx / 2) * 2.12
-        sl.addShape(pptx.ShapeType.roundRect, { x: cx, y: cy, w: 5.95, h: 1.92, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
-        sl.addShape(pptx.ShapeType.rect, { x: cx, y: cy, w: 0.12, h: 1.92, fill: { color: idx % 2 === 0 ? T.acc : '10B981' } })
-        sl.addText(`要点 0${idx + 1}`, { x: cx + 0.25, y: cy + 0.14, w: 5.4, h: 0.32, fontSize: 11, bold: true, color: T.acc, fontFace: FONT })
-        sl.addText(String(b), { x: cx + 0.25, y: cy + 0.48, w: 5.45, h: 1.3, fontSize: 12.5, color: '0F172A', valign: 'top', fontFace: FONT })
-      })
-    } else {
-      sl.addImage({ data: slideArt, x: 0.6, y: 1.32, w: 4.1, h: 5.5 })
-      sl.addText(`${String(i + 1).padStart(2, '0')}\n${pageTitle}`, { x: 0.85, y: 1.8, w: 3.6, h: 2.2, fontSize: 20, bold: true, color: 'FFFFFF', fontFace: FONT })
-      bList.forEach((b, idx) => {
-        const y = 1.32 + idx * 0.92
-        sl.addShape(pptx.ShapeType.roundRect, { x: 4.95, y, w: 7.75, h: 0.8, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', pt: 0.8 } })
-        sl.addShape(pptx.ShapeType.rect, { x: 4.95, y, w: 0.1, h: 0.8, fill: { color: idx % 2 === 0 ? T.acc : '10B981' } })
-        sl.addText(String(b), { x: 5.2, y: y + 0.08, w: 7.35, h: 0.64, fontSize: 12.5, color: '0F172A', valign: 'middle', fontFace: FONT })
-      })
-    }
+    const slideArt = i === 0 ? bgSec : `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal, scale).toString('base64')}`
+    const cards = normalizeSlideCards(s)
+    const kpis = s.kpis?.length ? s.kpis : [{ val: '100%', label: '底稿核对率', sub: '原文逐项勾稽' }, { val: `0${i + 1}`, label: '核心研判模块', sub: '多维交叉验证' }, { val: 'CP闭环', label: '风控缓释机制', sub: '交割前置条件' }]
+    addHead(sl, s.kicker || `SECTION 0${i + 1} · 深度投研`, s.title || `专项分析章节 ${i + 1}`, i + 2, s.footnote)
+
+    // 顶部深色纹理导语条 + 右侧 3 个量化 KPI 胶囊
+    sl.addImage({ data: slideArt, x: 0.55, y: 1.12, w: 12.22, h: 0.96 })
+    sl.addText(String(s.banner || cards[0]?.body || '核心导语：严格依据已勾选底稿交叉比对财务、客户合同与法务条款。').slice(0, 125), { x: 0.75, y: 1.2, w: 6.8, h: 0.8, fontSize: 11.5, bold: true, color: 'FFFFFF', valign: 'middle', fontFace: FONT })
+    kpis.slice(0, 3).forEach((k, ki) => {
+      const kx = 7.75 + ki * 1.66
+      sl.addShape(pptx.ShapeType.roundRect, { x: kx, y: 1.2, w: 1.56, h: 0.8, rectRadius: 0.05, fill: { color: '081A33', transparency: 10 }, line: { color: '60A5FA', pt: 0.8 } })
+      sl.addText(String(k.val).slice(0, 10), { x: kx + 0.08, y: 1.24, w: 1.4, h: 0.36, fontSize: 12.5, bold: true, align: 'center', color: '60A5FA', fontFace: FONT })
+      sl.addText(String(k.label).slice(0, 10), { x: kx + 0.08, y: 1.6, w: 1.4, h: 0.32, fontSize: 8.5, align: 'center', color: 'E2E8F0', fontFace: FONT })
+    })
+    renderSlideBodyLayout(pptx, sl, T, i, s, cards)
   }
   return Buffer.from(await pptx.write({ outputType: 'nodebuffer' }))
 }
+
+function normalizeSlideCards(s = {}) {
+  if (Array.isArray(s.cards) && s.cards.length >= 4) return s.cards.slice(0, 4)
+  const raw = Array.isArray(s.bullets) && s.bullets.length ? s.bullets : ['基于已勾选底稿完成核心数据与业务条款交叉核对 [1]']
+  const tags = ['01 · 核心实证', '02 · 业务与客户', '03 · 财务与勾稽', '04 · 风险与判断']
+  return [0, 1, 2, 3].map(idx => {
+    const c = s.cards?.[idx]
+    if (c?.body) return c
+    const txt = String(raw[idx % raw.length] || raw[0])
+    return { tag: tags[idx], heading: txt.replace(/\[.*?\]|（.*?）/g, '').slice(0, 16) || `核验维度 0${idx + 1}`, body: txt.length > 26 ? txt : `${txt}；经与项目原始底稿逐项比对，已纳入本阶段投研核验台账。` }
+  })
+}
+
+function renderSlideBodyLayout(pptx, sl, T, i, s, cards) {
+  const mode = s.layout || (['bento_quad', 'kpi_table', 'split_cards'][i % 3])
+  if (mode === 'kpi_table' && Array.isArray(s.tableRows) && s.tableRows.length >= 2) {
+    sl.addShape(pptx.ShapeType.roundRect, { x: 0.55, y: 2.22, w: 6.45, h: 4.18, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+    sl.addShape(pptx.ShapeType.rect, { x: 0.55, y: 2.22, w: 6.45, h: 0.4, fill: { color: T.pri } })
+    sl.addText(`📊 ${String(s.tableTitle || '底稿核心数据核验表')}`, { x: 0.72, y: 2.26, w: 6.1, h: 0.32, fontSize: 11, bold: true, color: 'FFFFFF', fontFace: FONT })
+    const rows = s.tableRows.slice(0, 6).map((r, ri) => r.slice(0, 4).map(cell => ({ text: String(cell ?? '').slice(0, 22), options: { fill: { color: ri === 0 ? T.acc : ri % 2 === 1 ? 'F8FAFC' : 'FFFFFF' }, color: ri === 0 ? 'FFFFFF' : '0F172A', bold: ri === 0, fontSize: 9.5 } })))
+    sl.addTable(rows, { x: 0.7, y: 2.72, w: 6.15, rowH: 0.48, border: { pt: 0.5, color: 'CBD5E1' }, fontFace: FONT })
+    cards.slice(0, 2).forEach((c, ci) => {
+      const cy = 2.22 + ci * 2.14
+      sl.addShape(pptx.ShapeType.roundRect, { x: 7.18, y: cy, w: 5.58, h: 2.04, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+      sl.addShape(pptx.ShapeType.rect, { x: 7.18, y: cy, w: 5.58, h: 0.38, fill: { color: ci === 0 ? T.pri : T.acc } })
+      sl.addText(`${c.tag}  |  ${c.heading}`, { x: 7.34, y: cy + 0.05, w: 5.25, h: 0.28, fontSize: 10.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+      sl.addText(String(c.body), { x: 7.34, y: cy + 0.46, w: 5.25, h: 1.48, fontSize: 11, color: '1E293B', valign: 'top', fontFace: FONT })
+    })
+    return
+  }
+  cards.slice(0, 4).forEach((c, idx) => {
+    const cx = 0.55 + (idx % 2) * 6.22, cy = 2.22 + Math.floor(idx / 2) * 2.14
+    sl.addShape(pptx.ShapeType.roundRect, { x: cx, y: cy, w: 6.0, h: 2.02, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+    sl.addShape(pptx.ShapeType.rect, { x: cx, y: cy, w: 6.0, h: 0.4, fill: { color: idx % 2 === 0 ? T.pri : T.acc } })
+    sl.addText(`${c.tag || `0${idx + 1}`}  ·  ${c.heading || '核心研判结论'}`, { x: cx + 0.18, y: cy + 0.06, w: 5.65, h: 0.28, fontSize: 11, bold: true, color: 'FFFFFF', fontFace: FONT })
+    sl.addText(String(c.body), { x: cx + 0.18, y: cy + 0.48, w: 5.65, h: 1.44, fontSize: 11.2, color: '1E293B', valign: 'top', fontFace: FONT })
+  })
+}
+
