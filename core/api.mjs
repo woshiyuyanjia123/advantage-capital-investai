@@ -213,6 +213,7 @@ export function createApi(ctx) {
     'ai.generate': async (user, b) => ai.poll((await ai.generate(user, b)).id),
     'ai.rewrite': async (user, b) => { const d = deliverable(user, b.deliverableId); return ai.poll((await ai.generate(user, { projectId: d.projectId, deliverableId: d.id, type: d.type, section: Number(b.section), prompt: String(b.instruction ?? '') })).id) },
     'ai.prereview': async (user, b) => ai.preReview(deliverable(user, b.id), user),
+    'ai.test': async user => { org.assert(user, 'ai.policy'); return ai.testModel() },
 
     'project.create': (user, b) => projectView(user, engine.create(user, { name: b.name, companyId: b.companyId ?? createCompany(user, b), businessType: b.businessType ?? 'financial', fields: b.fields, tags: b.tags, desc: b.desc })),
     'project.update': (user, b) => {
@@ -353,6 +354,7 @@ export function createApi(ctx) {
       }
       if (sec === 'push') value = { channels: (value.channels ?? []).map(c => ({ id: c.id ?? randomBytes(4).toString('hex'), name: String(c.name).slice(0, 30), type: c.type, enabled: !!c.enabled, kinds: c.kinds ?? [] })) }
       db.put('settings', { ...s, [sec]: sec === 'models' ? { ...s.models, ...value } : value }, meta(user, `修改设置：${sec}`, 'settings'))
+      if (sec === 'models') ai.resetHealth()
       return settingsView(user)
     },
     'secret.set': async (user, b) => {
@@ -362,6 +364,8 @@ export function createApi(ctx) {
       if (!perm) throw fail('不允许的密钥项')
       org.assert(user, perm)
       if (key === 'wisburgApiKey') await wisburg.setKey(String(b.value ?? '').trim()); else await writeSecret(key, String(b.value ?? '').trim())
+      // 换了 Key 后立即生效：清掉旧 Key 的失败记录（否则 5 分钟内仍显示「调用失败」并走离线引擎）
+      if (key === 'deepseekApiKey') ai.resetHealth()
       db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: user.name, action: '更新密钥', target: key, detail: '内容不记录' })
       return { ok: true }
     },

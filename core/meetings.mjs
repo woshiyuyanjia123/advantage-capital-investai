@@ -154,7 +154,7 @@ export function createMeetings({ db, kb, org, ai, deliverables, notify, lifecycl
     let result = null
     if (route.adapter) {
       try {
-        const out = parseJson(await complete(route.adapter, { system: '你是会议纪要助手，只输出 JSON。责任人只能从参会人名单中选择，无法确定时 owner 为 null，不要猜测。', user: `参会人：${people.map(u => u.name).join('、')}\n输出 JSON：{"summary":["讨论要点"],"decisions":["决定事项"],"todos":[{"text":"","owner":"姓名或null","due":"原文中的期限或null"}],"pending":["待核实"]}\n\n转写：\n${text}`, maxTokens: 2000, signal: job?.abort?.signal ?? AbortSignal.timeout(120000) }))
+        const out = parseJson(await complete(route.adapter, { system: '你是会议纪要助手，只输出 JSON。责任人只能从参会人名单中选择，无法确定时 owner 为 null，不要猜测。', user: `参会人：${people.map(u => u.name).join('、')}\n输出 JSON：{"summary":["讨论要点"],"decisions":["决定事项"],"todos":[{"text":"","owner":"姓名或null","due":"原文中的期限或null"}],"pending":["待核实"]}\n\n转写：\n${text}`, maxTokens: 6000, reasoning: 'off', signal: job?.abort?.signal ?? AbortSignal.timeout(120000) }))
         if (out) result = { ...out, engine: route.label }
       } catch { /* 回落到规则 */ }
     }

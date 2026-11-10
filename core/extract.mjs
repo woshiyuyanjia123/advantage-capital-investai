@@ -96,7 +96,7 @@ export function createExtractor({ db, kb, org, ai, projection }) {
       // 外部模型只收到全部敏感类别已脱敏的文本；本地模型收到按用户权限脱敏的文本
       const safe = t => route.route === 'external' ? org.redactAll(t) : org.redact(user, t)
       const prompt = `从资料中提取以下字段：${SCHEMAS.bp.fields.map(f => f[0]).join('、')}。\n只输出 JSON：{"字段名":{"value":"值","n":资料编号,"quote":"原文片段（必须逐字摘自资料）"}}；资料中没有的字段不要输出，禁止推测。\n\n${sources.map(s => `[${s.n}] ${s.path}\n${safe(s.text.slice(0, 8000))}`).join('\n\n')}`
-      const out = parseJson(await complete(route.adapter, { system: '你是严谨的信息抽取助手，只输出 JSON。', user: prompt, maxTokens: 2500, signal: job?.abort?.signal ?? AbortSignal.timeout(120000) })) ?? {}
+      const out = parseJson(await complete(route.adapter, { system: '你是严谨的信息抽取助手，只输出 JSON。', user: prompt, maxTokens: 6000, reasoning: 'off', signal: job?.abort?.signal ?? AbortSignal.timeout(120000) })) ?? {}
       const found = {}
       for (const [key, v] of Object.entries(out)) {
         const s = sources.find(x => x.n === Number(v?.n))

@@ -8,7 +8,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createCore } from './index.mjs'
-import { openaiLlm, secretLlm } from './llm.mjs'
+import { openaiLlm, secretLlm, normalizeModel, DEFAULT_MODEL } from './llm.mjs'
 import { readSecrets } from './notify.mjs'
 import { hashPassword } from './api.mjs'
 
@@ -19,10 +19,12 @@ export const DEMO_ACCOUNTS = join(dirname(fileURLToPath(import.meta.url)), '..',
 export async function startServer({ dir, desktop = false, demoAccounts = false, host = '127.0.0.1', port = 4310, env = process.env, log = console.log } = {}) {
   const apiKey = env.INVESTAI_LLM_API_KEY ?? env.DEEPSEEK_API_KEY ?? ''
   const baseURL = env.INVESTAI_LLM_BASE_URL ?? 'https://api.deepseek.com'
-  const model = env.INVESTAI_LLM_MODEL ?? (baseURL.includes('deepseek') ? 'deepseek-v4.1-flash' : '')
-  // 指定了自定义接口地址时按环境变量直连；否则使用 DeepSeek，Key 来自环境变量或界面中保存的密钥
-  const llm = env.INVESTAI_LLM_BASE_URL ? openaiLlm({ baseURL, apiKey, model }) : secretLlm({ readSecrets, envKey: apiKey, baseURL, model })
-  const core = await createCore({ dir, mode: desktop ? 'desktop' : 'saas', llm })
+  const model = normalizeModel(env.INVESTAI_LLM_MODEL ?? (baseURL.includes('deepseek') ? DEFAULT_MODEL : ''))
+  // 指定了自定义接口地址时按环境变量直连；否则使用 DeepSeek，Key 来自环境变量或界面中保存的密钥，模型可在界面中选择（环境变量指定时以环境变量为准）
+  let core = null
+  const chosen = () => { const m = env.INVESTAI_LLM_MODEL ? '' : core?.db.get('settings', 'main')?.models?.external?.model; return /^deepseek-/.test(m ?? '') ? m : undefined }
+  const llm = env.INVESTAI_LLM_BASE_URL ? openaiLlm({ baseURL, apiKey, model }) : secretLlm({ readSecrets, envKey: apiKey, baseURL, model, getModel: chosen })
+  core = await createCore({ dir, mode: desktop ? 'desktop' : 'saas', llm })
 
   if (!desktop) {
     // 只给还没有密码的账号设置；已有密码（包括用户自己改过的）一律不覆盖

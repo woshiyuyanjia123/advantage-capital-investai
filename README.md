@@ -4,7 +4,7 @@
 
 同一套代码四种运行方式（另可部署为**云服务器**多人共用）：**独立桌面应用**（Mac / Windows 安装包，双击即用，不需要 DSH 或 Node）、**DSH 全局插件**（接管 DSH 外观与侧栏，复用 DSH 的 DeepSeek 模型）、**独立 SaaS**（多用户登录、统一登录、外部填报链接）、**本机演示**（单用户，可切换岗位身份）。
 
-> 📘 **完整的安装部署与使用教程（Mac / Windows / DSH 插件 / 云服务器）：[docs/GUIDE.md](docs/GUIDE.md)**　·　云服务器与权限、同步：[docs/CLOUD.md](docs/CLOUD.md)
+> 📘 **完整的安装部署与使用教程（Mac / Windows / DSH 插件 / 云服务器）：[docs/GUIDE.md](docs/GUIDE.md)**　·　云服务器与权限、同步：[docs/CLOUD.md](docs/CLOUD.md)　·　DeepSeek 接入与 AI 产出质量修复说明：[docs/DEEPSEEK-FIX.md](docs/DEEPSEEK-FIX.md)
 
 ![DSH 内嵌工作台](docs/screenshots/1-dsh-workbench.jpg)
 
@@ -81,8 +81,8 @@ npm install
 | 其他 | 命令 | 说明 |
 |---|---|---|
 | 会议转写 | Mac / Linux：`sh scripts/setup-asr.sh`；Windows：`powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` | 安装本机 faster-whisper small（约 480MB，需要 [uv](https://docs.astral.sh/uv/)），录音不出本机。桌面应用在「会议纪要」页给出带本应用数据目录的完整命令 |
-| 测试 | `node --test --test-concurrency=1 "test/*.test.mjs"` | 52 项回归测试（代码审查、生命周期、演示账号、云端安全与同步、DSH 兼容；GitHub Actions 在 Windows / macOS / Linux 上运行） |
-| 验收 | `node scripts/verify.mjs` | 135 项自动化验收（临时目录，不碰真实数据） |
+| 测试 | `node --test --test-concurrency=1 "test/*.test.mjs"` | 60 项回归测试（代码审查、生命周期、演示账号、云端安全与同步、DSH 兼容、DeepSeek 接入协议；GitHub Actions 在 Windows / macOS / Linux 上运行） |
+| 验收 | `node scripts/verify.mjs` | 127 项自动化验收（临时目录，不碰真实数据） |
 | 评测 | `node scripts/eval.mjs [--deepseek]` | 34 项 AI 质量与安全评测，结果在「系统配置 → 评测」 |
 
 数据目录：插件 `~/.dsh/investai`，服务端 `./data`（`--data` 可改）。密钥（智堡、推送 Webhook、统一登录）只保存在 `~/.config/investai/secrets.json`（600），不进数据库、日志或安装包。
@@ -106,7 +106,7 @@ npm install
 
 ## 需要你提供 / 注意
 
-- **DeepSeek API Key**：在 DSH「设置 → 模型」中填写（或服务端环境变量 `DEEPSEEK_API_KEY`）。未配置时系统用离线引擎（资料原文摘录 + 规则），功能完整但不会改写润色。
+- **DeepSeek API Key**：桌面应用 / 服务端在「系统配置 → AI 策略与模型」中填写（或环境变量 `DEEPSEEK_API_KEY`），填完点「测试连接」确认可用，可选 V4.1 Flash（模型 ID `deepseek-flash`，默认）或 V4 Pro（`deepseek-v4-pro`）；DSH 插件在 DSH「设置 → 模型」中填写。未配置时系统用离线引擎（资料原文摘录 + 规则），功能完整但不会改写润色。注意「机密」及以上资料默认只交给本地模型，没有本地模型时即使填了 Key 也走离线引擎（见 GUIDE「常见问题」）。
 - **智堡 API Key**：系统配置 → 集成。上次提供的密钥已在本机配置；建议到智堡后台轮换一次。
 - **行情**：本系统不内置未经授权的行情源，请从已授权终端导出 CSV 导入，或接入你们已授权的接口。
 - **toolknit-desktop**：其许可为 PolyForm Noncommercial（商业使用需作者授权），本系统**不打包**其代码；已自研同类能力，并提供默认关闭的 MCP 连接器，管理员确认授权后可启用。

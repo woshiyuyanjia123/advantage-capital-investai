@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // InvestAI 评测集：衡量 AI 输出质量与安全边界，结果写入数据目录 eval-latest.json（系统配置 → 评测 中查看）。
 //   node scripts/eval.mjs                        离线引擎（无模型）基线
-//   DEEPSEEK_API_KEY=... node scripts/eval.mjs --deepseek [--model deepseek-v4.1-flash] [--allow-external]
+//   DEEPSEEK_API_KEY=... node scripts/eval.mjs --deepseek [--model deepseek-flash] [--allow-external]
 //        --allow-external：评测期间把演示资料（虚构数据）允许发送外部模型，用来对比模型与离线引擎；默认仍按密级只走本地/离线
 //   --out <目录>                                  结果写入目录（默认 ~/.dsh/investai）
 // 评测在临时目录中运行，不修改真实数据。
@@ -24,7 +24,7 @@ const useModel = flag('deepseek')
 if (useModel && !process.env.DEEPSEEK_API_KEY) { console.error('需要环境变量 DEEPSEEK_API_KEY'); process.exit(2) }
 const seen = []
 const spy = { kind: 'spy', info: async () => ({ ok: true, label: '外部模型（探针）' }), models: async () => [], async *stream(o) { seen.push(JSON.stringify(o)); throw new Error('探针：不应调用') }, async turn(o) { seen.push(JSON.stringify(o)); throw new Error('探针：不应调用') } }
-const llm = useModel ? openaiLlm({ baseURL: 'https://api.deepseek.com', apiKey: process.env.DEEPSEEK_API_KEY, model: opt('model', 'deepseek-v4.1-flash') }) : spy
+const llm = useModel ? openaiLlm({ baseURL: 'https://api.deepseek.com', apiKey: process.env.DEEPSEEK_API_KEY, model: opt('model', 'deepseek-flash') }) : spy
 const noWis = createWisburg({ fetchImpl: async () => new Response('{}', { status: 503 }), base: 'https://offline.invalid' })
 const core = await createCore({ dir: join(TMP, 'data'), mode: 'dsh', llm, wisburg: noWis, autostart: false })
 await core.ready
@@ -126,7 +126,7 @@ add('会议', '期限识别（10月25日 / 下周）', mt.todos.filter(t => t.du
 
 // ───────── 汇总 ─────────
 const result = {
-  at: Date.now(), engine: useModel ? `DeepSeek · ${opt('model', 'deepseek-v4.1-flash')}${flag('allow-external') ? '（评测允许外部）' : ''}` : '离线引擎（基线）',
+  at: Date.now(), engine: useModel ? `DeepSeek · ${opt('model', 'deepseek-flash')}${flag('allow-external') ? '（评测允许外部）' : ''}` : '离线引擎（基线）',
   total: cases.length, passed: cases.filter(c => c.ok).length,
   metrics: { citeVerified: ratios.reduce((a, b) => a + b, 0) / (ratios.length || 1), extractAccuracy: hit / total, permission: `${permOk}/${permAll}` },
   cases,
