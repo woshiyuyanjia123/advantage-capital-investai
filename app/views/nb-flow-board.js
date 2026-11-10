@@ -44,24 +44,24 @@ function renderArtSubmitCol(p, b) {
   const allWorks = b.stages.flatMap(s => s.works.map(w => [w.id, `${s.name} · ${w.type}${w.required ? ' (必做)' : ''}`]))
   const curW = fb.pickedWork?.id || allWorks[0]?.[0] || ''
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>① 右下角 Studio 成品池 (${arts.length})</b><span class="grow"></span>
-      <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 文件夹</button></div>
+    <div class="nb-col-hd"><b>① 已编制工作成果库 (${arts.length})</b><span class="grow"></span>
+      <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 项目档案室</button></div>
     <div class="nb-sources" style="max-height:42%">
       ${arts.map((a, i) => `<div class="nb-art-item ${fb.pickedArt?.name === a.name ? 'on' : ''}" style="${fb.pickedArt?.name === a.name ? 'border-color:#3B82F6;background:#172E58' : ''}" data-act="fb-pick-art" data-i="${i}">
         ${ficon(a.ext, true)}<div class="grow" style="min-width:0"><div class="ell"><b>${esc(a.name)}</b></div>
           <div class="dim ell" style="font-size:10.5px">${(a.bytes / 1048576).toFixed(2)} MB · ${esc(a.summary || '')}</div></div>
-        <span class="tag blue">选用</span></div>`).join('') || '<div class="empty">先在图1制作成品</div>'}
+        <span class="tag blue">选用</span></div>`).join('') || '<div class="empty">请先在尽调与研判工作台编制工作成果</div>'}
     </div>
-    <div class="nb-col-hd" style="border-top:1px solid var(--line)"><b>② 直接提交 / 人工轻微修改后自主提交</b></div>
+    <div class="nb-col-hd" style="border-top:1px solid var(--line)"><b>② 原件报送 / 修订说明补录后报送阶段工作项</b></div>
     <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;flex:1;overflow:auto">
-      <label class="f">目标流程工作节点<select class="select sm" id="fbWorkSel">${opts(allWorks, curW)}</select></label>
-      <label class="f">人工轻微修改 / 补充说明（留空则原件直交，填写则以修订内容生成新版本提交）
-        <textarea class="input area mono" id="fbLightEdit" style="height:115px" placeholder="可选：在此直接微调关键数字、结论或补充审批说明，无需打开繁琐 OA 表单…">${esc(fb.lightText)}</textarea></label>
-      <label class="dim" style="font-size:11.5px"><input type="checkbox" id="fbAutoRev" checked> 提交后自动送审（若当前岗位有「提交审核」权限）</label>
-      <label class="dim" style="font-size:11.5px"><input type="checkbox" id="fbAutoFin"> 若当前岗位有「材料定稿」权限，一键直达定稿</label>
-      <div class="row"><button class="btn sm" data-act="nb-studio-ppt" data-p="${p.id}">打开PPT工坊微调</button>
-        <button class="btn sm" data-act="nb-studio-word" data-p="${p.id}">打开Word工坊微调</button></div>
-      <button class="btn pri" data-act="fb-submit-now" data-p="${p.id}">${icon('check', 14)} 立即自主提交到所选流程节点</button>
+      <label class="f">目标阶段工作项<select class="select sm" id="fbWorkSel">${opts(allWorks, curW)}</select></label>
+      <label class="f">人工修订说明 / 补充核验结论（留空则原件报送，填写则生成新版本报送）
+        <textarea class="input area mono" id="fbLightEdit" style="height:115px" placeholder="可选：在此直接修订关键财务口径、核心结论或补充报审意见…">${esc(fb.lightText)}</textarea></label>
+      <label class="dim" style="font-size:11.5px"><input type="checkbox" id="fbAutoRev" checked> 报送后自动提请复核（需当前岗位具备「提交审核」权限）</label>
+      <label class="dim" style="font-size:11.5px"><input type="checkbox" id="fbAutoFin"> 若当前岗位具备「材料定稿」权限，直接确认为正式定稿版本</label>
+      <div class="row"><button class="btn sm" data-act="nb-studio-ppt" data-p="${p.id}">路演PPT修订台</button>
+        <button class="btn sm" data-act="nb-studio-word" data-p="${p.id}">尽调文书修订台</button></div>
+      <button class="btn pri" data-act="fb-submit-now" data-p="${p.id}">${icon('check', 14)} 立即报送至所选阶段工作项</button>
     </div>
   </div>`
 }
@@ -70,10 +70,10 @@ function renderPipelineCol(x, p, b) {
   const f = p.flow ?? { overallPct: p.progress ?? 0, curStagePct: 0, stageDetails: [] }
   return `<div class="nb-col">
     <div class="nb-flow-strip">
-      <div class="row"><button class="btn ghost sm" data-act="go" data-view="notebook" data-sub="${p.id}">${icon('left', 13)}返回图1制作台</button>
-        <b class="ell" style="font-size:14.5px">${esc(p.name)} · 企业全流程提交看板</b>
-        <span class="pill st-3">总进度 ${f.overallPct}%</span><span class="grow"></span>
-        <button class="btn sm" data-act="go" data-view="workbench">返回图2项目库</button></div>
+      <div class="row"><button class="btn ghost sm" data-act="go" data-view="notebook" data-sub="${p.id}">${icon('left', 13)}尽调与研判工作台</button>
+        <b class="ell" style="font-size:14.5px">${esc(p.name)} · 阶段门禁与投决中心</b>
+        <span class="pill st-3">全周期进度 ${f.overallPct}%</span><span class="grow"></span>
+        <button class="btn sm" data-act="go" data-view="workbench">投研项目总览</button></div>
       <div class="nb-stage-bar"><i style="width:${f.overallPct}%"></i></div>
     </div>
     <div class="abody" style="flex:1;padding:12px 14px;overflow:auto">

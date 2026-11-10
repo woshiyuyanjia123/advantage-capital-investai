@@ -30,15 +30,15 @@ export function renderNbWorkspace(v) {
 
 function renderLeftPane(x, p, checked) {
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>来源 (${x.files.length})</b><span class="grow"></span>
-      <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 专属文件夹</button></div>
-    <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 添加来源</button>
-      <button class="btn sm grow" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 创建笔记</button></div>
-    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">勾选来源以针对性生成右侧 Studio 成品</span><span class="grow"></span>
+    <div class="nb-col-hd"><b>项目底稿资料 (${x.files.length})</b><span class="grow"></span>
+      <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 项目档案室</button></div>
+    <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 上传底稿资料</button>
+      <button class="btn sm grow" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 新增尽调纪要</button></div>
+    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">勾选底稿以定向编制右侧工作成果</span><span class="grow"></span>
       <label class="dim" style="font-size:11.5px;cursor:pointer"><input type="checkbox" class="ck" data-act="nb-src-all" ${checked.size && checked.size === x.files.length ? 'checked' : ''}> 全选</label></div>
     <div class="nb-sources">${x.files.map((f, idx) => `<label class="nb-src-row">
       <span class="mono dim">${idx + 1}</span>${ficon(f.ext, true)}<span class="ell grow" title="${esc(f.name)}">${esc(f.name)}</span>
-      <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}></label>`).join('') || '<div class="empty">请点击上方「+ 添加来源」</div>'}
+      <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}></label>`).join('') || '<div class="empty">请点击上方「+ 上传底稿资料」</div>'}
     </div>
   </div>`
 }
@@ -51,18 +51,18 @@ function renderCenterPane(x, p, f) {
   S.centerTab ??= 'im'
   return `<div class="nb-col">
     <div class="nb-flow-strip">
-      <div class="row"><button class="btn ghost sm" data-act="go" data-view="workbench">${icon('left', 13)}项目库</button>
-        <b class="ell" style="font-size:14.5px">${esc(p.name)}</b><span class="pill st-3">${esc(p.stage)} · 总进度 ${f.overallPct}%</span>
+      <div class="row"><button class="btn ghost sm" data-act="go" data-view="workbench">${icon('left', 13)}投研项目总览</button>
+        <b class="ell" style="font-size:14.5px">${esc(p.name)}</b><span class="pill st-3">${esc(p.stage)} · 全周期进度 ${f.overallPct}%</span>
         <span class="grow"></span>
-        <button class="btn sm ${S.centerTab === 'im' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="im">💬 项目群聊×Agent协同 (千问2.0模式)</button>
-        <button class="btn sm ${S.centerTab === 'qa' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="qa">✨ 源依据深度问答</button>
+        <button class="btn sm ${S.centerTab === 'im' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="im">💬 项目组协同流 (IM×成果共创)</button>
+        <button class="btn sm ${S.centerTab === 'qa' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="qa">✨ 底稿溯源研判</button>
         <button class="nb-api-pill" data-act="nb-api"><span class="dot ${d.model.ok ? 'ok' : 'warn'}"></span><span>${esc(d.model.ok ? d.model.label : '本地离线引擎')}</span></button></div>
       <div class="nb-stage-bar"><i style="width:${f.overallPct}%"></i></div>
       <div class="row" style="flex-wrap:wrap">
-        <span class="dim" style="font-size:11px">⚡ DWS 事件自动任务：</span>
+        <span class="dim" style="font-size:11px">⚡ 机构自动化协同流：</span>
         ${(os.autoTasks ?? []).map(at => `<button class="btn sm ${at.enabled ? 'pri' : 'ghost'}" style="padding:2px 7px;font-size:10.5px" data-act="nb-os-at" data-p="${p.id}" data-id="${at.id}" title="${esc(at.desc)}">${at.enabled ? '✓ ' : ''}${esc(at.name)}</button>`).join('')}
         <span class="grow"></span>
-        ${chk ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-d="${chk.id}" data-ch="local-checkin">回传 Office 修改</button>` : ''}
+        ${chk ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-d="${chk.id}" data-ch="local-checkin">回传本地修订件</button>` : ''}
       </div>
     </div>
     <div class="abody" style="flex:1;padding:14px;overflow:auto">
@@ -113,9 +113,9 @@ function renderRightNotes(x, p) {
     ['table', '#34D399', '📋 数据表格'],
   ]
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>Studio · 规格与美学控制舱</b><span class="grow"></span>
-      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">编辑PPT</button>
-      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">编辑Word</button></div>
+    <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
+      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订路演PPT</button>
+      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订尽调文书</button></div>
     <div style="padding:8px 12px;border-bottom:1px solid var(--line);background:#0C162B;font-size:11.5px;display:flex;flex-direction:column;gap:6px">
       <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(规范区间 4–24)</span></span><span class="grow"></span>
         <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
@@ -138,19 +138,19 @@ function renderRightNotes(x, p) {
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
     <div class="nb-notes-list" style="border-top:1px solid var(--line)">
-      ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6"><span class="spin"></span><div class="grow"><b>正在生成 ${esc(S.makingStudio)}…</b><div class="dim" style="font-size:11px">基于已勾选 ${S.ctx.fileIds.length} 个来源制作并写入项目文件夹</div></div></div>` : ''}
-      <div class="row" style="margin:2px 2px 4px"><b>✨ Studio 已生成成品 (${arts.length})</b><span class="grow"></span>
-        <button class="lnk" data-act="nb-flowboard" data-p="${p.id}">进入项目管理提交看板 ›</button></div>
+      ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6"><span class="spin"></span><div class="grow"><b>正在编制 ${esc(S.makingStudio)}…</b><div class="dim" style="font-size:11px">严格依据已勾选 ${S.ctx.fileIds.length} 份底稿编制并归档至项目档案室</div></div></div>` : ''}
+      <div class="row" style="margin:2px 2px 4px"><b>✨ 已编制工作成果 (${arts.length})</b><span class="grow"></span>
+        <button class="lnk" data-act="nb-flowboard" data-p="${p.id}">进入阶段门禁与投决 ›</button></div>
       ${arts.map((a, idx) => `<div class="nb-art-item" data-act="nb-open-folder" data-p="${p.id}" data-fp="${esc(a.fullPath)}">
         ${ficon(a.ext, true)}
         <div class="grow" style="min-width:0">
           <div class="ell"><b>${esc(a.name)}</b></div>
-          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 个来源 · ${(a.bytes / 1048576).toFixed(2)} MB · 点击本机打开</div>
+          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿溯源 · ${(a.bytes / 1048576).toFixed(2)} MB · 点击本机检阅</div>
         </div>
-        <button class="btn sm pri" data-act="nb-submit-art" data-p="${p.id}" data-i="${idx}" onclick="event.stopPropagation()">提交到项目管理</button>
-      </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方 Studio 按钮制作，生成的成品将显示在此处（右下角）并可直接提交到项目管理流程</div>'}
-      <div class="row" style="margin:10px 2px 4px"><b>📌 笔记与五维看板 (${notes.length})</b><span class="grow"></span>
-        <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">全部看板</button></div>
+        <button class="btn sm pri" data-act="nb-submit-art" data-p="${p.id}" data-i="${idx}" onclick="event.stopPropagation()">报送阶段复核</button>
+      </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方编制按钮，产出的正式工作成果将陈列于此（右下角）并可直接报送阶段复核</div>'}
+      <div class="row" style="margin:10px 2px 4px"><b>📌 尽调纪要与五维管控看板 (${notes.length})</b><span class="grow"></span>
+        <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">五维管控看板</button></div>
       ${notes.map(n => `<div class="nb-note-card" data-act="nb-open-board" data-p="${p.id}" data-b="${esc(n.board || 'stages')}" data-n="${esc(n.id)}">
         <div class="row"><span class="tag blue">${esc(n.tag || '笔记')}</span><b class="ell grow">${esc(n.title)}</b></div>
         <div class="dim" style="font-size:11.5px;margin-top:4px">${esc(n.summary || '')}</div></div>`).join('')}

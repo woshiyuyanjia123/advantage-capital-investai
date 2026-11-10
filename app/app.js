@@ -62,11 +62,11 @@ function renderHdr() {
 export const NAV = () => {
   const d = D()
   return [
-    ['workbench', 'grid', '① 项目书架 (图2)', d.projects.filter(p => p.status === 'active').length],
-    ['notebook', 'spark', '② Notebook 制作台 (图1)'],
-    ['flowboard', 'flow', '③ 流程提交与权限看板'],
-    ['knowledge', 'kb', '项目资料库', d.kpi.kbFiles],
-    ['settings', 'set', '系统与本地API'],
+    ['workbench', 'grid', '投研项目总览', d.projects.filter(p => p.status === 'active').length],
+    ['notebook', 'spark', '尽调与研判工作台'],
+    ['flowboard', 'flow', '阶段门禁与投决中心'],
+    ['knowledge', 'kb', '底稿资料库', d.kpi.kbFiles],
+    ['settings', 'set', '机构治理与模型配置'],
   ]
 }
 function renderNav() {
