@@ -295,7 +295,12 @@ Object.assign(ACT, {
   },
   'proj-upload': async () => {
     const files = await pick()
-    for (const file of files) await act('kb.upload', { projectId: S.sel, name: file.name, data: await toB64(file) }, `已上传 ${file.name}`)
+    if (!files?.length) return
+    for (const file of files) {
+      const r = await act('kb.upload', { projectId: S.sel, name: file.name, data: await toB64(file) }, `已上传底稿 ${file.name}`)
+      if (r?.id && !S.ctx.fileIds.includes(r.id)) S.ctx.fileIds.push(r.id)
+    }
+    if (S.sel) S.project = await get('project', { id: S.sel }).catch(() => S.project)
     await hooks.reload()
   },
   comment: async () => { const t = $('#cmt')?.value.trim(); if (!t) return; if (await act('comment.add', { projectId: S.sel, text: t })) loadProject() },

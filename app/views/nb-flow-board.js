@@ -94,9 +94,9 @@ function renderWorkNodeCard(p, w) {
     <span class="pill ${dl ? `dl-${dl.status}` : ''}">${dl ? `${DL_STATUS[dl.status]} v${dl.v}` : WORK_STATUS[w.status] || w.status}</span></div>
     <div class="dim" style="font-size:11px;margin:4px 0">责任人：${esc(w.assigneeName)} · 可定稿：${esc((w.holders?.finalize ?? []).join('、') || '部门负责人/合伙人')}</div>
     <div class="wacts">
-      <button class="btn sm pri" data-act="fb-slot-sub" data-w="${w.id}" data-t="${esc(w.type)}">把左侧成品交入此节点</button>
-      ${dl && dl.status === 'draft' && dl.v ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.submit" data-d="${dl.id}" ${P.submit?.ok ? '' : `title="${esc(P.submit?.why || '')}"`}>提交审核</button>` : ''}
-      ${dl && dl.status === 'review' ? `<button class="btn sm pri" data-act="fb-node-act" data-op="deliverable.finalize" data-d="${dl.id}" ${P.finalize?.ok ? '' : `title="${esc(P.finalize?.why || '')}"`}>审核定稿</button>` : ''}
+      <button class="btn sm pri" data-act="fb-slot-sub" data-w="${w.id}" data-t="${esc(w.type)}">报送成果至此工作项</button>
+      ${dl && dl.status === 'draft' && dl.v ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.submit" data-d="${dl.id}" ${P.submit?.ok ? '' : `title="${esc(P.submit?.why || '')}"`}>提请复核</button>` : ''}
+      ${dl && dl.status === 'review' ? `<button class="btn sm pri" data-act="fb-node-act" data-op="deliverable.finalize" data-d="${dl.id}" ${P.finalize?.ok ? '' : `title="${esc(P.finalize?.why || '')}"`}>确认定稿</button>` : ''}
     </div></div>`
 }
 
@@ -122,7 +122,7 @@ function renderPermissionCol(x, p, b) {
         <div class="row" style="margin-top:8px;flex-wrap:wrap">
           ${pending ? `<button class="btn sm pri" data-act="fb-vote" data-a="${pending.id}" data-d="pass">表决：同意通过</button>
             <button class="btn sm" data-act="fb-vote" data-a="${pending.id}" data-d="return">退回补充</button>`
-            : `<button class="btn sm pri" data-act="fb-gate" data-p="${p.id}" ${b.readiness.ok ? '' : 'disabled'}>发起本阶段门禁表决</button>`}
+            : `<button class="btn sm ${b.readiness.ok ? 'pri' : ''}" data-act="fb-gate" data-p="${p.id}">${b.readiness.ok ? '⚖️ 发起本阶段决策表决' : '⏳ 发起本阶段决策表决（点击查看待定稿项）'}</button>`}
         </div></div>
     </div>
   </div>`
@@ -134,12 +134,12 @@ Object.assign(ACT, {
   'fb-submit-now': async el => {
     const pid = el.dataset.p || S.sel
     const workId = $('#fbWorkSel')?.value || fb.pickedWork?.id
-    const editedText = $('#fbLightEdit')?.value?.trim() || ''
+    const editedText = $('#fbLightEdit')?.value?.trim() || (!fb.pickedArt ? `# 阶段工作成果核验报送\n\n- 依据项目底稿完成核验并报送本节点复核` : '')
     const r = await act('nb.flow.submit', {
       projectId: pid, workId, artifactPath: fb.pickedArt?.fullPath, artifactName: fb.pickedArt?.name,
       editedText: editedText || undefined, autoSubmitReview: !!$('#fbAutoRev')?.checked, autoFinalize: !!$('#fbAutoFin')?.checked,
     })
-    if (r) { toast(`✅ 已自主提交至「${r.workType}」v${r.version}（当前状态：${DL_STATUS[r.status] || r.status}）`, 'ok'); fb.lightText = ''; await hooks.reload({ files: false }); await loadFlowBoard(pid) }
+    if (r) { toast(`✅ 已报送至「${r.workType}」v${r.version}（当前状态：${DL_STATUS[r.status] || r.status}）`, 'ok'); fb.lightText = ''; await hooks.reload({ files: false }); await loadFlowBoard(pid) }
   },
   'fb-slot-sub': async el => {
     $('#fbWorkSel') && ($('#fbWorkSel').value = el.dataset.w)
@@ -153,7 +153,11 @@ Object.assign(ACT, {
     if (await act('persona', { userId: el.dataset.u }, '✅ 已切换岗位权限视角')) { await hooks.reload({ files: false }); await loadFlowBoard(S.sel) }
   },
   'fb-gate': async el => {
-    if (await act('project.gate', { id: el.dataset.p }, '✅ 已发起阶段门禁表决')) { await hooks.reload({ files: false }); await loadFlowBoard(S.sel) }
+    if (fb.data && !fb.data.readiness?.ok) {
+      const miss = (fb.data.readiness?.items ?? []).filter(i => !i.ok).map(i => `${i.work}（${i.why || '待定稿'}）`).join('、')
+      return toast(`⏳ 尚有必做工作未完成定稿，暂不可发起表决：${miss || '请先将本阶段必做项定稿'}`, 'warn')
+    }
+    if (await act('project.gate', { id: el.dataset.p }, '✅ 已发起阶段决策表决')) { await hooks.reload({ files: false }); await loadFlowBoard(S.sel) }
   },
   'fb-vote': async el => {
     if (await act('approval.vote', { id: el.dataset.a, decision: el.dataset.d, opinion: '经第三界面审核通过' }, '✅ 表决已记录并推进流程')) { await hooks.reload({ files: false }); await loadFlowBoard(S.sel) }

@@ -435,14 +435,14 @@ async function forcePassword() {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]')
   if (!el) { if (!e.target.closest('#popup, #gsearch')) closePopup(); return }
-  if (el.tagName === 'SELECT') return
+  if (el.tagName === 'SELECT' || (el.tagName === 'INPUT' && ['checkbox', 'range', 'radio'].includes(el.type))) return
   if (!el.closest('#popup') && !el.dataset.keepPopup) closePopup()
   const fn = ACT[el.dataset.act]
   if (fn) { e.preventDefault(); fn(el, e) }
 })
 document.addEventListener('change', e => {
-  const el = e.target.closest('[data-act-change]')
-  if (el) ACT[el.dataset.actChange]?.(el, e)
+  const el = e.target.closest('[data-act-change], select[data-act], input[type="checkbox"][data-act], input[type="radio"][data-act]')
+  if (el) ACT[el.dataset.actChange || el.dataset.act]?.(el, e)
 })
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('#gsearch')?.focus() }
@@ -509,11 +509,12 @@ window.addEventListener('drop', async e => {
   e.preventDefault(); dragDepth = 0; $('#drop').hidden = true
   const files = [...e.dataTransfer.files]
   if (!files.length) return
-  const projectId = S.view === 'project' ? S.sel : undefined
+  const projectId = ['project', 'notebook', 'flowboard'].includes(S.view) ? S.sel : undefined
   for (const file of files) {
     if (file.size > 40 * 1024 * 1024) { toast(`${file.name} 超过 40MB，请放入 NAS 目录后扫描`, 'deny'); continue }
     await act('kb.upload', { projectId, mountId: projectId ? undefined : 'm_up', name: file.name, data: await toB64(file) }, `已上传 ${file.name}${projectId ? '（项目资料）' : ''}`)
   }
+  if (projectId) S.project = await get('project', { id: projectId }).catch(() => S.project)
   await hooks.reload()
   if (projectId) hooks.loadProject?.()
 })

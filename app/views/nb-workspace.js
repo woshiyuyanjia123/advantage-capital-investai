@@ -114,8 +114,9 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
-      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订路演PPT</button>
-      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订尽调文书</button></div>
+      <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 录音转写</button>
+      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订PPT</button>
+      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订文书</button></div>
     <div style="padding:8px 12px;border-bottom:1px solid var(--line);background:#0C162B;font-size:11.5px;display:flex;flex-direction:column;gap:6px">
       <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(规范区间 4–24)</span></span><span class="grow"></span>
         <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
@@ -179,9 +180,9 @@ Object.assign(ACT, {
     }
   },
   'nb-src-ck': el => { const s = new Set(S.ctx.fileIds); el.checked ? s.add(el.dataset.id) : s.delete(el.dataset.id); S.ctx.fileIds = [...s]; hooks.refresh() },
-  'nb-src-all': () => { const all = S.project?.files?.map(f => f.id) ?? []; S.ctx.fileIds = S.ctx.fileIds.length === all.length ? [] : all; hooks.refresh() },
-  'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; ACT['nb-chat-send']() } },
-  'nb-chat-send': () => { const v = $('#nbChatInput')?.value?.trim(); if (!v) return; hooks.fill(v); hooks.send(); $('#nbChatInput').value = '' },
+  'nb-src-all': el => { const all = S.project?.files?.map(f => f.id) ?? []; S.ctx.fileIds = el?.checked === false ? [] : (S.ctx.fileIds.length === all.length ? [] : all); hooks.refresh() },
+  'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; S.centerTab === 'im' ? ACT['nb-os-send'](el) : ACT['nb-chat-send']() } },
+  'nb-chat-send': () => { const v = $('#nbChatInput')?.value?.trim(); if (!v) return; S.centerTab = 'qa'; hooks.fill(v); hooks.send(); $('#nbChatInput').value = ''; hooks.refresh() },
   'nb-note-add': async el => {
     const r = await act('nb.note.save', { projectId: el.dataset.p, title: `投研笔记 ${new Date().toLocaleTimeString('zh-CN')}`, content: '# 新建投研笔记\n\n- 记录尽调关键发现与看板待办', board: 'tasks' }, '✅ 已新建笔记')
     if (r) { S.project.notes = r; hooks.refresh() }
@@ -195,13 +196,12 @@ Object.assign(ACT, {
     const k = el.dataset.k
     const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
     cfg.specKind = k
-    if (k === 'audio') return ACT['nb-studio-audio'](el)
     S.makingStudio = `${el.textContent.trim()} (${cfg.pageCount}页/章 · ~${cfg.targetMB}MB)`
     hooks.refresh()
     const r = await act('nb.studio.make', { projectId: el.dataset.p || S.sel, kind: k, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density })
     S.makingStudio = null
     if (r) {
-      toast(`✅ 已按规格 (${cfg.pageCount}页/章 · ${(r.bytes / 1048576).toFixed(2)} MB) 生成「${r.name}」并置于右下角`, 'ok')
+      toast(`✅ 已按规格 (${cfg.pageCount}页/章 · ${(r.bytes / 1048576).toFixed(2)} MB) 编制「${r.name}」并置于右下角`, 'ok')
       S.project = await get('project', { id: el.dataset.p || S.sel })
     }
     hooks.refresh()
@@ -229,6 +229,6 @@ Object.assign(ACT, {
   },
 })
 
-document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ACT['nb-chat-send']() } })
+document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); S.centerTab === 'im' ? ACT['nb-os-send']({ dataset: { p: S.sel } }) : ACT['nb-chat-send']() } })
 document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (a?.startsWith('nb-cfg-') && ACT[a]) ACT[a](e.target) })
 VIEWS.notebook = renderNbWorkspace
