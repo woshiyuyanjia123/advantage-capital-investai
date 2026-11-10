@@ -17,8 +17,8 @@ export function extractGroundedFacts(p, docs = []) {
       }
     }
   })
-  if (!facts.length) facts.push({ text: `${p.name}主营业务突出，处于${p.stage || '尽调'}阶段，核心技术与客户壁垒已通过初步核验`, cite: '[1]', source: '项目底稿' })
-  if (!metrics.length) metrics.push({ text: `拟投资金额 ${p.fields?.amount || '1.0亿元'}，对应估值 ${p.fields?.valuation || '30亿元'}，复合增长率超 35%`, cite: '[1]', source: '财务底稿' })
+  if (!facts.length) facts.push({ text: `${p.name}（${p.desc || '见所选来源'}）`, cite: '[1]', source: '项目立项档案' })
+  if (!metrics.length) metrics.push({ text: `登记拟投金额：${p.fields?.amount || '见来源'}，估值：${p.fields?.valuation || '见来源'}`, cite: '[1]', source: '项目登记字段' })
   return { facts, metrics }
 }
 
@@ -94,7 +94,7 @@ function renderPodcastHtml(p, turns) {
 }
 
 function renderBentoInfographicHtml(p, kind, metrics, facts) {
-  return `<h3>📊 Bento Grid 视觉信息图与财务趋势（${p.name}）</h3><svg viewBox="0 0 600 130" style="width:100%;background:#0f172a;border-radius:12px;margin-bottom:12px;border:1px solid #1e3a8a"><text x="20" y="28" fill="#93c5fd" font-size="13">近三年营收与预测跃升趋势（2024A → 2025A → 2026E）</text><rect x="60" y="75" width="90" height="35" rx="4" fill="#3b82f6"/><text x="65" y="68" fill="#f8fafc" font-size="12">2024A: 2.18亿</text><rect x="230" y="55" width="90" height="55" rx="4" fill="#2563eb"/><text x="235" y="48" fill="#f8fafc" font-size="12">2025A: 3.64亿</text><rect x="400" y="32" width="90" height="78" rx="4" fill="#10b981"/><text x="405" y="25" fill="#6ee7b7" font-size="12">2026E: 5.40亿</text></svg><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${metrics.slice(0, 3).map(m => `<div class="card" style="background:linear-gradient(145deg,#172554,#1e3a8a)"><div style="font-size:12px;color:#93c5fd">核心量化指标 ${m.cite}</div><div style="font-size:15px;font-weight:700;margin-top:6px">${m.text}</div></div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px">${facts.slice(0, 4).map(f => `<div class="card"><b>核心事实证据 ${f.cite} (${f.source})</b><p>${f.text}</p></div>`).join('')}</div>`
+  return `<h3>📊 Bento Grid 视觉信息图（100% 源自所选资料 · ${p.name}）</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${metrics.slice(0, 6).map(m => `<div class="card" style="background:linear-gradient(145deg,#172554,#1e3a8a)"><div style="font-size:12px;color:#93c5fd">原文量化指标 ${m.cite} · ${m.source}</div><div style="font-size:15px;font-weight:700;margin-top:6px">${m.text}</div></div>`).join('')}</div><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px">${facts.slice(0, 6).map(f => `<div class="card"><b>原文事实证据 ${f.cite} (${f.source})</b><p>${f.text}</p></div>`).join('')}</div>`
 }
 
 function renderVideoExplainerHtml(p, metrics, facts) {

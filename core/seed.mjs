@@ -1,10 +1,11 @@
 // 企业版演示数据（全部主体、人员、金额为虚构）。首次启动或数据结构升级时写入。
-import { cp, mkdir, readFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_ROLES } from './org.mjs'
 import { defaultWorkflows, BUSINESS_TYPES } from './workflow.mjs'
+import { extractAny } from './office.mjs'
 import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
 
 export const SCHEMA = 5
@@ -95,9 +96,23 @@ export async function seed({ db, dir, engine, renderDeliverable, system }) {
   const day = n => Date.now() + n * 864e5
   const mk = (owner, input) => engine.create(U(owner), input)
   const toStage = (p, stageId, by, note) => engine.save(U(by), engine.enterStage(db.get('projects', p.id), stageId, U(by), note), note, 'seed')
+  const loadRealDocs = async p => {
+    const short = db.get('companies', p.companyId)?.short || p.name.split(' ')[0]
+    const sub = join(dir, 'nas/项目资料', short)
+    if (!existsSync(sub)) return [{ name: `${p.name}立项信息`, text: `${p.name}：${p.desc || ''}` }]
+    const names = await readdir(sub).catch(() => [])
+    const out = []
+    for (const n of names) {
+      const ex = await extractAny(await readFile(join(sub, n)), extname(n)).catch(() => ({ text: '' }))
+      if (ex.text) out.push({ name: n, text: ex.text })
+    }
+    return out
+  }
   const finalize = async (p, type, md, by, status = 'final') => {
-    const richMd = md && md.length > 350 ? md : buildComprehensiveMarkdown(p, type, [{ name: `${p.name}底稿` }, { name: '审计与业务访谈纪要' }], [md?.replace(/^#+\s*.+\n?/, '').trim()].filter(Boolean))
-    const d = await renderDeliverable({ projectId: p.id, type, markdown: richMd, user: U(by), engine: '人工编制（完整底稿）', status })
+    const realDocs = await loadRealDocs(p)
+    if (md) realDocs.unshift({ name: `${p.name}核定纪要`, text: md })
+    const richMd = buildComprehensiveMarkdown(p, type, realDocs)
+    const d = await renderDeliverable({ projectId: p.id, type, markdown: richMd, user: U(by), engine: '100%源依据编制', status })
     const cur = db.get('projects', p.id)
     db.put('projects', { ...cur, works: cur.works.map(w => w.type === type && !w.deliverableId ? { ...w, deliverableId: d.id, status: status === 'final' ? 'done' : 'doing' } : w) }, m)
     return d
