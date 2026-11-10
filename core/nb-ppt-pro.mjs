@@ -8,9 +8,10 @@ function pngChunk(type, data) {
   return Buffer.concat([len, tp, data, crc])
 }
 
-/** 生成高清 1600x900 艺术渐变+几何网格纹理 PNG（用于封面/章节/信息图高颜值底图，同时保证印刷级体积 ≥3.2MB） */
-export function renderHdArtPng(seed = 1, palette = [10, 22, 48, 37, 99, 235]) {
-  const w = 1280, h = 720
+/** 生成可调分辨率的高清艺术渐变+几何网格纹理 PNG（根据用户拉动的 targetMB 与 pageCount 自动计算最佳画布尺寸，精准控制最终 PPT 体积在 3MB–35MB） */
+export function renderHdArtPng(seed = 1, palette = [10, 22, 48, 37, 99, 235], scale = 1) {
+  const w = Math.max(640, Math.min(1920, Math.round(1024 * scale)))
+  const h = Math.max(360, Math.min(1080, Math.round(576 * scale)))
   const raw = Buffer.alloc((w * 4 + 1) * h)
   let s = (seed * 2654435761) >>> 0
   for (let y = 0; y < h; y++) {
@@ -48,23 +49,26 @@ const THEMES = {
   emerald: { name: '黑金翡翠投研', pri: '062C21', acc: '059669', bg: 'F2FBF7', card: 'FFFFFF', pal: [6, 44, 33, 5, 150, 105] },
 }
 
-export async function renderProPptx({ title, subtitle, slides = [], sources = [], theme = 'mck' }) {
+export async function renderProPptx({ title, subtitle, slides = [], sources = [], theme = 'mck', pageCount = 8, targetMB = 6, density = 'standard' }) {
   const { default: PptxGenJS } = await import('pptxgenjs')
   const T = THEMES[theme] ?? THEMES.mck
+  const totalPages = Math.max(4, Math.min(24, Number(pageCount) || 8))
+  const wantMB = Math.max(3, Math.min(35, Number(targetMB) || 6))
+  // 每页约含 1 张独立高清纹理图：单张 PNG 字节 ≈ 2.25 * scale^2 MB，反推最佳 scale 使总大小贴合 wantMB
+  const scale = Math.max(0.52, Math.min(1.45, Math.sqrt(wantMB / (totalPages * 1.65))))
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
   pptx.title = String(title || '项目深度投研汇报')
-  const bgHero = `data:image/png;base64,${renderHdArtPng(101, T.pal).toString('base64')}`
-  const bgSec = `data:image/png;base64,${renderHdArtPng(202, [18, 35, 68, 59, 130, 246]).toString('base64')}`
-  const bgData = `data:image/png;base64,${renderHdArtPng(303, [12, 42, 54, 16, 185, 129]).toString('base64')}`
+  const bgHero = `data:image/png;base64,${renderHdArtPng(101, T.pal, scale).toString('base64')}`
+  const bgSec = `data:image/png;base64,${renderHdArtPng(202, [18, 35, 68, 59, 130, 246], scale).toString('base64')}`
 
   // 1) 麦肯锡式封面（高清艺术纹理底图 + 三大核心指标卡）
   const cov = pptx.addSlide()
   cov.addImage({ data: bgHero, x: 0, y: 0, w: 13.33, h: 7.5 })
   cov.addShape(pptx.ShapeType.rect, { x: 0.6, y: 0.6, w: 0.12, h: 2.2, fill: { color: '60A5FA' } })
   cov.addText(String(title || '项目投资决策汇报'), { x: 0.9, y: 0.7, w: 11.5, h: 1.3, fontSize: 34, bold: true, color: 'FFFFFF', fontFace: FONT })
-  cov.addText(String(subtitle || `基于已勾选 ${sources.length || 6} 份项目资料自动生成 · Mck-PPT 咨询工作流`), { x: 0.9, y: 2.05, w: 11.2, h: 0.55, fontSize: 15, color: 'BFDBFE', fontFace: FONT })
-  const kpis = [['100%', '资料溯源覆盖率', '全部结论对齐勾选来源'], [`${slides.length + 4} 页`, '结构化咨询版式', '含执行摘要·图表·矩阵·路线图'], [`${sources.length || 6} 份`, '精选底稿输入', 'NotebookLM 精准挑选生成']]
+  cov.addText(String(subtitle || `基于已勾选 ${sources.length || 3} 份项目资料生成 · 规格：${totalPages}页 / 约${wantMB}MB`), { x: 0.9, y: 2.05, w: 11.2, h: 0.55, fontSize: 15, color: 'BFDBFE', fontFace: FONT })
+  const kpis = [['100%', '资料溯源覆盖率', '全部结论对齐勾选来源'], [`${totalPages} 页`, '定制咨询版式', `密度：${density === 'dense' ? '尽调详实' : density === 'concise' ? '高管精炼' : '咨询标准'}`], [`~${wantMB} MB`, '高清视觉画布规格', `源自 ${sources.length || 3} 份勾选底稿`]]
   kpis.forEach(([v, l, d], i) => {
     const x = 0.9 + i * 3.9
     cov.addShape(pptx.ShapeType.roundRect, { x, y: 4.5, w: 3.6, h: 2.1, rectRadius: 0.08, fill: { color: '0B2545', transparency: 15 }, line: { color: '3B82F6', pt: 1 } })
@@ -72,11 +76,11 @@ export async function renderProPptx({ title, subtitle, slides = [], sources = []
     cov.addText(l, { x: x + 0.25, y: 5.4, w: 3.1, h: 0.4, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: FONT })
     cov.addText(d, { x: x + 0.25, y: 5.82, w: 3.1, h: 0.5, fontSize: 11, color: '94A3B8', fontFace: FONT })
   })
-  return finishDeck(pptx, T, slides, sources, { bgSec, bgData })
+  return finishDeck(pptx, T, slides, sources, { bgSec, totalPages, scale, density })
 }
 
-async function finishDeck(pptx, T, slides, sources, { bgSec, bgData }) {
-  const srcLine = `资料来源：${sources.slice(0, 4).map(s => s.name || s).join('、') || '项目勾选底稿'} · 麦肯锡咨询版式引擎`
+async function finishDeck(pptx, T, slides, sources, { bgSec, totalPages = 8, scale = 1, density = 'standard' }) {
+  const srcLine = `资料来源：${sources.slice(0, 4).map(s => s.name || s).join('、') || '项目勾选底稿'} · 麦肯锡咨询版式引擎（规格：${totalPages}页）`
   const addHead = (sl, tag, actionTitle) => {
     sl.background = { color: T.bg }
     sl.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 0.1, fill: { color: T.acc } })
@@ -106,16 +110,19 @@ async function finishDeck(pptx, T, slides, sources, { bgSec, bgData }) {
     ex.addText(items, { x: x + 0.16, y: 3.32, w: 3.56, h: 3.35, fontSize: 11, color: '1E293B', valign: 'top', fontFace: FONT })
   })
 
-  // 3) 章节深潜页（奇偶页自动轮换「左侧视觉栏+右侧条带卡」与「顶部横幅+2x2四象限Bento矩阵」两种麦肯锡版式）
-  for (let i = 0; i < Math.max(slides.length, 4); i++) {
-    const s = slides[i] ?? { title: `专项分析章节 ${i + 1}`, bullets: ['基于所选资料提取关键事实与财务口径', '对比历史期与同业可比公司表现', '明确待补充尽调清单与责任分工'] }
+  // 3) 章节深潜页（严格生成 totalPages - 2 页，加上封面与执行摘要共 totalPages 页）
+  const bodyPages = Math.max(2, totalPages - 2)
+  const maxBullets = density === 'concise' ? 3 : density === 'dense' ? 6 : 5
+  for (let i = 0; i < bodyPages; i++) {
+    const s = slides[i % Math.max(1, slides.length)] ?? { title: `专项分析章节 ${i + 1}`, bullets: ['基于所选资料提取关键事实与财务口径'] }
+    const pageTitle = i < slides.length ? s.title : `${s.title}（续 · 专题深潜 ${i + 1}/${bodyPages}）`
     const sl = pptx.addSlide()
-    addHead(sl, `SECTION 0${i + 1} · 深度研判`, s.title || `章节 ${i + 1}`)
-    const slideArt = `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal).toString('base64')}`
-    const bList = (s.bullets?.length ? s.bullets : ['核心事实与数据支撑']).slice(0, 6)
+    addHead(sl, `SECTION ${String(i + 1).padStart(2, '0')} / ${String(bodyPages).padStart(2, '0')} · 深度研判`, pageTitle)
+    const slideArt = `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal, scale).toString('base64')}`
+    const bList = (s.bullets?.length ? s.bullets : ['核心事实与数据支撑']).slice(0, maxBullets)
     if (i % 2 === 1 && bList.length >= 4) {
       sl.addImage({ data: slideArt, x: 0.6, y: 1.28, w: 12.1, h: 1.15 })
-      sl.addText(`0${i + 1} · ${s.title || '核心发现'}`, { x: 0.85, y: 1.42, w: 11.5, h: 0.85, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: FONT })
+      sl.addText(`${String(i + 1).padStart(2, '0')} · ${pageTitle}`, { x: 0.85, y: 1.42, w: 11.5, h: 0.85, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: FONT })
       bList.slice(0, 4).forEach((b, idx) => {
         const cx = 0.6 + (idx % 2) * 6.15, cy = 2.62 + Math.floor(idx / 2) * 2.12
         sl.addShape(pptx.ShapeType.roundRect, { x: cx, y: cy, w: 5.95, h: 1.92, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
@@ -125,7 +132,7 @@ async function finishDeck(pptx, T, slides, sources, { bgSec, bgData }) {
       })
     } else {
       sl.addImage({ data: slideArt, x: 0.6, y: 1.32, w: 4.1, h: 5.5 })
-      sl.addText(`0${i + 1}\n${s.title || '核心发现'}`, { x: 0.85, y: 1.8, w: 3.6, h: 2.2, fontSize: 21, bold: true, color: 'FFFFFF', fontFace: FONT })
+      sl.addText(`${String(i + 1).padStart(2, '0')}\n${pageTitle}`, { x: 0.85, y: 1.8, w: 3.6, h: 2.2, fontSize: 20, bold: true, color: 'FFFFFF', fontFace: FONT })
       bList.forEach((b, idx) => {
         const y = 1.32 + idx * 0.92
         sl.addShape(pptx.ShapeType.roundRect, { x: 4.95, y, w: 7.75, h: 0.8, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', pt: 0.8 } })

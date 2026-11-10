@@ -18,6 +18,9 @@ export function buildFollowUps(p, question = '', checkedNames = []) {
 export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, b) {
   const kind = String(b.kind || 'ppt')
   const theme = String(b.theme || 'mck')
+  const pageCount = Math.max(4, Math.min(24, Number(b.pageCount) || 8))
+  const targetMB = Math.max(3, Math.min(35, Number(b.targetMB) || 6))
+  const density = ['concise', 'standard', 'dense'].includes(b.density) ? b.density : 'standard'
   let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
   if (!allFiles.some(f => f.mountId !== 'm_ws')) {
     await kb.scanAll().catch(() => {})
@@ -38,20 +41,20 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
   if (kind === 'ppt') {
     const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
     const aiBullets = aiSec ? aiSec.split('\n').map(s => s.replace(/^[-*#\d.]+\s*/, '').trim()).filter(s => s.length > 14 && s.length < 95).slice(0, 5) : []
-    const slides = buildRichPptSlides(p, docs, snippets)
+    const slides = buildRichPptSlides(p, docs, snippets, { pageCount, density })
     if (aiBullets.length >= 3) slides.splice(1, 0, { title: `DeepSeek 实时底稿交叉核验：${p.name}核心财务与估值博弈`, bullets: aiBullets })
-    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `严格基于已勾选 ${docs.length} 份来源 + DeepSeek 实时研判生成`, slides, sources: srcNames, theme })
+    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `基于已勾选 ${docs.length} 份来源 · 规格：${pageCount}页 / 目标~${targetMB}MB`, slides, sources: srcNames, theme, pageCount, targetMB, density })
     const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
-    await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: 'Studio 麦肯锡8页PPT引擎', sources: docs.length, note: '8页麦肯锡咨询版式PPT' })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `麦肯锡咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份勾选资料）` })
+    await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: `Studio ${pageCount}页麦肯锡PPT引擎`, sources: docs.length, note: `${pageCount}页 · ${(buf.length / 1048576).toFixed(2)}MB` })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${pageCount}页_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `${pageCount} 页麦肯锡 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份来源）` })
   }
   if (kind === 'word' || kind === 'report') {
     const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
-    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets) + (aiSec ? `\n\n## 九、DeepSeek 实时专项研判与投资问题深度解答\n${aiSec}` : '')
-    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成 · 完整核验版`, markdown: md })
+    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets, { chapterCount: pageCount, density }) + (aiSec ? `\n\n## DeepSeek 实时专项研判与投资问题深度解答\n${aiSec}` : '')
+    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成 · 规格：${pageCount}章核验版`, markdown: md })
     const d = deliverables.ensure(p.id, '尽调报告', {}, user)
-    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: aiSec ? 'DeepSeek API + 深度报告引擎' : 'Studio 深度报告引擎', sources: docs.length, note: '完整尽调报告' })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${docs.length} 个来源 · DeepSeek 完整核验报告` })
+    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: aiSec ? 'DeepSeek API + 深度报告引擎' : 'Studio 深度报告引擎', sources: docs.length, note: `${pageCount}章尽调报告` })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${pageCount}章_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${pageCount} 章深度报告 · ${docs.length} 个来源` })
   }
   if (kind === 'table' || kind === 'xlsx') {
     const baseSheets = sheetsFromMarkdown(buildComprehensiveMarkdown(p, '尽调清单', docs, snippets), '核验表')

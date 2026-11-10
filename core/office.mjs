@@ -164,9 +164,9 @@ export function markdownToSlides(md) {
   return out
 }
 
-export async function renderPptx({ title, subtitle, markdown, slides: given, sources = [], theme = 'mck' }) {
+export async function renderPptx({ title, subtitle, markdown, slides: given, sources = [], theme = 'mck', pageCount = 8, targetMB = 6, density = 'standard' }) {
   const list = given ?? markdownToSlides(markdown)
-  return renderProPptx({ title, subtitle, slides: list.map(s => ({ title: s.title, bullets: (s.items ?? s.bullets ?? []).map(x => x.text).filter(Boolean) })), sources, theme })
+  return renderProPptx({ title, subtitle, slides: list.map(s => ({ title: s.title, bullets: (s.items ?? s.bullets ?? []).map(x => typeof x === 'string' ? x : x.text).filter(Boolean) })), sources, theme, pageCount, targetMB, density })
 }
 export async function renderPptxLegacy({ title, subtitle, markdown, slides: given }) {
   const { default: PptxGenJS } = await import('pptxgenjs')

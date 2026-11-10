@@ -82,6 +82,19 @@ function renderCenterPane(x, p, f) {
 function renderRightNotes(x, p) {
   const notes = x.notes ?? []
   const arts = x.artifacts?.items ?? []
+  S.studioCfg ??= { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard', specKind: 'ppt' }
+  const cfg = S.studioCfg
+  const SPECS = {
+    ppt: '🖼️ 演示文稿规范：建议 6–14 页 · 单页 130–240 字（3–5 条结论先行要点）· 封面+金字塔摘要+条带卡/2×2 Bento 交替 · 留白率 ≥35% · 画布体积 3–25 MB',
+    word: '📄 深度报告规范：建议 7–10 章 · 总字数 2,500–6,500 字 · 深海蓝章节底线 + 左侧蓝条溯源框 + 深蓝表头斑马纹数据表 · 1.4x 舒适行距',
+    table: '📋 数据表格规范：4 个标准工作表（工商交易要素 + 原文财务/合同表 + 三维尽调清单 + 勾选资料逐条事实溯源）· 自动列宽与千分位格式',
+    audio: '🎙️ 双人播客规范：Host A（合伙人）× Host B（分析师）6–10 轮交叉追问 · 1,400–2,400 字口语化实证交锋 · 支持双声线语音联播',
+    video: '🎬 视频分镜规范：Scene 01–08 动态镜头分镜卡 · 每幕含画面视觉高光提示 + 旁白配音词 + 原文角标',
+    mindmap: '🌿 思维导图规范：3 层可折叠证据树 · 每个末梢节点强制绑定 [n] 原文出处标签，单分支 ≤6 项防拥挤',
+    flashcards: '🗂️ 翻转闪卡规范：6–12 张 2 列网格主动回忆卡 · 正面核心核验问题，点击翻转展示底稿原文答案与出处',
+    quiz: '❓ 核验测验规范：4–8 道底稿实证选择题 · 点击选项即刻判分并弹出原文核对依据',
+    infographic: '📊 信息图规范：3 列核心量化指标渐流光卡 + 2 列事实证据 Bento 网格 · 零虚构数字',
+  }
   const studioBtns = [
     ['audio', '#38BDF8', '🎙️ 音频概览'],
     ['ppt', '#C084FC', '🖼️ 演示文稿'],
@@ -94,9 +107,28 @@ function renderRightNotes(x, p) {
     ['table', '#34D399', '📋 数据表格'],
   ]
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>Studio</b><span class="grow"></span>
+    <div class="nb-col-hd"><b>Studio · 规格与美学控制舱</b><span class="grow"></span>
       <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">编辑PPT</button>
       <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">编辑Word</button></div>
+    <div style="padding:8px 12px;border-bottom:1px solid var(--line);background:#0C162B;font-size:11.5px;display:flex;flex-direction:column;gap:6px">
+      <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(规范区间 4–24)</span></span><span class="grow"></span>
+        <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
+      <div class="row"><span>💎 目标文件大小：<b id="nbMbVal" style="color:#34D399">~${cfg.targetMB} MB</b> <span class="dim">(高清区间 3–30MB)</span></span><span class="grow"></span>
+        <input type="range" min="3" max="30" step="1" value="${cfg.targetMB}" style="width:120px;accent-color:#10B981" data-act="nb-cfg-mb"></div>
+      <div class="row">
+        <select class="select sm grow" data-act="nb-cfg-theme">
+          <option value="mck" ${cfg.theme === 'mck' ? 'selected' : ''}>🎨 麦肯锡深海蓝 (Mck)</option>
+          <option value="swiss" ${cfg.theme === 'swiss' ? 'selected' : ''}>🎨 瑞士国际网格 (Swiss)</option>
+          <option value="emerald" ${cfg.theme === 'emerald' ? 'selected' : ''}>🎨 黑金翡翠投研 (Emerald)</option>
+        </select>
+        <select class="select sm grow" data-act="nb-cfg-den">
+          <option value="concise" ${cfg.density === 'concise' ? 'selected' : ''}>📐 高管精炼 (每页3要点)</option>
+          <option value="standard" ${cfg.density === 'standard' ? 'selected' : ''}>📐 咨询标准 (每页5要点)</option>
+          <option value="dense" ${cfg.density === 'dense' ? 'selected' : ''}>📐 尽调详实 (每页6要点)</option>
+        </select>
+      </div>
+      <div class="dim" id="nbSpecHint" style="padding:5px 8px;background:#111F3D;border-radius:6px;border-left:3px solid #3B82F6;line-height:1.45">${esc(SPECS[cfg.specKind] || SPECS.ppt)}</div>
+    </div>
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
     <div class="nb-notes-list" style="border-top:1px solid var(--line)">
@@ -130,15 +162,21 @@ Object.assign(ACT, {
     if (r) { S.project.notes = r; hooks.refresh() }
   },
   'nb-studio-xlsx': el => ACT['nb-open-board']({ dataset: { p: el.dataset.p, b: 'evidence' } }),
+  'nb-cfg-pg': el => { S.studioCfg ??= {}; S.studioCfg.pageCount = Number(el.value) || 8; if ($('#nbPgVal')) $('#nbPgVal').textContent = `${S.studioCfg.pageCount} 页/章` },
+  'nb-cfg-mb': el => { S.studioCfg ??= {}; S.studioCfg.targetMB = Number(el.value) || 6; if ($('#nbMbVal')) $('#nbMbVal').textContent = `~${S.studioCfg.targetMB} MB` },
+  'nb-cfg-theme': el => { S.studioCfg ??= {}; S.studioCfg.theme = el.value || 'mck' },
+  'nb-cfg-den': el => { S.studioCfg ??= {}; S.studioCfg.density = el.value || 'standard' },
   'nb-make': async el => {
     const k = el.dataset.k
+    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
+    cfg.specKind = k
     if (k === 'audio') return ACT['nb-studio-audio'](el)
-    S.makingStudio = el.textContent.trim()
+    S.makingStudio = `${el.textContent.trim()} (${cfg.pageCount}页/章 · ~${cfg.targetMB}MB)`
     hooks.refresh()
-    const r = await act('nb.studio.make', { projectId: el.dataset.p || S.sel, kind: k, fileIds: S.ctx.fileIds })
+    const r = await act('nb.studio.make', { projectId: el.dataset.p || S.sel, kind: k, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density })
     S.makingStudio = null
     if (r) {
-      toast(`✅ 已生成「${r.name}」（${(r.bytes / 1048576).toFixed(2)} MB），已陈列在右下角 Studio 成品区`, 'ok')
+      toast(`✅ 已按规格 (${cfg.pageCount}页/章 · ${(r.bytes / 1048576).toFixed(2)} MB) 生成「${r.name}」并置于右下角`, 'ok')
       S.project = await get('project', { id: el.dataset.p || S.sel })
     }
     hooks.refresh()
@@ -167,4 +205,5 @@ Object.assign(ACT, {
 })
 
 document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ACT['nb-chat-send']() } })
+document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (a?.startsWith('nb-cfg-') && ACT[a]) ACT[a](e.target) })
 VIEWS.notebook = renderNbWorkspace
