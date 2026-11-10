@@ -114,7 +114,7 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
-      <button class="btn sm pri" data-act="nb-dify-open" data-p="${p.id}">🔗 Dify工作流</button>
+      <button class="btn sm pri" data-act="nb-dify-open" data-p="${p.id}">🏛️ 机构模板与额度</button>
       <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 录音转写</button>
       <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订PPT</button>
       <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订文书</button></div>
@@ -196,23 +196,24 @@ Object.assign(ACT, {
   'nb-dify-open': async el => {
     const pid = el.dataset.p || S.sel
     const data = await get('nb.dify.templates', { projectId: pid })
-    S.difySt = { pid, tpls: data.templates || [], curId: data.templates?.[0]?.id || 'dify_word_bridge', yaml: data.sampleYaml || '', trace: null }
+    S.difySt = { pid, tpls: data.templates || [], quota: data.quota, perms: data.permissions, curId: data.templates?.[0]?.id || 'ac_dd_word', yaml: data.sampleYaml || '', trace: null }
     renderDifyDrawer()
   },
   'nb-dify-tpl': async el => {
     const pid = S.difySt?.pid || S.sel
     const data = await get('nb.dify.templates', { projectId: pid, tplId: el.value })
-    S.difySt = { ...S.difySt, curId: el.value, yaml: data.sampleYaml || '', trace: null }
+    S.difySt = { ...S.difySt, curId: el.value, quota: data.quota, perms: data.permissions, yaml: data.sampleYaml || '', trace: null }
     renderDifyDrawer()
   },
   'nb-dify-run': async () => {
-    const st = S.difySt || { pid: S.sel, curId: 'dify_word_bridge' }
+    const st = S.difySt || { pid: S.sel, curId: 'ac_dd_word' }
     const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
-    toast('🔗 正在按 Dify DSL 节点拓扑执行工作流并渲染成果…')
+    toast('🏛️ 正在按机构标准工作流节点执行核验并扣减配额…')
     const r = await act('nb.dify.run', { projectId: st.pid, workflowId: st.curId, dslYaml: $('#nbDifyYaml')?.value, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density, autoSubmit: !!$('#nbDifyAutoSub')?.checked })
     if (r) {
       S.difySt.trace = r.trace
-      toast(`✅ Dify工作流「${r.workflowName}」执行完毕，已产出《${r.artifact.name}》`, 'ok')
+      if (r.gov) { S.difySt.quota = r.gov.quota; S.difySt.tpls = r.gov.templates }
+      toast(`✅ 机构工作流「${r.workflowName}」执行完毕，已产出《${r.artifact.name}》`, 'ok')
       S.project = await get('project', { id: st.pid })
       renderDifyDrawer()
       hooks.refresh()
@@ -260,22 +261,29 @@ document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (
 VIEWS.notebook = renderNbWorkspace
 
 function renderDifyDrawer() {
-  const st = S.difySt || { tpls: [], curId: 'dify_word_bridge', yaml: '' }
+  const st = S.difySt || { tpls: [], curId: 'ac_dd_word', yaml: '', quota: { usedCalls: 12, limitCalls: 500, remainCalls: 488, usedRMB: 3.85, monthlyLimitRMB: 200, remainRMB: 196.15 }, perms: {} }
   const cur = st.tpls.find(t => t.id === st.curId) || st.tpls[0] || {}
-  drawer(`${drawerHead('🔗 Dify DSL 投研工作流编排中心 (兼容 DifyAIA v0.2.0)', '内置本地零依赖 Sidecar 渲染桥接：无需额外部署 Python Flask 即可直接执行 Dify 工作流并产出 Word / PPT / Excel / 导图 / 压力测试')}
+  const q = st.quota || {}
+  drawer(`${drawerHead('🏛️ 优势资本 · 机构模板中心与企业级额度治理', '对标企业级治理规范：个人/部门调用配额与成本归因 · 按全机构使用频次排序的标准模板 · 非管理员密钥脱敏与模型权限锁')}
     <div class="body">
-      <label class="f">选择预置投研 Dify 工作流模板（或直接在下方粘贴任意 Dify .yml DSL）
-        <select class="select" data-act="nb-dify-tpl">${st.tpls.map(t => `<option value="${t.id}" ${t.id === st.curId ? 'selected' : ''}>${esc(t.name)}（源自 ${esc(t.origin)}）</option>`).join('')}</select></label>
-      <div class="box" style="margin:8px 0"><b>节点拓扑流（Workflow Graph Nodes）</b>
+      <div class="box" style="margin-bottom:10px;background:#0F1E3A;border-color:#2563EB">
+        <div class="row"><b>📊 当前账号 AI 额度与消费归因</b><span class="grow"></span>
+          <span class="pill st-3">剩余调用：${q.remainCalls ?? 488} / ${q.limitCalls ?? 500} 次</span>
+          <span class="pill st-4">本月余额：¥${q.remainRMB ?? 196.15} / ¥${q.monthlyLimitRMB ?? 200}</span></div>
+        <div class="dim" style="margin-top:6px;font-size:11.5px">权限边界：${st.perms?.canToggleModel ? '管理员（可管理模型供应商、密钥限额与同步机构标准模板）' : '普通成员（已锁定模型供应商开关与API密钥明文查看，保障机构合规）'}</div>
+      </div>
+      <label class="f">机构标准工作流模板中心（按全机构累计调用频次排序）
+        <select class="select" data-act="nb-dify-tpl">${st.tpls.map(t => `<option value="${t.id}" ${t.id === st.curId ? 'selected' : ''}>🔥 [${t.usageCount}次调用] ${esc(t.name)} · ${esc(t.category)}</option>`).join('')}</select></label>
+      <div class="box" style="margin:8px 0"><b>标准执行节点流（Workflow Graph）</b>
         <div class="row" style="flex-wrap:wrap;margin-top:6px">${(cur.nodes || []).map((n, i) => `<span class="pill st-3">${i + 1}. ${esc(n)}</span>`).join(' → ')}</div>
         <div class="dim" style="margin-top:6px;font-size:11.5px">${esc(cur.desc || '')}</div></div>
-      ${st.trace ? `<div class="box" style="margin:8px 0;border-color:#10B981"><b>✅ 节点执行追踪</b><div class="row" style="flex-wrap:wrap;margin-top:6px">${st.trace.map(t => `<span class="tag blue">✓ ${esc(t.node)} (${t.ms}ms)</span>`).join('')}</div></div>` : ''}
-      <label class="f">Dify Workflow DSL (v0.2.0 YAML · 可直接修改节点或导入外部 .yml)
-        <textarea class="input area mono" id="nbDifyYaml" style="height:210px">${esc(st.yaml)}</textarea></label>
+      ${st.trace ? `<div class="box" style="margin:8px 0;border-color:#10B981"><b>✅ 节点执行与计费归因完成</b><div class="row" style="flex-wrap:wrap;margin-top:6px">${st.trace.map(t => `<span class="tag blue">✓ ${esc(t.node)} (${t.ms}ms)</span>`).join('')}</div></div>` : ''}
+      <label class="f">工作流编排定义（YAML DSL · 支持导入/导出）
+        <textarea class="input area mono" id="nbDifyYaml" style="height:175px">${esc(st.yaml)}</textarea></label>
       <div class="row" style="margin-top:10px">
         <label class="dim"><input type="checkbox" id="nbDifyAutoSub" checked> 执行完成后自动报送至当前阶段复核节点</label>
         <span class="grow"></span>
-        <button class="btn pri" data-act="nb-dify-run">▶ 立即运行此 Dify 工作流</button>
+        <button class="btn pri" data-act="nb-dify-run">▶ 立即执行此机构标准工作流</button>
       </div>
     </div>`, true)
 }

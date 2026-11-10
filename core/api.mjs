@@ -26,7 +26,7 @@ import { listProjectArtifacts, openProjectFolderOrFile } from './nb-folder.mjs'
 import { buildFollowUps, generateStudioArtifact } from './nb-studio-gen.mjs'
 import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
 import { getOsState, dispatchAgentOs, inlineCoCreateRewrite, toggleAutoTask } from './nb-qwen-os.mjs'
-import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow } from './nb-dify-dsl.mjs'
+import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow, getEnterpriseGovState } from './nb-dify-dsl.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -581,7 +581,8 @@ export function createApi(ctx) {
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.dify.templates': (user, q) => {
       const p = q.get('projectId') ? project(user, q.get('projectId')) : null
-      return { templates: DIFY_WORKFLOW_TEMPLATES, sampleYaml: exportDifyDslYaml(q.get('tplId') || 'dify_word_bridge', p || {}) }
+      const gov = getEnterpriseGovState(db, user, org)
+      return { ...gov, sampleYaml: exportDifyDslYaml(q.get('tplId') || gov.templates[0]?.id, p || {}) }
     },
     'nb.slides': async (user, q) => {
       const d = deliverable(user, q.get('id'))

@@ -284,7 +284,13 @@ export async function pdfText(buf) {
 /** 统一文字抽取：按扩展名分派，返回 { text, pages?, note } */
 export async function extractAny(buf, ext) {
   try {
-    if (['.md', '.txt', '.csv', '.tsv', '.json', '.log'].includes(ext)) return { text: buf.toString('utf8') }
+    if (['.md', '.txt', '.csv', '.tsv', '.json', '.log'].includes(ext)) {
+      const utf8 = buf.toString('utf8')
+      if (utf8.includes('\uFFFD')) {
+        try { return { text: new TextDecoder('gb18030').decode(buf) } } catch { /* fallback utf8 */ }
+      }
+      return { text: utf8 }
+    }
     if (ext === '.pdf') { const r = await pdfText(buf); return { text: r.text, pages: r.pages.length, note: r.scanned ? '扫描件无文字层，需 OCR' : '' } }
     if (ext === '.xlsx') return { text: await readXlsx(buf) }
     if (ext === '.docx' || ext === '.pptx') return { text: officeText(buf, ext) }
