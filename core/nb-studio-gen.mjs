@@ -2,6 +2,7 @@
 import { renderDocx, renderPptx, renderXlsx } from './office.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
 import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
+import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml } from './nb-nlm-pipeline.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
   const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
@@ -47,16 +48,10 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
     const buf = await renderXlsx({ title: `${p.name} · 勾选资料结构化数据表`, sheets: [{ name: '核验数据表', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '提取事实与指标', key: 'finding', width: 64 }, { header: '对应勾选来源', key: 'src', width: 32 }, { header: '状态', key: 'status', width: 14 }], rows }] })
     return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_数据表格_${stamp}.xlsx`, buffer: buf, kind: 'xlsx', sourceCount: docs.length, summary: `结构化数据表 XLSX（源自 ${docs.length} 份勾选资料）` })
   }
-  const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与逐字稿', video: '视频概览脚本' }
+  const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与双人对谈', video: '视频概览脚本' }
   const label = labelMap[kind] || '专项成果'
-  const html = buildRichHtmlArtifact(p, label, kind, docs, snippets)
+  const grounded = extractGroundedFacts(p, docs)
+  const turns = kind === 'audio' ? await generateTwoHostScript(null, p, docs, grounded) : []
+  const html = renderInteractiveNlmHtml(p, kind, docs, { ...grounded, turns })
   return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_${label}_${stamp}.html`, buffer: Buffer.from(html, 'utf8'), kind, sourceCount: docs.length, summary: `${label}（源自 ${docs.length} 份勾选资料）` })
-}
-
-function buildRichHtmlArtifact(p, label, kind, docs, snippets) {
-  const items = (snippets.length ? snippets : ['核心投资逻辑与证据链已对齐勾选来源']).slice(0, 8)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${p.name} · ${label}</title>
-<style>body{margin:0;padding:32px;font-family:"Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#081226,#13284c);color:#f8fafc}.wrap{max-width:980px;margin:0 auto}.hd{border-left:5px solid #38bdf8;padding-left:16px;margin-bottom:24px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.card{background:rgba(255,255,255,.07);border:1px solid rgba(148,163,184,.22);border-radius:14px;padding:18px}</style>
-</head><body><div class="wrap"><div class="hd"><h1>${p.name} · ${label}</h1><p>基于已勾选 ${docs.length} 份来源（${docs.map(d => d.name).join('、') || '项目底稿'}）自动生成 · 存放于项目专属文件夹</p></div>
-<div class="grid">${items.map((x, i) => `<div class="card"><b style="color:#38bdf8">${kind === 'quiz' ? `测验题 Q${i + 1}` : kind === 'flashcards' ? `核心闪卡 #${i + 1}` : `关键节点 0${i + 1}`}</b><p>${x}</p></div>`).join('')}</div></div></body></html>`
 }
