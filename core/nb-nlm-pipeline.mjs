@@ -1,4 +1,4 @@
-// Google NotebookLM 100% 级生成流水线：
+// 优势资本智能投研 100% 级生成流水线：
 // Stage 1: 全量勾选来源分块与带页码/句段锚定 (Source-Anchored Fact & Metric Map)
 // Stage 2: LLM / 深度结构化双通道合成（双人播客对谈、可折叠思维导图、3D翻转闪卡、交互判分测验、Bento信息图）
 import { complete, parseJson } from './llm.mjs'
@@ -43,7 +43,7 @@ export async function generateTwoHostScript(ai, p, docs, { facts, metrics }) {
   const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
   if (route?.adapter) {
     try {
-      const prompt = `项目：${p.name}\n来源事实：\n${[...metrics.slice(0, 6), ...facts.slice(0, 6)].map(x => `${x.text} ${x.cite}`).join('\n')}\n请生成 Google NotebookLM Audio Overview 风格的双主持人（Host A 资深投研合伙人 / Host B 敏锐尽调分析师）深度对谈脚本 JSON：{"turns":[{"speaker":"Host A","text":"..."},{"speaker":"Host B","text":"..."}]}，共 8 轮，自然口语且引用具体数字。`
+      const prompt = `项目：${p.name}\n来源事实：\n${[...metrics.slice(0, 6), ...facts.slice(0, 6)].map(x => `${x.text} ${x.cite}`).join('\n')}\n请生成 优势资本投研对谈 风格的双主持人（Host A 资深投研合伙人 / Host B 敏锐尽调分析师）深度对谈脚本 JSON：{"turns":[{"speaker":"Host A","text":"..."},{"speaker":"Host B","text":"..."}]}，共 8 轮，自然口语且引用具体数字。`
       const out = parseJson(await complete(route.adapter, { system: '只输出 JSON。', user: prompt, maxTokens: 2500, reasoning: 'off', signal: AbortSignal.timeout(25000) }))
       if (Array.isArray(out?.turns) && out.turns.length >= 4) return out.turns
     } catch { /* 回退至高拟真双人深度对谈模板 */ }
@@ -53,7 +53,7 @@ export async function generateTwoHostScript(ai, p, docs, { facts, metrics }) {
   const f0 = facts[0]?.text || '核心技术具备国产替代壁垒'
   const f1 = facts[1]?.text || '下游头部客户订单饱满'
   return [
-    { speaker: 'Host A（投研合伙人）', text: `欢迎收听本期 NotebookLM 深度投研对谈。今天我们聚焦「${p.name}」，只根据咱们左侧勾选的 ${docs.length || 2} 份原始底稿来拆解它的投资价值。` },
+    { speaker: 'Host A（投研合伙人）', text: `欢迎收听本期 优势资本投研 深度投研对谈。今天我们聚焦「${p.name}」，只根据咱们左侧勾选的 ${docs.length || 2} 份原始底稿来拆解它的投资价值。` },
     { speaker: 'Host B（尽调分析师）', text: `没错。我刚把这几份底稿做完交叉比对，最抓眼球的一组核心数据是：${m0}。而且从业务验证来看，${f0}。` },
     { speaker: 'Host A（投研合伙人）', text: `这个数字确实很亮眼。但作为投委会门禁把关，我们要追问第二层：它的增长持续性和客户验证到底扎不扎实？` },
     { speaker: 'Host B（尽调分析师）', text: `底稿里给出了明确证据：${m1}。同时在客户侧，${f1}，说明不是单点偶发收入，而是具备高复购基础。` },
@@ -73,7 +73,7 @@ export function renderInteractiveNlmHtml(p, kind, docs, { facts, metrics, turns 
     : renderBentoInfographicHtml(p, kind, metrics, facts)
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${p.name} · Studio</title>
 <style>body{margin:0;padding:26px;font:14px/1.6 "Microsoft YaHei",sans-serif;background:#091122;color:#f1f5f9}.hd{border-bottom:1px solid #1e293b;padding-bottom:14px;margin-bottom:20px}.card{background:#111c35;border:1px solid #243861;border-radius:14px;padding:16px;margin-bottom:12px}.tag{display:inline-block;padding:2px 9px;border-radius:99px;background:#1d4ed8;color:#fff;font-size:11.5px;margin-right:8px}button{cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid #3b82f6;background:#1d4ed8;color:#fff}</style>
-</head><body><div class="hd"><h2>${p.name} · Google NotebookLM 交互式成品</h2><div style="color:#94a3b8;font-size:12px">溯源依据（${docs.length} 份）：${srcText}</div></div>${body}</body></html>`
+</head><body><div class="hd"><h2>${p.name} · 优势资本 · 交互式投研成果</h2><div style="color:#94a3b8;font-size:12px">溯源依据（${docs.length} 份）：${srcText}</div></div>${body}</body></html>`
 }
 
 function renderMindmapHtml(p, all) {

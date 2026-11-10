@@ -1,4 +1,4 @@
-// NotebookLM 三栏项目工作空间：左栏（左上本地 PPT/Word/录音转文字工坊 + 左下资料源）| 中栏（流程进度%+插件提交 + 对话）| 右栏（笔记与各种看板）
+// 优势资本投研 三栏项目工作空间：左栏（左上本地 PPT/Word/录音转文字工坊 + 左下资料源）| 中栏（流程进度%+插件提交 + 对话）| 右栏（笔记与各种看板）
 import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, levelTag } from '/api/investai?asset=ui.js'
 
 async function loadNbProject() {
@@ -71,7 +71,7 @@ function renderCenterPane(x, p, f) {
         <div class="md">${md(m.text || '')}</div>
         ${m.actions?.length ? `<div class="row" style="flex-wrap:wrap;margin-top:6px">${m.actions.map(a => `<span class="pill st-3" style="font-size:10.5px">${esc(a)}</span>`).join('')}</div>` : ''}
       </div>`).join('') : (msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
-        <div class="dim" style="font-size:11px;margin-bottom:3px">${m.role === 'user' ? esc(d.me.name) : 'Gemini Notebook · FDE 助手'}</div>
+        <div class="dim" style="font-size:11px;margin-bottom:3px">${m.role === 'user' ? esc(d.me.name) : '优势资本 · 智能投研助手'}</div>
         <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于勾选来源深度分析…' : ''))}</div>
         ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 保存到笔记</button></div>` : ''}</div>`).join('')
         : `<div class="box"><b>基于已勾选 ${S.ctx.fileIds.length} 个来源的深度工作流</b></div>`)}

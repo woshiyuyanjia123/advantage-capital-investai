@@ -1,4 +1,4 @@
-// 点击 NotebookLM 笔记展开多维看板：阶段推进看板 / 成果与插件提交看板 / 数据与冲突核验看板 / 投决门禁看板 / 待办与笔记编辑器
+// 点击 优势资本投研 笔记展开多维看板：阶段推进看板 / 成果与插件提交看板 / 数据与冲突核验看板 / 投决门禁看板 / 待办与笔记编辑器
 import { S, D, ACT, hooks, $, esc, md, icon, avatar, get, act, drawer, drawerHead, toast, userName, fmt, ymd, DL_STATUS, WORK_STATUS, RESULT, RULE } from '/api/investai?asset=ui.js'
 
 let boardSt = { projectId: null, tab: 'stages', noteId: null }

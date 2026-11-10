@@ -1,4 +1,4 @@
-// NotebookLM × FDE：左上工坊本地 PPT/Word/录音转文字处理与插件提交动作
+// 优势资本智能投研：左上工坊本地 PPT/Word/录音转文字处理与插件提交动作
 import { randomBytes } from 'node:crypto'
 import { stat, readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
@@ -66,7 +66,7 @@ export async function transcribeAudioLocal({ db, kb, meetings, settings }, user,
 export async function handlePluginSubmit(ctx, user, p, b) {
   const { db, ai, deliverables, engine } = ctx
   const channel = String(b.channel || 'plugin-draft')
-  const note = String(b.note || '通过 NotebookLM 插件通道提交').slice(0, 200)
+  const note = String(b.note || '通过 优势资本投研 插件通道提交').slice(0, 200)
   let summary = ''
   let deliverableId = b.deliverableId || null
   if (channel === 'local-checkin' && deliverableId) {

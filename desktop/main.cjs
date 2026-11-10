@@ -9,7 +9,7 @@ const net = require('node:net')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
-const TITLE = 'NotebookLM · 企业 FDE 工作台 (DSH 插件版)'
+const TITLE = '优势资本 · 智能投研工作台'
 
 function syncDshPlugin(silent = false) {
   try {

@@ -1,4 +1,4 @@
-// NotebookLM 项目管理主页：轻点项目展开实时流程进度百分比，旁边直接提供插件提交入口
+// 优势资本投研 项目管理主页：轻点项目展开实时流程进度百分比，旁边直接提供插件提交入口
 import { S, D, ACT, VIEWS, hooks, $, esc, icon, avatar, act, toast, pick, toB64, can, P_STATUS } from '/api/investai?asset=ui.js'
 
 S.nbExpanded ??= null

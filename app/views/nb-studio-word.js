@@ -28,7 +28,7 @@ function renderWordDrawer() {
         <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">📂 打开项目专属文件夹</button>
       </div>
       <div class="row" style="margin-bottom:8px;padding:6px 10px;background:#0F1E3A;border:1px solid #2563EB;border-radius:8px">
-        <span style="font-size:12px;color:#93C5FD"><b>✍️ 千问2.0 人机共创</b>：在下方正文框用鼠标选中一段文字 →</span>
+        <span style="font-size:12px;color:#93C5FD"><b>✍️ 段落级人机共创</b>：在下方正文框用鼠标选中一段文字 →</span>
         <input class="input sm grow" id="nbInlineInst" placeholder="输入原地改写要求（如：补充勾选底稿财务数据 / 精炼为投决要点 / 强化风险条款）…">
         <button class="btn sm pri" data-act="nb-word-inline">✨ 让 Agent 原地改写选中段落</button>
       </div>

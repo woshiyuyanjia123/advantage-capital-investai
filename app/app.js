@@ -45,7 +45,7 @@ function renderHdr() {
   const w = d.wisburg
   const route = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }[d.model.mode] ?? d.model.mode
   $('#hdr').innerHTML = `
-    <div class="logo"><span class="mk">N /</span><span class="nm">NotebookLM · 企业 FDE</span><span class="ver">${esc(d.settings.org?.name ?? '')} · DSH 插件版</span></div>
+    <div class="logo"><span class="mk">AC /</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')} · DSH 插件版</span></div>
     <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或直接提问…" autocomplete="off"><span class="kbd">⌘ K</span></div>
     <button class="nb-api-pill" data-act="nb-api" title="点击配置本地离线 API / DSH / 云端 API"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
     <button class="btn ghost ico" data-act="help" title="帮助：快速上手、名词解释、常见问题">${icon('info', 17)}</button>

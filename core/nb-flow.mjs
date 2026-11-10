@@ -1,4 +1,4 @@
-// NotebookLM × FDE：阶段进度百分比计算、插件提交记录与笔记存储
+// 优势资本智能投研：阶段进度百分比计算、插件提交记录与笔记存储
 import { randomBytes } from 'node:crypto'
 
 const idOf = p => `${p}_${randomBytes(4).toString('hex')}`

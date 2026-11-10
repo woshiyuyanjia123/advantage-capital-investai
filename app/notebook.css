@@ -1,4 +1,4 @@
-/* NotebookLM × WorkBuddy 企业 FDE 样式（三栏工坊 + 点击展开进度百分比 + 插件提交 + 多维笔记看板） */
+/* 优势资本智能投研 样式（三栏工坊 + 点击展开进度百分比 + 插件提交 + 多维笔记看板） */
 .nb-shelf { padding: 20px 26px 32px; overflow: auto; height: 100%; }
 .nb-hero { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
 .nb-hero h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
@@ -24,7 +24,7 @@
 .nb-plug-box { background: #0D1629; border: 1px solid #263B63; border-radius: 10px; padding: 11px 12px; display: flex; flex-direction: column; gap: 8px; }
 .nb-plug-box h4 { margin: 0; font-size: 12.5px; color: #93C5FD; display: flex; align-items: center; gap: 6px; }
 
-/* NotebookLM 三栏项目工作空间：左栏（左上本地工坊 + 左下资料源）| 中栏（进度%与插件提交 + 对话）| 右栏（笔记与多维看板） */
+/* 优势资本投研 三栏项目工作空间：左栏（左上本地工坊 + 左下资料源）| 中栏（进度%与插件提交 + 对话）| 右栏（笔记与多维看板） */
 .nb-ws { display: grid; grid-template-columns: 320px minmax(0, 1fr) 340px; gap: 12px; padding: 12px 14px; height: 100%; overflow: hidden; background: #080E1B; }
 .nb-col { background: #0F172A; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .nb-col-hd { padding: 10px 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; background: #111C33; flex: none; }
@@ -48,7 +48,7 @@
 .nb-seg-row { display: grid; grid-template-columns: 64px 96px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
 @media (max-width: 1180px) { .nb-ws { grid-template-columns: 280px minmax(0, 1fr); } .nb-ws > .nb-col:nth-child(3) { display: none; } }
 
-/* 图2（Gemini Notebook 精选横幅 + 最近项目卡片）& 图1（左来源+左下成品夹 | 中带角标问答+3追问卡片 | 右Studio九宫格） */
+/* 图2（优势资本智能投研 精选横幅 + 最近项目卡片）& 图1（左来源+左下成品夹 | 中带角标问答+3追问卡片 | 右Studio九宫格） */
 .nb-feat-row { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); gap: 14px; margin-bottom: 24px; overflow-x: auto; padding-bottom: 4px; }
 .nb-feat-card { position: relative; height: 158px; border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.32); transition: transform .16s; }
 .nb-feat-card:hover { transform: translateY(-3px); border-color: #60A5FA; }

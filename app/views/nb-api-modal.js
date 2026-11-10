@@ -1,4 +1,4 @@
-// NotebookLM 风格一键 API 连接面板（支持完全断网调用本机 Ollama/LM Studio/vLLM、DSH 宿主模型或云端 API）
+// 优势资本投研 风格一键 API 连接面板（支持完全断网调用本机 Ollama/LM Studio/vLLM、DSH 宿主模型或云端 API）
 import { D, ACT, hooks, $, esc, icon, get, act, dialog, toast, opts } from '/api/investai?asset=ui.js'
 
 export async function openApiConnectModal() {
@@ -10,7 +10,7 @@ export async function openApiConnectModal() {
     ? probe.models.map(m => `<button type="button" class="tag blue" data-pick-url="${esc(m.baseURL)}" data-pick-m="${esc(m.model)}">${esc(m.model)}</button>`).join(' ')
     : '<span class="dim">未探测到运行中的本机端口（可离线手动填写 Ollama 11434 / LM Studio 1234 / 直接用内置离线引擎）</span>'
   const r = await dialog(`<h3>${icon('globe', 16)} 连接模型 API（支持断网本地 API / DSH / 云端）</h3>
-    <div class="infobox" style="font-size:12px">像 NotebookLM 一样即连即用：断网环境选<b>「仅本地离线 API」</b>直连本机 Ollama / LM Studio / vLLM（或零依赖内置离线引擎）；联网可选 DSH 宿主模型或云端 API。</div>
+    <div class="infobox" style="font-size:12px">多模态模型即连即用：断网环境选<b>「仅本地离线 API」</b>直连本机 Ollama / LM Studio / vLLM（或零依赖内置离线引擎）；联网可选 DSH 宿主模型或云端 API。</div>
     <label class="f">运行路由模式<select class="select" name="mode">${opts([['hybrid', '智能混合（优先已连接 API，机密可走本地）'], ['local', '仅本地离线 API（不联网，数据不出本机）'], ['external', '云端 / DSH API 优先']], s.mode)}</select></label>
     <div class="box" style="margin:8px 0"><b>① 本地离线 API（无需联网）</b><div style="margin:6px 0">${localHints}</div>
       <div class="row"><label class="f grow">本机地址<input class="input mono sm" name="localBaseURL" id="nbLocUrl" value="${esc(s.local?.baseURL || 'http://127.0.0.1:11434/v1')}" placeholder="http://127.0.0.1:11434/v1"></label>

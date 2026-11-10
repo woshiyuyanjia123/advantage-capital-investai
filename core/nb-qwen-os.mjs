@@ -1,4 +1,4 @@
-// 千问办公 2.0 范式融合引擎（Agent as an OS：IM 钉钉/项目群聊协同 × Office 原地人机共创 × SaaS 自动任务与 DWS 事件源 × MCP 协议）
+// 机构智能协同 范式融合引擎（Agent as an OS：IM 钉钉/项目群聊协同 × Office 原地人机共创 × SaaS 自动任务与 DWS 事件源 × MCP 协议）
 import { complete } from './llm.mjs'
 import { generateStudioArtifact } from './nb-studio-gen.mjs'
 import { submitArtifactToNode } from './nb-flow-board.mjs'
@@ -63,7 +63,7 @@ export async function inlineCoCreateRewrite({ db, org, deliverables, ai }, user,
   const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
   if (route?.adapter) {
     const out = await complete(route.adapter, {
-      system: '你是千问办公2.0风格的Office原地人机共创助手。只输出替换选中段落后的修订后Markdown正文片段，严禁编造底稿外数字，保留[n]引用。',
+      system: '你是机构智能协同风格的Office原地人机共创助手。只输出替换选中段落后的修订后Markdown正文片段，严禁编造底稿外数字，保留[n]引用。',
       user: `项目：${p.name}\n原选中段落：\n${selected}\n\n修改指令：${inst}\n请直接输出替换后的段落：`,
       maxTokens: 1200, reasoning: 'off', signal: AbortSignal.timeout(25000),
     }).catch(() => '')

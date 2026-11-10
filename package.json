@@ -1,7 +1,7 @@
 {
   "name": "@local/investai-desktop",
   "version": "3.0.0",
-  "description": "NotebookLM × WorkBuddy 企业 FDE 项目管理 DSH 插件（流程进度百分比 + 插件提交 + 多维笔记看板 + 左上本地 PPT/Word/录音转文字工坊 + 本地离线/云端 API）",
+  "description": "优势资本智能投研 项目管理 DSH 插件（流程进度百分比 + 插件提交 + 多维笔记看板 + 左上本地 PPT/Word/录音转文字工坊 + 本地离线/云端 API）",
   "type": "module",
   "private": true,
   "main": "lib/index.mjs",

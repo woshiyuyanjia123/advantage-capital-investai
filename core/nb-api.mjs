@@ -1,4 +1,4 @@
-// NotebookLM × FDE：本地离线 API（Ollama/LM Studio/vLLM）与云端/DSH API 统一连接与探测
+// 优势资本智能投研：本地离线 API（Ollama/LM Studio/vLLM）与云端/DSH API 统一连接与探测
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
@@ -108,7 +108,7 @@ export async function quickConnectApi({ db, ai, mode }, user, b) {
     ...(b.customModel !== undefined ? { customModel: normalizeModel(String(b.customModel).trim()) } : {}),
   }
   const sensitiveLevel = b.sensitiveLevel !== undefined ? Number(b.sensitiveLevel) : (mode !== 'saas' && routeMode !== 'local' ? 4 : s.models.sensitiveLevel)
-  db.put('settings', { ...s, models: { ...s.models, mode: routeMode, sensitiveLevel, local, external } }, { actor: user, reason: 'NotebookLM API 快速配置', action: 'settings' })
+  db.put('settings', { ...s, models: { ...s.models, mode: routeMode, sensitiveLevel, local, external } }, { actor: user, reason: '优势资本投研 API 快速配置', action: 'settings' })
   ai.resetHealth()
   if (b.test) {
     if (routeMode === 'local' && local?.baseURL && local?.model) {

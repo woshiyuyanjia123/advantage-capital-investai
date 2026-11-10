@@ -1,8 +1,8 @@
 {
-  "name": "dsh-notebooklm-fde",
-  "productName": "DSH NotebookLM FDE",
+  "name": "dsh-优势资本投研-fde",
+  "productName": "优势资本智能投研工作台",
   "version": "3.0.0",
-  "description": "NotebookLM × WorkBuddy 企业 FDE 项目管理工作台（内置 DSH 插件自动挂载 + 本地离线/云端 API）",
+  "description": "优势资本智能投研 项目管理工作台（内置 DSH 插件自动挂载 + 本地离线/云端 API）",
   "author": "InvestAI",
   "license": "UNLICENSED",
   "private": true,
@@ -26,10 +26,10 @@
     "resedit": "2.0.3"
   },
   "build": {
-    "appId": "com.dsh.notebooklm.fde",
-    "productName": "DSH NotebookLM FDE",
-    "copyright": "NotebookLM FDE",
-    "artifactName": "DSH-NotebookLM-FDE-Setup-${version}-${os}-${arch}.${ext}",
+    "appId": "com.dsh.优势资本投研.fde",
+    "productName": "优势资本智能投研工作台",
+    "copyright": "优势资本投研 FDE",
+    "artifactName": "DSH-优势资本投研-FDE-Setup-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -80,8 +80,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "NotebookLM · 企业FDE工作台 (DSH插件版)",
-      "uninstallDisplayName": "NotebookLM · 企业FDE工作台 (DSH插件版)",
+      "shortcutName": "优势资本 · 智能投研工作台",
+      "uninstallDisplayName": "优势资本 · 智能投研工作台",
       "deleteAppDataOnUninstall": false
     },
     "afterPack": "scripts/after-pack.cjs"
