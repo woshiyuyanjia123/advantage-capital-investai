@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_ROLES } from './org.mjs'
 import { defaultWorkflows, BUSINESS_TYPES } from './workflow.mjs'
+import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
 
 export const SCHEMA = 5
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures')
@@ -95,7 +96,8 @@ export async function seed({ db, dir, engine, renderDeliverable, system }) {
   const mk = (owner, input) => engine.create(U(owner), input)
   const toStage = (p, stageId, by, note) => engine.save(U(by), engine.enterStage(db.get('projects', p.id), stageId, U(by), note), note, 'seed')
   const finalize = async (p, type, md, by, status = 'final') => {
-    const d = await renderDeliverable({ projectId: p.id, type, markdown: md, user: U(by), engine: '人工编制（演示）', status })
+    const richMd = md && md.length > 350 ? md : buildComprehensiveMarkdown(p, type, [{ name: `${p.name}底稿` }, { name: '审计与业务访谈纪要' }], [md?.replace(/^#+\s*.+\n?/, '').trim()].filter(Boolean))
+    const d = await renderDeliverable({ projectId: p.id, type, markdown: richMd, user: U(by), engine: '人工编制（完整底稿）', status })
     const cur = db.get('projects', p.id)
     db.put('projects', { ...cur, works: cur.works.map(w => w.type === type && !w.deliverableId ? { ...w, deliverableId: d.id, status: status === 'final' ? 'done' : 'doing' } : w) }, m)
     return d

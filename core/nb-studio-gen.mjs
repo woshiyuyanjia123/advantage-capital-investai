@@ -1,6 +1,7 @@
 // Studio 8 大加工成品定向生成器（严格按勾选 fileIds 提炼 + 自动落盘项目专属文件夹 + 智能追问建议）
 import { renderDocx, renderPptx, renderXlsx } from './office.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
+import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
   const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
@@ -35,9 +36,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
     return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `麦肯锡咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · 源自 ${docs.length} 份勾选资料）` })
   }
   if (kind === 'word' || kind === 'report') {
-    const md = `# ${p.name} · 深度研判报告\n\n> 依据已勾选 ${docs.length} 份资料（${srcNames.join('、') || '项目底稿'}）定向生成\n\n## 一、核心结论与投资亮点\n${snippets.slice(0, 6).map(s => `- ${s}`).join('\n') || '- 核心逻辑成立'}\n\n## 二、风险核查与下一步门禁建议\n${snippets.slice(6, 12).map(s => `- ${s}`).join('\n') || '- 建议推进阶段评审'}`
-    const buf = await renderDocx({ title: `${p.name} · 专项研究报告`, subtitle: `勾选来源：${docs.length} 份`, markdown: md })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `正式排版 Word 报告（源自 ${docs.length} 份勾选资料）` })
+    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets)
+    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成 · 完整八章核验版`, markdown: md })
+    const d = deliverables.ensure(p.id, '尽调报告', {}, user)
+    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: 'Studio 深度报告引擎', sources: docs.length, note: '完整八章尽调报告' })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${docs.length} 个来源 · 完整八章深度报告` })
   }
   if (kind === 'table' || kind === 'xlsx') {
     const rows = (snippets.length ? snippets : ['核心指标正常 [1]']).map((s, i) => ({ idx: `E-${i + 1}`, finding: s, src: srcNames[i % Math.max(1, srcNames.length)] || '项目资料', status: '已溯源核对' }))

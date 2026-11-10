@@ -44,7 +44,7 @@ function renderArtSubmitCol(p, b) {
   const allWorks = b.stages.flatMap(s => s.works.map(w => [w.id, `${s.name} · ${w.type}${w.required ? ' (必做)' : ''}`]))
   const curW = fb.pickedWork?.id || allWorks[0]?.[0] || ''
   return `<div class="nb-col">
-    <div class="nb-col-hd"><b>① 左下角专属夹成品池 (${arts.length})</b><span class="grow"></span>
+    <div class="nb-col-hd"><b>① 右下角 Studio 成品池 (${arts.length})</b><span class="grow"></span>
       <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 文件夹</button></div>
     <div class="nb-sources" style="max-height:42%">
       ${arts.map((a, i) => `<div class="nb-art-item ${fb.pickedArt?.name === a.name ? 'on' : ''}" style="${fb.pickedArt?.name === a.name ? 'border-color:#3B82F6;background:#172E58' : ''}" data-act="fb-pick-art" data-i="${i}">
