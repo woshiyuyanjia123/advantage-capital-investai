@@ -86,36 +86,53 @@ async function finishDeck(pptx, T, slides, sources, { bgSec, bgData }) {
     sl.addText(srcLine, { x: 0.6, y: 7.08, w: 11.5, h: 0.28, fontSize: 9, color: '64748B', fontFace: FONT })
   }
 
-  // 2) 执行摘要页（三栏麦肯锡金字塔：核心结论 / 关键风险 / 投决建议）
+  // 2) 执行摘要页（三栏麦肯锡金字塔：每栏精选 3 条核心要点，自适应字号防溢出）
   const ex = pptx.addSlide()
-  addHead(ex, 'EXECUTIVE SUMMARY · 执行摘要', slides[0]?.title || '核心投资逻辑成立，建议推进下一阶段核验')
-  ex.addImage({ data: bgSec, x: 0.6, y: 1.3, w: 12.1, h: 1.45 })
-  ex.addText('核心判断：基于所选底稿交叉核验，标的具备明确技术与订单壁垒，财务增长与估值区间匹配机构准入标准。', { x: 0.85, y: 1.5, w: 11.6, h: 1.05, fontSize: 15, bold: true, color: 'FFFFFF', fontFace: FONT })
-  const cols = slides.slice(0, 3)
-  ;[0, 1, 2].forEach(i => {
-    const c = cols[i] ?? { title: ['一、业务与增长亮点', '二、核心风险与缓释', '三、下一步行动门禁'][i], bullets: ['依据已勾选资料提炼关键证据', '量化指标与行业基准比对', '落实责任人与时间节点'] }
+  addHead(ex, 'EXECUTIVE SUMMARY · 执行摘要', slides[0]?.title || '核心投资逻辑与底稿交叉核验总览')
+  ex.addImage({ data: bgSec, x: 0.6, y: 1.28, w: 12.1, h: 1.25 })
+  const lead = slides[0]?.bullets?.[0] || '严格依据所勾选原始资料交叉比对，全部财务口径、业务合同与待核实事项均已溯源锚定。'
+  ex.addText(`核心综述：${lead}`, { x: 0.85, y: 1.42, w: 11.6, h: 0.95, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: FONT })
+  const pillars = [
+    { head: '支柱一：主体概况与业务壁垒', items: [...(slides[0]?.bullets ?? []), ...(slides[1]?.bullets ?? [])].slice(0, 3) },
+    { head: '支柱二：财务表现与实证台账', items: [...(slides[2]?.bullets ?? []), ...(slides[3]?.bullets ?? [])].slice(0, 3) },
+    { head: '支柱三：风险识别与待核实项', items: [...(slides[4]?.bullets ?? []), ...(slides[5]?.bullets ?? [])].slice(0, 3) },
+  ]
+  pillars.forEach((pCol, i) => {
     const x = 0.6 + i * 4.1
-    ex.addShape(pptx.ShapeType.roundRect, { x, y: 2.95, w: 3.9, h: 3.9, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
-    ex.addShape(pptx.ShapeType.rect, { x, y: 2.95, w: 3.9, h: 0.48, fill: { color: T.pri } })
-    ex.addText(String(c.title).slice(0, 22), { x: x + 0.15, y: 3.0, w: 3.6, h: 0.38, fontSize: 13, bold: true, color: 'FFFFFF', fontFace: FONT })
-    ex.addText((c.bullets || []).slice(0, 5).map(b => ({ text: String(b), options: { bullet: true, breakLine: true, paraSpaceAfter: 8 } })), { x: x + 0.18, y: 3.55, w: 3.54, h: 3.1, fontSize: 12, color: '1E293B', valign: 'top', fontFace: FONT })
+    ex.addShape(pptx.ShapeType.roundRect, { x, y: 2.75, w: 3.9, h: 4.1, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+    ex.addShape(pptx.ShapeType.rect, { x, y: 2.75, w: 3.9, h: 0.46, fill: { color: T.pri } })
+    ex.addText(pCol.head, { x: x + 0.15, y: 2.8, w: 3.6, h: 0.36, fontSize: 12.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+    const items = (pCol.items.length ? pCol.items : ['见对应章节详述']).map(t => ({ text: String(t).slice(0, 68), options: { bullet: true, breakLine: true, paraSpaceAfter: 10 } }))
+    ex.addText(items, { x: x + 0.16, y: 3.32, w: 3.56, h: 3.35, fontSize: 11, color: '1E293B', valign: 'top', fontFace: FONT })
   })
 
-  // 3) 数据可视化与章节深潜页（每页带高清视觉侧栏 + 咨询级双栏卡片）
+  // 3) 章节深潜页（奇偶页自动轮换「左侧视觉栏+右侧条带卡」与「顶部横幅+2x2四象限Bento矩阵」两种麦肯锡版式）
   for (let i = 0; i < Math.max(slides.length, 4); i++) {
     const s = slides[i] ?? { title: `专项分析章节 ${i + 1}`, bullets: ['基于所选资料提取关键事实与财务口径', '对比历史期与同业可比公司表现', '明确待补充尽调清单与责任分工'] }
     const sl = pptx.addSlide()
     addHead(sl, `SECTION 0${i + 1} · 深度研判`, s.title || `章节 ${i + 1}`)
     const slideArt = `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal).toString('base64')}`
-    sl.addImage({ data: slideArt, x: 0.6, y: 1.32, w: 4.1, h: 5.5 })
-    sl.addText(`0${i + 1}\n${s.title || '核心发现'}`, { x: 0.85, y: 1.8, w: 3.6, h: 2.2, fontSize: 22, bold: true, color: 'FFFFFF', fontFace: FONT })
     const bList = (s.bullets?.length ? s.bullets : ['核心事实与数据支撑']).slice(0, 6)
-    bList.forEach((b, idx) => {
-      const y = 1.32 + idx * 0.92
-      sl.addShape(pptx.ShapeType.roundRect, { x: 4.95, y, w: 7.75, h: 0.8, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', pt: 0.8 } })
-      sl.addShape(pptx.ShapeType.rect, { x: 4.95, y, w: 0.1, h: 0.8, fill: { color: idx % 2 === 0 ? T.acc : '10B981' } })
-      sl.addText(String(b), { x: 5.2, y: y + 0.1, w: 7.35, h: 0.6, fontSize: 13, color: '0F172A', valign: 'middle', fontFace: FONT })
-    })
+    if (i % 2 === 1 && bList.length >= 4) {
+      sl.addImage({ data: slideArt, x: 0.6, y: 1.28, w: 12.1, h: 1.15 })
+      sl.addText(`0${i + 1} · ${s.title || '核心发现'}`, { x: 0.85, y: 1.42, w: 11.5, h: 0.85, fontSize: 18, bold: true, color: 'FFFFFF', fontFace: FONT })
+      bList.slice(0, 4).forEach((b, idx) => {
+        const cx = 0.6 + (idx % 2) * 6.15, cy = 2.62 + Math.floor(idx / 2) * 2.12
+        sl.addShape(pptx.ShapeType.roundRect, { x: cx, y: cy, w: 5.95, h: 1.92, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+        sl.addShape(pptx.ShapeType.rect, { x: cx, y: cy, w: 0.12, h: 1.92, fill: { color: idx % 2 === 0 ? T.acc : '10B981' } })
+        sl.addText(`要点 0${idx + 1}`, { x: cx + 0.25, y: cy + 0.14, w: 5.4, h: 0.32, fontSize: 11, bold: true, color: T.acc, fontFace: FONT })
+        sl.addText(String(b), { x: cx + 0.25, y: cy + 0.48, w: 5.45, h: 1.3, fontSize: 12.5, color: '0F172A', valign: 'top', fontFace: FONT })
+      })
+    } else {
+      sl.addImage({ data: slideArt, x: 0.6, y: 1.32, w: 4.1, h: 5.5 })
+      sl.addText(`0${i + 1}\n${s.title || '核心发现'}`, { x: 0.85, y: 1.8, w: 3.6, h: 2.2, fontSize: 21, bold: true, color: 'FFFFFF', fontFace: FONT })
+      bList.forEach((b, idx) => {
+        const y = 1.32 + idx * 0.92
+        sl.addShape(pptx.ShapeType.roundRect, { x: 4.95, y, w: 7.75, h: 0.8, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'E2E8F0', pt: 0.8 } })
+        sl.addShape(pptx.ShapeType.rect, { x: 4.95, y, w: 0.1, h: 0.8, fill: { color: idx % 2 === 0 ? T.acc : '10B981' } })
+        sl.addText(String(b), { x: 5.2, y: y + 0.08, w: 7.35, h: 0.64, fontSize: 12.5, color: '0F172A', valign: 'middle', fontFace: FONT })
+      })
+    }
   }
   return Buffer.from(await pptx.write({ outputType: 'nodebuffer' }))
 }

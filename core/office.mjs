@@ -49,14 +49,14 @@ export async function renderDocx({ title, subtitle, markdown, footer }) {
     ...(subtitle ? [new Paragraph({ children: run(subtitle, { size: 20, color: '666666' }), alignment: AlignmentType.CENTER, spacing: { after: 320 } })] : []),
   ]
   for (const b of blocks(markdown)) {
-    if (b.t === 'h') children.push(new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][b.level - 1] ?? HeadingLevel.HEADING_3, children: run(plain(b.text), { bold: true, size: [32, 30, 26, 24][b.level - 1] }), spacing: { before: 240, after: 120 } }))
-    else if (b.t === 'li') children.push(new Paragraph({ bullet: { level: 0 }, children: run(b.text), spacing: { after: 60 } }))
-    else if (b.t === 'quote') children.push(new Paragraph({ children: run(b.text, { color: '666666', size: 20 }), indent: { left: 360 }, spacing: { after: 80 } }))
+    if (b.t === 'h') children.push(new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][b.level - 1] ?? HeadingLevel.HEADING_3, children: run(plain(b.text), { bold: true, size: [32, 28, 24, 22][b.level - 1], color: '0F2A56' }), spacing: { before: 280, after: 140 }, ...(b.level <= 2 ? { border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'BFDBFE' } } } : {}) }))
+    else if (b.t === 'li') children.push(new Paragraph({ bullet: { level: 0 }, children: run(b.text), spacing: { line: 340, after: 80 } }))
+    else if (b.t === 'quote') children.push(new Paragraph({ children: run(b.text, { color: '1E3A8A', size: 20 }), indent: { left: 280, right: 200 }, spacing: { before: 120, after: 140 }, shading: { fill: 'F0F6FF' }, border: { left: { style: BorderStyle.SINGLE, size: 18, color: '2563EB' } } }))
     else if (b.t === 'table') {
-      const cell = (t, head) => new TableCell({ children: [new Paragraph({ children: run(plain(t), { bold: head, size: 20 }) })], shading: head ? { fill: 'E8EEF7' } : undefined })
-      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: b.head.map(h => cell(h, true)), tableHeader: true }), ...b.rows.map(r => new TableRow({ children: b.head.map((_, i) => cell(r[i] ?? '', false)) }))] }))
-      children.push(new Paragraph({ children: [] }))
-    } else children.push(new Paragraph({ children: run(b.text), spacing: { after: 100 }, ...(b.text.length > 40 ? { indent: { firstLine: 420 } } : {}) }))
+      const cell = (t, head, odd) => new TableCell({ children: [new Paragraph({ children: run(plain(t), { bold: head, size: 20, color: head ? 'FFFFFF' : '1E293B' }), spacing: { before: 60, after: 60 } })], shading: head ? { fill: '0F2A56' } : odd ? { fill: 'F8FAFC' } : undefined })
+      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: b.head.map(h => cell(h, true, false)), tableHeader: true }), ...b.rows.map((r, ri) => new TableRow({ children: b.head.map((_, i) => cell(r[i] ?? '', false, ri % 2 === 1)) }))] }))
+      children.push(new Paragraph({ children: [], spacing: { after: 120 } }))
+    } else children.push(new Paragraph({ children: run(b.text), spacing: { line: 340, after: 110 }, ...(b.text.length > 40 ? { indent: { firstLine: 420 } } : {}) }))
   }
   if (footer) children.push(new Paragraph({ children: run(footer, { size: 16, color: '999999' }), spacing: { before: 400 }, border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' } } }))
   const doc = new Document({ creator: 'InvestAI', title, styles: { default: { document: { run: { font: FONT } } } }, sections: [{ children }] })
