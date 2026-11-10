@@ -23,8 +23,8 @@ function renderBoardDrawer() {
   const f = p.flow ?? { overallPct: p.progress ?? 0, stageDetails: [] }
   const note = (x.notes ?? []).find(n => n.id === boardSt.noteId) ?? x.notes?.[0]
   drawer(`${drawerHead(`${esc(p.name)} · 看板`, `总进度 ${f.overallPct}%${note ? ` · 笔记：${esc(note.title)}` : ''}`)}
-    <div class="nb-board-tabs">${BTABS.map(([k, l]) => `<button class="btn sm ${boardSt.tab === k ? 'pri' : ''}" data-act="nb-btab" data-k="${k}">${l}</button>`).join('')}</div>
-    <div class="body">${renderBoardTab(boardSt.tab, x, note)}</div>`, true)
+    <div class="nb-board-tabs">${BTABS.map(([k, l]) => `<button class="${boardSt.tab === k ? 'on' : ''}" data-act="nb-btab" data-k="${k}">${l}</button>`).join('')}</div>
+    <div class="body nb-board-body">${renderBoardTab(boardSt.tab, x, note)}</div>`, true)
 }
 
 function renderBoardTab(tab, x, note) {
@@ -34,14 +34,15 @@ function renderBoardTab(tab, x, note) {
     return `<div class="kanban">${x.workflow.stages.map((s, idx) => {
       const ws = x.works.filter(w => w.stageId === s.id)
       const pct = f.stageDetails?.[idx]?.pct ?? 0
-      return `<div class="kcol"><div class="khd"><b>${idx + 1}. ${esc(s.name)}</b><span>${pct}%</span></div>
+      return `<div class="kcol"><div class="khd"><b><span class="mono dim" style="font-weight:400;margin-right:6px">${String(idx + 1).padStart(2, '0')}</span>${esc(s.name)}</b><span>${pct}%</span></div>
+        <div class="prog" style="margin:-4px 0 10px"><i style="width:${pct}%"></i></div>
         ${ws.map(w => `<div class="kcard" data-act="work-ai" data-t="${esc(w.type)}" data-w="${w.id}"><b>${esc(w.type)}</b>
-          <div class="dim">${esc(w.assigneeName || '')} · ${WORK_STATUS[w.status] || w.status}</div></div>`).join('') || '<div class="empty">无必做项</div>'}</div>`
+          <div class="dim">${esc(w.assigneeName || '')} · ${WORK_STATUS[w.status] || w.status}</div></div>`).join('') || '<div class="dim" style="font-size:11.5px;padding:2px">没有工作项</div>'}</div>`
     }).join('')}</div>`
   }
   if (tab === 'deliverables') {
-    return `<div class="row" style="margin-bottom:10px"><button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-ch="plugin-draft">AI 起草并提交</button>
-      <button class="btn sm" data-act="nb-plug-upload" data-p="${p.id}">上传文件提交</button></div>
+    return `<div class="nb-bar"><button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-ch="plugin-draft">${icon('bot', 13)}AI 起草并提交</button>
+      <button class="btn sm" data-act="nb-plug-upload" data-p="${p.id}">${icon('upload', 13)}上传文件提交</button></div>
       <div class="works">${x.deliverables.map(d => `<div class="wcard"><div class="row"><b class="grow">${esc(d.type)}</b><span class="pill dl-${d.status}">${DL_STATUS[d.status]} v${d.versions.length}</span></div>
         <div class="dim" style="margin:4px 0">${d.checkout ? `本地编辑中：${esc(d.checkout.name)}` : `格式：${esc(d.format.toUpperCase())}`}</div>
         <div class="wacts"><button class="btn sm" data-act="open-deliverable" data-p="${p.id}" data-d="${d.id}">查看版本</button>
@@ -49,10 +50,10 @@ function renderBoardTab(tab, x, note) {
           ${d.status === 'draft' && d.versions.length ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-d="${d.id}" data-ch="review-submit">提交审核</button>` : ''}</div></div>`).join('') || '<div class="empty">暂无成果</div>'}</div>`
   }
   if (tab === 'evidence') {
-    return `<div class="row" style="margin-bottom:10px">${Object.entries(S.meta?.schemas ?? {}).map(([k, s]) => `<button class="btn sm" data-act="extract" data-k="${k}">${esc(s.name)}</button>`).join('')}</div>
+    return `<div class="nb-bar">${Object.entries(S.meta?.schemas ?? {}).map(([k, s]) => `<button class="btn sm" data-act="extract" data-k="${k}">${esc(s.name)}</button>`).join('')}</div>
       ${x.extractions.map(e => `<div class="li2" data-act="extraction" data-id="${e.id}"><div class="grow"><b>${esc(e.name)}</b>
         <div class="dim">缺失 ${e.missing?.length ?? 0} 项 · 冲突 ${e.conflicts?.length ?? 0} 项 · ${fmt(e.createdAt)}</div></div>
-        <span class="pill ${e.status === 'confirmed' ? 'st-4' : 'st-0'}">${e.status === 'confirmed' ? '已确认' : '待核对'}</span></div>`).join('') || '<div class="empty">还没有提取记录</div>'}`
+        <span class="pill ${e.status === 'confirmed' ? 'dl-final' : 'st-0'}">${e.status === 'confirmed' ? '已确认' : '待核对'}</span></div>`).join('') || '<div class="empty">还没有提取记录</div>'}`
   }
   if (tab === 'gates') {
     return `<div class="box" style="margin-bottom:10px"><b>当前阶段准入 ${f.curStagePct ?? 0}%</b>

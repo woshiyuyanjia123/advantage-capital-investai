@@ -13,23 +13,39 @@ export async function openLocalPptStudio(projectId) {
   renderPptDrawer()
 }
 
+const prevHTML = (s, i, n) => `<h4>${esc(s?.title || '')}</h4><ul>${(s?.bullets ?? []).map(x => `<li>${esc(x)}</li>`).join('')}</ul><span class="pg">${i + 1} / ${n}</span>`
+
 function renderPptDrawer() {
   const st = pptState
   const cur = st.slides[st.sel] ?? st.slides[0]
-  drawer(`${drawerHead(`PPT · ${esc(st.title)}`)}
-    <div class="body"><div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+  const keep = $('.nb-thumbs')?.scrollTop
+  drawer(`${drawerHead(`PPT · ${esc(st.title)}`, `${st.slides.length} 页${st.checkout ? ' · 本机编辑中' : ''}`)}
+    <div class="body"><div class="nb-bar">
       <button class="btn sm pri" data-act="nb-ppt-ai">${icon('spark', 13)}用勾选的资料生成</button>
-      <button class="btn sm" data-act="nb-ppt-add">${icon('plus', 13)}加一页</button>
       <button class="btn sm" data-act="nb-ppt-office">${icon('open', 13)}用本机 PowerPoint/WPS 打开</button>
-      ${st.checkout ? `<button class="btn sm pri" data-act="nb-ppt-checkin">回传本机修改</button>` : ''}
-      <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">${icon('open', 13)}文件夹</button></div>
+      ${st.checkout ? `<button class="btn sm pri" data-act="nb-ppt-checkin">${icon('check', 13)}回传本机修改</button>` : ''}
+      <span class="grow"></span>
+      <button class="btn sm ghost" data-act="nb-open-folder" data-p="${st.projectId}">${icon('folder', 13)}文件夹</button></div>
       <div class="nb-slide-list">
-        <div class="box" style="padding:8px;overflow:auto">${st.slides.map((s, i) => `<div class="li2 ${i === st.sel ? 'on' : ''}" data-act="nb-ppt-sel" data-i="${i}"><span class="mono dim">${i + 1}</span><b class="ell grow">${esc(s.title)}</b></div>`).join('')}</div>
-        <div class="box"><label class="f">第 ${st.sel + 1} 页标题<input class="input" id="nbSlideTitle" value="${esc(cur?.title || '')}"></label>
-          <label class="f">要点（一行一条）<textarea class="input area" id="nbSlideBullets" style="height:210px">${esc((cur?.bullets ?? []).join('\n'))}</textarea></label>
-          <div class="row"><button class="btn sm danger" data-act="nb-ppt-del">删除本页</button><span class="grow"></span><button class="btn pri" data-act="nb-ppt-save">保存并生成 PPTX</button></div></div>
+        <div class="nb-thumbs">${st.slides.map((s, i) => `<button class="nb-thumb ${i === st.sel ? 'on' : ''}" data-act="nb-ppt-sel" data-i="${i}"><span class="no">${i + 1}</span><b>${esc(s.title)}</b><span class="ln"></span><span class="ln"></span></button>`).join('')}
+          <button class="btn sm" data-act="nb-ppt-add">${icon('plus', 13)}加一页</button></div>
+        <div><div class="nb-prev" id="nbSlidePrev">${prevHTML(cur, st.sel, st.slides.length)}</div>
+          <div class="nb-fields"><label class="f">标题<input class="input" id="nbSlideTitle" value="${esc(cur?.title || '')}"></label>
+          <label class="f">要点（一行一条）<textarea class="input area" id="nbSlideBullets">${esc((cur?.bullets ?? []).join('\n'))}</textarea></label>
+          <div class="row"><button class="btn sm danger" data-act="nb-ppt-del">删除本页</button><span class="grow"></span><button class="btn pri" data-act="nb-ppt-save">保存并生成 PPTX</button></div></div></div>
       </div></div>`, true)
+  if (keep && $('.nb-thumbs')) $('.nb-thumbs').scrollTop = keep
 }
+
+// 边改边看：右边的预览和左边的缩略图标题跟着输入更新
+document.addEventListener('input', e => {
+  if (!pptState || (e.target?.id !== 'nbSlideTitle' && e.target?.id !== 'nbSlideBullets')) return
+  syncCurSlide()
+  const cur = pptState.slides[pptState.sel]
+  if ($('#nbSlidePrev')) $('#nbSlidePrev').innerHTML = prevHTML({ ...cur, title: $('#nbSlideTitle').value }, pptState.sel, pptState.slides.length)
+  const t = $('.nb-thumb.on b')
+  if (t) t.textContent = cur.title
+})
 
 function syncCurSlide() {
   if (!pptState || !$('#nbSlideTitle')) return
