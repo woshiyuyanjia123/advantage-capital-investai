@@ -71,6 +71,7 @@ export async function inlineCoCreateRewrite({ db, org, deliverables, ai }, user,
   }
   const nextMd = fullText.includes(selected) ? fullText.replace(selected, replacement) : `${fullText}\n\n${replacement}`
   const d = b.deliverableId ? db.get('deliverables', b.deliverableId) : deliverables.ensure(p.id, b.workType || '尽调报告', {}, user)
+  if (d.status === 'final') db.putQuiet('deliverables', { ...d, status: 'draft' })
   const ver = await deliverables.saveText(user, d.id, nextMd, `人机共创原地改写：${inst.slice(0, 40)}`)
   const st = getOsState(db, p)
   st.messages.push({ id: `m_${Date.now()}_c`, sender: 'Agent OS（Office 人机共创）', role: 'agent', badge: 'DWS.doc.coedit', at: Date.now(), text: `${user.name} 在《${d.title}》中选中文字完成了原地人机共创（「${inst}」），已实时生成 v${ver.version.v}。`, actions: ['✍️ Office 原地替换完成', `📦 自动升级版本 v${ver.version.v}`] })
