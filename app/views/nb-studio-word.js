@@ -27,7 +27,12 @@ function renderWordDrawer() {
         ${st.checkout ? `<button class="btn sm pri" data-act="nb-word-checkin">回传本机 Word 修改件</button>` : ''}
         <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">📂 打开项目专属文件夹</button>
       </div>
-      <textarea class="input area mono" id="nbWordArea" style="height:56vh;line-height:1.65">${esc(st.text)}</textarea>
+      <div class="row" style="margin-bottom:8px;padding:6px 10px;background:#0F1E3A;border:1px solid #2563EB;border-radius:8px">
+        <span style="font-size:12px;color:#93C5FD"><b>✍️ 千问2.0 人机共创</b>：在下方正文框用鼠标选中一段文字 →</span>
+        <input class="input sm grow" id="nbInlineInst" placeholder="输入原地改写要求（如：补充勾选底稿财务数据 / 精炼为投决要点 / 强化风险条款）…">
+        <button class="btn sm pri" data-act="nb-word-inline">✨ 让 Agent 原地改写选中段落</button>
+      </div>
+      <textarea class="input area mono" id="nbWordArea" style="height:52vh;line-height:1.65">${esc(st.text)}</textarea>
       <div class="row" style="margin-top:10px"><span class="dim">保存即生成带版本留痕的真实 .DOCX 文件</span><span class="grow"></span>
         <button class="btn pri" data-act="nb-word-save">保存本地修改并提交新版本</button></div>
     </div>`, true)
@@ -55,6 +60,15 @@ Object.assign(ACT, {
     wordSt.text = $('#nbWordArea')?.value ?? wordSt.text
     const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '导出 DOCX' })
     if (r?.version?.fileId) downloadFile(r.version.fileId, `${wordSt.type}.docx`)
+  },
+  'nb-word-inline': async () => {
+    const area = $('#nbWordArea')
+    const fullText = area?.value ?? wordSt.text
+    const sel = area ? fullText.slice(area.selectionStart, area.selectionEnd).trim() : ''
+    const selectedText = sel || fullText.split('\n\n').find(p => p.length > 20) || fullText.slice(0, 200)
+    const instruction = $('#nbInlineInst')?.value?.trim() || '结合勾选底稿强化量化论证并精炼表述'
+    const r = await act('nb.os.inline', { projectId: wordSt.projectId, deliverableId: wordSt.did, workType: wordSt.type, fullText, selectedText, instruction }, '✍️ Agent 已在原文原地改写并同步至项目群聊')
+    if (r?.markdown) { wordSt.text = r.markdown; if (area) area.value = r.markdown; await hooks.reload({ files: false }) }
   },
   'nb-word-ai': async () => {
     const j = await act('ai.generate', { projectId: wordSt.projectId, deliverableId: wordSt.did, type: wordSt.type, fileIds: S.ctx.fileIds, prompt: `生成并完善「${wordSt.type}」` }, '正在生成 Word 文稿…')

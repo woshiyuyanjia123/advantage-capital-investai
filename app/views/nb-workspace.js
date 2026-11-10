@@ -47,35 +47,41 @@ function renderCenterPane(x, p, f) {
   const d = D()
   const msgs = S.chat.slice(-16)
   const chk = x.deliverables.find(z => z.checkout)
+  const os = x.osState ?? { messages: [], autoTasks: [] }
+  S.centerTab ??= 'im'
   return `<div class="nb-col">
     <div class="nb-flow-strip">
       <div class="row"><button class="btn ghost sm" data-act="go" data-view="workbench">${icon('left', 13)}项目库</button>
         <b class="ell" style="font-size:14.5px">${esc(p.name)}</b><span class="pill st-3">${esc(p.stage)} · 总进度 ${f.overallPct}%</span>
         <span class="grow"></span>
+        <button class="btn sm ${S.centerTab === 'im' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="im">💬 项目群聊×Agent协同 (千问2.0模式)</button>
+        <button class="btn sm ${S.centerTab === 'qa' ? 'pri' : 'ghost'}" data-act="nb-ctab" data-t="qa">✨ 源依据深度问答</button>
         <button class="nb-api-pill" data-act="nb-api"><span class="dot ${d.model.ok ? 'ok' : 'warn'}"></span><span>${esc(d.model.ok ? d.model.label : '本地离线引擎')}</span></button></div>
       <div class="nb-stage-bar"><i style="width:${f.overallPct}%"></i></div>
       <div class="row" style="flex-wrap:wrap">
-        ${f.stageDetails.map(st => `<span class="nb-st-node ${st.state}">${st.state === 'done' ? '✓' : st.index + 1}. ${esc(st.name)} <b>${st.pct}%</b></span>`).join('')}
+        <span class="dim" style="font-size:11px">⚡ DWS 事件自动任务：</span>
+        ${(os.autoTasks ?? []).map(at => `<button class="btn sm ${at.enabled ? 'pri' : 'ghost'}" style="padding:2px 7px;font-size:10.5px" data-act="nb-os-at" data-p="${p.id}" data-id="${at.id}" title="${esc(at.desc)}">${at.enabled ? '✓ ' : ''}${esc(at.name)}</button>`).join('')}
         <span class="grow"></span>
-        <button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-ch="plugin-draft">${icon('spark', 12)}插件提交草稿</button>
-        <button class="btn sm" data-act="nb-plug-upload" data-p="${p.id}">${icon('upload', 12)}本地件提交</button>
         ${chk ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-d="${chk.id}" data-ch="local-checkin">回传 Office 修改</button>` : ''}
-        ${f.readinessOk ? `<button class="btn sm pri" data-act="nb-plug-sub" data-p="${p.id}" data-ch="gate-submit">发起门禁</button>` : ''}
       </div>
     </div>
     <div class="abody" style="flex:1;padding:14px;overflow:auto">
-      ${msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
+      ${S.centerTab === 'im' ? (os.messages ?? []).map(m => `<div class="msg ${m.role === 'agent' ? 'ai' : 'me'}" style="margin-bottom:10px;border-left:3px solid ${m.role === 'agent' ? '#3B82F6' : '#10B981'}">
+        <div class="row" style="margin-bottom:4px"><b style="font-size:12px">${esc(m.sender)}</b><span class="tag blue">${esc(m.badge || '群协同')}</span></div>
+        <div class="md">${md(m.text || '')}</div>
+        ${m.actions?.length ? `<div class="row" style="flex-wrap:wrap;margin-top:6px">${m.actions.map(a => `<span class="pill st-3" style="font-size:10.5px">${esc(a)}</span>`).join('')}</div>` : ''}
+      </div>`).join('') : (msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
         <div class="dim" style="font-size:11px;margin-bottom:3px">${m.role === 'user' ? esc(d.me.name) : 'Gemini Notebook · FDE 助手'}</div>
         <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于勾选来源深度分析…' : ''))}</div>
         ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 保存到笔记</button></div>` : ''}</div>`).join('')
-        : `<div class="box"><b>三、基于已勾选 ${S.ctx.fileIds.length} 个来源的深度工作流</b>
-          <p class="dim" style="margin:6px 0">只针对左侧打勾的资料进行问答、生成 ≥3MB 麦肯锡版式 PPT 或专项报告，自动写入本项目专属文件夹并显示在左下角。</p></div>`}
-      <div class="nb-follow-grid">${(x.followUps ?? []).map(q => `<button class="nb-follow-card" data-act="nb-q" data-q="${esc(q)}"><span>${esc(q)}</span><span class="dim">↳ 点击继续追问或执行下一步</span></button>`).join('')}</div>
+        : `<div class="box"><b>基于已勾选 ${S.ctx.fileIds.length} 个来源的深度工作流</b></div>`)}
+      <div class="nb-follow-grid">${(x.followUps ?? []).map(q => `<button class="nb-follow-card" data-act="nb-q" data-q="${esc(q)}"><span>${esc(q)}</span><span class="dim">↳ 点击在群内一键执行跨工具任务</span></button>`).join('')}</div>
     </div>
     <div class="composer" style="padding:10px 14px;border-top:1px solid var(--line)"><div class="row">
-      <input class="input grow" id="nbChatInput" placeholder="提问或针对勾选资料创作内容…">
+      <input class="input grow" id="nbChatInput" placeholder="在项目群说一句话：让 Agent 同时改文档、更新表格、发群消息并提交业务流程…">
       <span class="dim" style="font-size:12px">${S.ctx.fileIds.length} 个来源</span>
-      <button class="btn pri ico" data-act="nb-chat-send" style="border-radius:99px">${icon('send', 14)}</button></div></div>
+      <button class="btn pri" data-act="nb-os-send" data-p="${p.id}">⚡ 群聊协同执行</button>
+      <button class="btn ghost ico" data-act="nb-chat-send" title="纯问答">${icon('send', 14)}</button></div></div>
   </div>`
 }
 
@@ -153,6 +159,25 @@ function renderRightNotes(x, p) {
 }
 
 Object.assign(ACT, {
+  'nb-ctab': el => { S.centerTab = el.dataset.t || 'im'; hooks.refresh() },
+  'nb-os-at': async el => {
+    const r = await act('nb.os.autotask', { projectId: el.dataset.p || S.sel, taskId: el.dataset.id }, '⚡ 已切换 DWS 事件自动任务状态')
+    if (r && S.project) { S.project.osState = r; hooks.refresh() }
+  },
+  'nb-os-send': async el => {
+    const v = $('#nbChatInput')?.value?.trim()
+    if (!v) return
+    $('#nbChatInput').value = ''
+    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6 }
+    toast('⚡ Agent OS 正在群内执行跨工具操作（IM 群聊 × Office 文档 × SaaS 流程）…')
+    const r = await act('nb.os.dispatch', { projectId: el?.dataset?.p || S.sel, text: v, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB })
+    if (r) {
+      toast(`✅ 跨工具执行完成：已生成《${r.artifact.name}》并同步至项目群与业务流程`, 'ok')
+      S.project = await get('project', { id: el?.dataset?.p || S.sel })
+      S.centerTab = 'im'
+      hooks.refresh()
+    }
+  },
   'nb-src-ck': el => { const s = new Set(S.ctx.fileIds); el.checked ? s.add(el.dataset.id) : s.delete(el.dataset.id); S.ctx.fileIds = [...s]; hooks.refresh() },
   'nb-src-all': () => { const all = S.project?.files?.map(f => f.id) ?? []; S.ctx.fileIds = S.ctx.fileIds.length === all.length ? [] : all; hooks.refresh() },
   'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; ACT['nb-chat-send']() } },

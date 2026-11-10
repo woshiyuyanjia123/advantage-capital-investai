@@ -25,6 +25,7 @@ import { slidesFromMd, slidesToMd, transcribeAudioLocal, handlePluginSubmit } fr
 import { listProjectArtifacts, openProjectFolderOrFile } from './nb-folder.mjs'
 import { buildFollowUps, generateStudioArtifact } from './nb-studio-gen.mjs'
 import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
+import { getOsState, dispatchAgentOs, inlineCoCreateRewrite, toggleAutoTask } from './nb-qwen-os.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -190,6 +191,7 @@ export function createApi(ctx) {
       notes: listNotes(db, p.id),
       artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p),
       followUps: buildFollowUps(projectView(user, p), '', kb.list(user, { companyId: p.companyId }).slice(0, 3).map(f => f.name)),
+      osState: getOsState(db, p),
       history: db.history('projects', p.id, 60),
       canVote: db.find('approvals', a => a.projectId === p.id && a.status === 'pending' && a.voters.includes(user.id)).map(a => a.id),
     }
@@ -237,6 +239,9 @@ export function createApi(ctx) {
     'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, meetings, settings: S() }, user, b),
     'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.flow.submit': (user, b) => submitArtifactToNode({ db, deliverables, lifecycle }, user, project(user, b.projectId), b),
+    'nb.os.dispatch': (user, b) => dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
+    'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, org, deliverables, ai }, user, project(user, b.projectId), b),
+    'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
     'nb.folder.open': (user, b) => {
       const p = project(user, b.projectId)
       const ws = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
@@ -571,6 +576,7 @@ export function createApi(ctx) {
     'nb.local.probe': (user, q) => probeLocalModels(q.get('url') || ''),
     'nb.notes': (user, q) => listNotes(db, project(user, q.get('projectId')).id),
     'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
+    'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.slides': async (user, q) => {
       const d = deliverable(user, q.get('id'))
       const text = org.redact(user, await deliverables.versionText(d, q.get('v')))
