@@ -115,31 +115,37 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>投研成果编制中心</b><span class="grow"></span>
-      <button class="btn sm pri" data-act="nb-dify-open" data-p="${p.id}">🏛️ 机构模板与额度</button>
-      <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 录音转写</button>
-      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">修订PPT</button>
-      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">修订文书</button></div>
-    <div style="padding:8px 12px;border-bottom:1px solid var(--line);background:#0C162B;font-size:11.5px;display:flex;flex-direction:column;gap:6px">
-      <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(规范区间 4–24)</span></span><span class="grow"></span>
-        <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
-      <div class="row"><span>💎 目标文件大小：<b id="nbMbVal" style="color:#34D399">~${cfg.targetMB} MB</b> <span class="dim">(高清区间 3–30MB)</span></span><span class="grow"></span>
-        <input type="range" min="3" max="30" step="1" value="${cfg.targetMB}" style="width:120px;accent-color:#10B981" data-act="nb-cfg-mb"></div>
-      <div class="row">
-        <select class="select sm grow" data-act="nb-cfg-theme">
-          <option value="mck" ${cfg.theme === 'mck' ? 'selected' : ''}>🎨 麦肯锡深海蓝 (Mck)</option>
-          <option value="swiss" ${cfg.theme === 'swiss' ? 'selected' : ''}>🎨 瑞士国际网格 (Swiss)</option>
-          <option value="emerald" ${cfg.theme === 'emerald' ? 'selected' : ''}>🎨 黑金翡翠投研 (Emerald)</option>
-        </select>
-        <select class="select sm grow" data-act="nb-cfg-den">
-          <option value="concise" ${cfg.density === 'concise' ? 'selected' : ''}>📐 高管精炼 (每页3要点)</option>
-          <option value="standard" ${cfg.density === 'standard' ? 'selected' : ''}>📐 咨询标准 (每页5要点)</option>
-          <option value="dense" ${cfg.density === 'dense' ? 'selected' : ''}>📐 尽调详实 (每页6要点)</option>
-        </select>
-      </div>
-      <div class="dim" id="nbSpecHint" style="padding:5px 8px;background:#111F3D;border-radius:6px;border-left:3px solid #3B82F6;line-height:1.45">${esc(SPECS[cfg.specKind] || SPECS.ppt)}</div>
-    </div>
+      <button class="btn sm ghost" data-act="nb-dify-open" data-p="${p.id}" title="机构标准工作流模板与AI配额治理">🏛️ 模板与配额</button>
+      <button class="btn sm ghost" data-act="nb-studio-audio" data-p="${p.id}" title="多模态语音降噪与四路意图路由">🎙️ 语音路由</button>
+      <button class="btn sm ghost" data-act="nb-studio-ppt" data-p="${p.id}">PPT工坊</button>
+      <button class="btn sm ghost" data-act="nb-studio-word" data-p="${p.id}">文书工坊</button></div>
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
+    <div style="padding:6px 12px;border-top:1px solid var(--line);background:#0B1528;font-size:11.5px">
+      <div class="row" style="cursor:pointer" data-act="nb-cfg-toggle">
+        <span>🎛️ 规格：<b style="color:#60A5FA">${cfg.pageCount}页/章</b> · <b style="color:#34D399">~${cfg.targetMB}MB</b> · <span class="dim">${cfg.theme === 'swiss' ? '瑞士网格' : cfg.theme === 'emerald' ? '黑金翡翠' : '麦肯锡深海蓝'}</span></span>
+        <span class="grow"></span><span class="lnk">${S.showStudioCfg ? '收起参数 ▴' : '调节页数/大小 ▾'}</span>
+      </div>
+      ${S.showStudioCfg ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+        <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(4–24)</span></span><span class="grow"></span>
+          <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
+        <div class="row"><span>💎 目标文件大小：<b id="nbMbVal" style="color:#34D399">~${cfg.targetMB} MB</b> <span class="dim">(3–30MB)</span></span><span class="grow"></span>
+          <input type="range" min="3" max="30" step="1" value="${cfg.targetMB}" style="width:120px;accent-color:#10B981" data-act="nb-cfg-mb"></div>
+        <div class="row">
+          <select class="select sm grow" data-act="nb-cfg-theme">
+            <option value="mck" ${cfg.theme === 'mck' ? 'selected' : ''}>🎨 麦肯锡深海蓝 (Mck)</option>
+            <option value="swiss" ${cfg.theme === 'swiss' ? 'selected' : ''}>🎨 瑞士国际网格 (Swiss)</option>
+            <option value="emerald" ${cfg.theme === 'emerald' ? 'selected' : ''}>🎨 黑金翡翠投研 (Emerald)</option>
+          </select>
+          <select class="select sm grow" data-act="nb-cfg-den">
+            <option value="concise" ${cfg.density === 'concise' ? 'selected' : ''}>📐 高管精炼 (每页3要点)</option>
+            <option value="standard" ${cfg.density === 'standard' ? 'selected' : ''}>📐 咨询标准 (每页5要点)</option>
+            <option value="dense" ${cfg.density === 'dense' ? 'selected' : ''}>📐 尽调详实 (每页6要点)</option>
+          </select>
+        </div>
+        <div class="dim" id="nbSpecHint" style="padding:5px 8px;background:#111F3D;border-radius:6px;border-left:3px solid #3B82F6;line-height:1.45">${esc(SPECS[cfg.specKind] || SPECS.ppt)}</div>
+      </div>` : ''}
+    </div>
     <div class="nb-notes-list" style="border-top:1px solid var(--line)">
       ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6"><span class="spin"></span><div class="grow"><b>正在编制 ${esc(S.makingStudio)}…</b><div class="dim" style="font-size:11px">严格依据已勾选 ${S.ctx.fileIds.length} 份底稿编制并归档至项目档案室</div></div></div>` : ''}
       <div class="row" style="margin:2px 2px 4px"><b>✨ 已编制工作成果 (${arts.length})</b><span class="grow"></span>
@@ -163,6 +169,8 @@ function renderRightNotes(x, p) {
 
 Object.assign(ACT, {
   'nb-ctab': el => { S.centerTab = el.dataset.t || 'im'; hooks.refresh() },
+  'nb-at-toggle': () => { S.showAutoTasks = !S.showAutoTasks; hooks.refresh() },
+  'nb-cfg-toggle': () => { S.showStudioCfg = !S.showStudioCfg; hooks.refresh() },
   'nb-os-at': async el => {
     const r = await act('nb.os.autotask', { projectId: el.dataset.p || S.sel, taskId: el.dataset.id }, '⚡ 已切换 DWS 事件自动任务状态')
     if (r && S.project) { S.project.osState = r; hooks.refresh() }

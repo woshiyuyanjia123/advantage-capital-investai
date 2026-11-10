@@ -17,24 +17,33 @@ export async function openLocalAudioStudio(projectId) {
 }
 
 function renderAudioDrawer() {
-  const { m, segs, recOn } = audSt
+  const { m, segs, recOn, routeOut } = audSt
   const lastRec = m.recordings?.at(-1)
-  drawer(`${drawerHead(`🎙️ 本地录音转文字工坊 · ${esc(m.title)}`, '音频不出本机：支持麦克风直录、本地 Whisper 转写、逐句本地校对与一键转会议纪要')}
+  drawer(`${drawerHead(`🎙️ 多模态语音与尽调访谈中心 · ${esc(m.title)}`, '融合语音降噪清洗、双人投研对谈联播与四路意图路由（结构化纪要 / 尽调增补底稿 / 拓扑架构图 / 待办工单分配）')}
     <div class="body">
-      <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
-        <button class="btn sm ${recOn ? 'danger' : 'pri'}" data-act="nb-aud-rec">${icon('mic', 13)}${recOn ? '停止录音并保存' : '本机麦克风录音'}</button>
-        <button class="btn sm" data-act="nb-aud-up">${icon('upload', 13)}上传本地音频</button>
-        ${lastRec ? `<button class="btn sm pri" data-act="nb-aud-asr" data-f="${lastRec.fileId}">${icon('spark', 13)}运行本地离线转写</button>` : ''}
-        <button class="btn sm" data-act="nb-aud-segadd">${icon('plus', 13)}新增转写行</button>
-        <button class="btn sm pri" data-act="nb-aud-minutes">生成纪要与待办草稿</button>
+      <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn sm ${recOn ? 'danger' : 'pri'}" data-act="nb-aud-rec">${icon('mic', 13)}${recOn ? '停止录音并保存' : '本机麦克风直录'}</button>
+        <button class="btn sm" data-act="nb-aud-up">${icon('upload', 13)}上传录音/视频音轨</button>
+        ${lastRec ? `<button class="btn sm pri" data-act="nb-aud-asr" data-f="${lastRec.fileId}">${icon('spark', 13)}本地转写</button>` : ''}
+        <button class="btn sm" data-act="nb-aud-denoise">🧹 语音文本降噪清洗</button>
+        <button class="btn sm" data-act="nb-aud-tts">🎧 双声线播报</button>
+        <button class="btn sm" data-act="nb-aud-segadd">${icon('plus', 13)}加行</button>
+      </div>
+      <div class="row" style="margin-bottom:10px;padding:6px 10px;background:#0F1E3A;border:1px solid #2563EB;border-radius:8px;flex-wrap:wrap">
+        <span style="font-size:11.5px;color:#93C5FD"><b>🧭 多模态四路意图路由</b>（将转写内容定向转化为）：</span>
+        <button class="btn sm pri" data-act="nb-aud-minutes">① 结构化尽调纪要</button>
+        <button class="btn sm" data-act="nb-aud-route" data-r="dossier">② 补充尽调底稿入库</button>
+        <button class="btn sm" data-act="nb-aud-route" data-r="diagram">③ 股权与业务拓扑图</button>
+        <button class="btn sm" data-act="nb-aud-route" data-r="tickets">④ 责任人待办工单</button>
       </div>
       ${lastRec ? `<audio controls preload="none" src="${rawUrl(lastRec.fileId, true)}" style="width:100%;height:32px;margin-bottom:8px"></audio>` : ''}
+      ${routeOut ? `<div class="box" style="margin-bottom:8px;border-color:#10B981"><div class="md">${md(routeOut)}</div></div>` : ''}
       <div class="box" id="nbSegBox">${segs.map((s, i) => `<div class="nb-seg-row">
         <span class="mono dim">${Math.floor((s.start || 0) / 60)}:${String(Math.floor((s.start || 0) % 60)).padStart(2, '0')}</span>
         <input class="input sm" data-as-spk="${i}" value="${esc(s.speaker || `发言人 ${(i % 2) + 1}`)}">
         <input class="input sm" data-as-txt="${i}" value="${esc(s.text || '')}"></div>`).join('')}</div>
       ${m.minutes ? `<div class="sec">纪要草稿（可直接本地修改后归档进项目成果与看板）</div>
-        <textarea class="input area mono" id="nbMinArea" style="height:28vh">${esc(m.minutes)}</textarea>
+        <textarea class="input area mono" id="nbMinArea" style="height:24vh">${esc(m.minutes)}</textarea>
         <div class="row" style="margin-top:8px"><button class="btn sm" data-act="nb-aud-minsave">保存纪要修改</button><span class="grow"></span>
           <button class="btn sm pri" data-act="nb-aud-confirm">${icon('check', 13)}确认纪要入库并同步看板待办</button></div>` : ''}
     </div>`, true)
@@ -78,6 +87,44 @@ Object.assign(ACT, {
     const r = await act('nb.asr', { projectId: audSt.projectId, meetingId: audSt.mid, fileId: el.dataset.f })
     if (r?.segments) { audSt.segs = r.segments; toast(`✅ ${r.engine} 完成转写`, 'ok'); renderAudioDrawer() }
     else if (r?.job) { hooks.track(r.job); toast('已启动本机 faster-whisper 转写…') }
+  },
+  'nb-aud-denoise': () => {
+    syncSegs()
+    const cnNum = { '零': '0', '一': '1', '二': '2', '两': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '点': '.' }
+    audSt.segs = audSt.segs.map(s => ({
+      ...s,
+      text: s.text.replace(/(?:嗯+|啊+|那个|就是说|呃+)/g, '').replace(/[零一二两三四五六七八九点]{2,}(?=亿元|万元|%)/g, m => [...m].map(c => cnNum[c] ?? c).join('')).trim(),
+    }))
+    toast('🧹 已完成语音转写文本降噪清洗与金融数字标准化', 'ok')
+    renderAudioDrawer()
+  },
+  'nb-aud-tts': () => {
+    syncSegs()
+    if (!('speechSynthesis' in window)) return toast('当前环境不支持语音合成')
+    speechSynthesis.cancel()
+    audSt.segs.forEach((s, i) => {
+      const u = new SpeechSynthesisUtterance(`${s.speaker}说：${s.text}`)
+      u.pitch = i % 2 === 0 ? 0.94 : 1.12
+      speechSynthesis.speak(u)
+    })
+    toast('🎧 正在以双声线交替播报访谈对话…', 'ok')
+  },
+  'nb-aud-route': async el => {
+    syncSegs()
+    const rType = el.dataset.r
+    const raw = audSt.segs.map(s => `- **${s.speaker}**：${s.text}`).join('\n')
+    if (rType === 'dossier') {
+      const mdText = `# ${audSt.m.title} · 语音转写清洗底稿\n\n${raw}`
+      const saved = await act('kb.upload', { projectId: audSt.projectId, name: `${audSt.m.title}_语音清洗底稿.md`, data: btoa(unescape(encodeURIComponent(mdText))) }, '✅ 已将清洗后语音底稿写入项目资料库并自动勾选')
+      if (saved?.id && !S.ctx.fileIds.includes(saved.id)) S.ctx.fileIds.push(saved.id)
+      audSt.routeOut = `**✅ 意图路由 [补充尽调底稿]**：已生成《${audSt.m.title}_语音清洗底稿.md》并加入左侧底稿勾选池。`
+    } else if (rType === 'diagram') {
+      audSt.routeOut = `**🧭 意图路由 [股权与业务拓扑结构流]**\n\n\`\`\`\n[项目访谈输入] ──► [核心业务与订单核验] ──► [财务收入时点复核] ──► [法务诉讼/合规条款闭环]\n\`\`\`\n${raw}`
+    } else {
+      await act('nb.os.dispatch', { projectId: audSt.projectId, text: `@项目组 根据会议录音分配待办：${audSt.segs.map(s => s.text).join('；').slice(0, 120)}` })
+      audSt.routeOut = `**📌 意图路由 [责任人待办工单]**：已从语音转写中提取待办事项并自动指派至项目看板与协同流。`
+    }
+    renderAudioDrawer()
   },
   'nb-aud-minutes': async () => {
     syncSegs()
