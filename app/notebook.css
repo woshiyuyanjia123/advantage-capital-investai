@@ -48,7 +48,7 @@
 .nb-seg-row { display: grid; grid-template-columns: 64px 96px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
 @media (max-width: 1180px) { .nb-ws { grid-template-columns: 280px minmax(0, 1fr); } .nb-ws > .nb-col:nth-child(3) { display: none; } }
 
-/* 图2（Gemini Notebook 精选横幅 + 最近项目卡片）& 图1（左来源+左下成品夹 | 中带角标问答+3追问卡片 | 右Studio九宫格） */
+/* 项目页（精选横幅 + 项目卡片）和制作台（左：工具、资料、成果文件 | 中：对话和追问卡片 | 右：Studio） */
 .nb-feat-row { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); gap: 14px; margin-bottom: 24px; overflow-x: auto; padding-bottom: 4px; }
 .nb-feat-card { position: relative; height: 158px; border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.32); transition: transform .16s; }
 .nb-feat-card:hover { transform: translateY(-3px); border-color: #60A5FA; }
@@ -61,3 +61,16 @@
 .nb-pill-btn:hover { background: #1B2D4F; border-color: #60A5FA; }
 .nb-art-item { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 9px; background: #0E1B31; border: 1px solid #1E3358; font-size: 12px; cursor: pointer; }
 .nb-art-item:hover { border-color: #38BDF8; background: #142747; }
+
+/* 交互整理：左上方三个本地工具、项目名单独一行、空状态 */
+.nb-sec-title { font-size: 15px; font-weight: 700; margin: 0 0 10px; }
+.nb-card-name { display: block; font-size: 15px; line-height: 1.35; }
+.nb-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.nb-tools .nb-st-tile { flex-direction: column; align-items: flex-start; gap: 7px; padding: 9px; }
+.nb-tools .nb-st-tile:active { transform: translateY(0); }
+.nb-art-head { margin: 10px 2px 4px; display: flex; align-items: center; gap: 8px; }
+.nb-empty-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 96px; border: 1px dashed var(--line2); border-radius: 10px; color: var(--muted); font-size: 12.5px; transition: all .14s; }
+.nb-empty-add:hover { border-color: #60A5FA; color: #DBEAFE; background: #142747; }
+.nb-chat-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 0 10px; }
+.nb-chat-empty b { font-size: 18px; }
+.nb-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }

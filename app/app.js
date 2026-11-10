@@ -62,9 +62,9 @@ function renderHdr() {
 export const NAV = () => {
   const d = D()
   return [
-    ['workbench', 'grid', '① 项目书架 (图2)', d.projects.filter(p => p.status === 'active').length],
-    ['notebook', 'spark', '② Notebook 制作台 (图1)'],
-    ['flowboard', 'flow', '③ 流程提交与权限看板'],
+    ['workbench', 'grid', '项目', d.projects.filter(p => p.status === 'active').length],
+    ['notebook', 'spark', '制作台'],
+    ['flowboard', 'flow', '流程提交'],
     ['knowledge', 'kb', '项目资料库', d.kpi.kbFiles],
     ['settings', 'set', '系统与本地API'],
   ]

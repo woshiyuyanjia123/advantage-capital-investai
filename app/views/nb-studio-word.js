@@ -1,4 +1,4 @@
-// 左上方本地 Word 文书修改工坊：支持章节本地快改、模板填充、本机 Word/WPS 检出修改与一键回传
+// 写 Word（制作台左上方的工具）：直接改正文，或用本机 Word/WPS 打开修改后回传
 import { S, ACT, hooks, $, esc, icon, get, act, drawer, drawerHead, downloadFile, opts } from '/api/investai?asset=ui.js'
 
 let wordSt = null
@@ -17,19 +17,19 @@ export async function openLocalWordStudio(projectId, preferredType) {
 function renderWordDrawer() {
   const st = wordSt
   const docTypes = ['尽调报告', '投决报告', '保密协议', '投资框架协议', '法务审阅意见']
-  drawer(`${drawerHead(`📝 本地 Word 修改工坊 · ${esc(st.type)}`, '直接在线修改章节生成真实 .DOCX，或用本机 Word / WPS 打开修改后一键回传')}
+  drawer(`${drawerHead(`Word · ${esc(st.type)}`)}
     <div class="body">
       <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
         <select class="select sm" id="nbWordType">${opts(docTypes.map(t => [t, t]), st.type)}</select>
         <button class="btn sm" data-act="nb-word-switch">切换文书</button>
-        <button class="btn sm pri" data-act="nb-word-ai">${icon('spark', 13)}AI/离线起草或填模板</button>
-        <button class="btn sm" data-act="nb-word-office">${icon('open', 13)}用本机 Word/WPS 打开修改</button>
-        ${st.checkout ? `<button class="btn sm pri" data-act="nb-word-checkin">回传本机 Word 修改件</button>` : ''}
-        <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">📂 打开项目专属文件夹</button>
+        <button class="btn sm pri" data-act="nb-word-ai">${icon('spark', 13)}用勾选的资料起草</button>
+        <button class="btn sm" data-act="nb-word-office">${icon('open', 13)}用本机 Word/WPS 打开</button>
+        ${st.checkout ? `<button class="btn sm pri" data-act="nb-word-checkin">回传本机修改</button>` : ''}
+        <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">${icon('open', 13)}文件夹</button>
       </div>
       <textarea class="input area mono" id="nbWordArea" style="height:56vh;line-height:1.65">${esc(st.text)}</textarea>
-      <div class="row" style="margin-top:10px"><span class="dim">保存即生成带版本留痕的真实 .DOCX 文件</span><span class="grow"></span>
-        <button class="btn pri" data-act="nb-word-save">保存本地修改并提交新版本</button></div>
+      <div class="row" style="margin-top:10px"><span class="grow"></span>
+        <button class="btn pri" data-act="nb-word-save">保存并生成 DOCX</button></div>
     </div>`, true)
 }
 
@@ -38,17 +38,17 @@ Object.assign(ACT, {
   'nb-word-switch': () => openLocalWordStudio(wordSt.projectId, $('#nbWordType')?.value),
   'nb-word-save': async () => {
     wordSt.text = $('#nbWordArea')?.value ?? wordSt.text
-    const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '左上 Word 工坊本地修改' }, '✅ 已保存本地 Word 修改并生成新版 .DOCX')
+    const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '在 Word 工具里修改' }, '已保存，DOCX 已重新生成')
     if (r) await hooks.reload({ files: false })
   },
   'nb-word-office': async () => {
     wordSt.text = $('#nbWordArea')?.value ?? wordSt.text
     await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '检出前同步' })
-    const r = await act('deliverable.checkout', { id: wordSt.did }, '已用本机 Word / WPS 打开工作副本')
+    const r = await act('deliverable.checkout', { id: wordSt.did }, '已用本机程序打开')
     if (r) { wordSt.checkout = r; renderWordDrawer(); await hooks.reload({ files: false }) }
   },
   'nb-word-checkin': async () => {
-    const r = await act('nb.plugin.submit', { projectId: wordSt.projectId, deliverableId: wordSt.did, channel: 'local-checkin' }, '✅ 已回传本机 Word 修改并更新节点')
+    const r = await act('nb.plugin.submit', { projectId: wordSt.projectId, deliverableId: wordSt.did, channel: 'local-checkin' }, '已回传本机修改')
     if (r) { wordSt.checkout = null; await hooks.reload({ files: false }); openLocalWordStudio(wordSt.projectId, wordSt.type) }
   },
   'nb-word-dl': async () => {
