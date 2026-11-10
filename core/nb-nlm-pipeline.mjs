@@ -22,6 +22,23 @@ export function extractGroundedFacts(p, docs = []) {
   return { facts, metrics }
 }
 
+export async function synthesizeDeepSeekSection(ai, p, docs = [], userPrompt = '') {
+  const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
+  if (!route?.adapter) return ''
+  try {
+    const ctx = docs.slice(0, 4).map((d, i) => `【来源 ${i + 1}：${d.name}】\n${String(d.text || '').slice(0, 1800)}`).join('\n\n')
+    const q = userPrompt || `请针对「${p.name}」（当前阶段：${p.stage || '尽调'}，估值：${p.fields?.valuation || '待定'}），严格基于上述勾选资料，深入剖析：1) 核心投资亮点与技术/客户壁垒；2) 财务数据与业务口径交叉核验发现；3) 投委会必须关注的三大风险与交易协议保护性条款建议。每处事实与数字必须标注 [1][2] 来源编号。`
+    const out = await complete(route.adapter, {
+      system: '你是顶级 PE/VC 投委会首席尽调官。只依据提供的来源资料撰写严谨、量化的深度投研分析，用 Markdown 列表与小标题排版，每处引用标注 [n]。',
+      user: `${ctx}\n\n【专项分析任务】\n${q}`,
+      maxTokens: 3500,
+      reasoning: 'off',
+      signal: AbortSignal.timeout(35000),
+    })
+    return String(out || '').trim()
+  } catch { return '' }
+}
+
 export async function generateTwoHostScript(ai, p, docs, { facts, metrics }) {
   const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
   if (route?.adapter) {

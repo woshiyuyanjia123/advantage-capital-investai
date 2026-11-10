@@ -1,6 +1,18 @@
 // NotebookLM × FDE：本地离线 API（Ollama/LM Studio/vLLM）与云端/DSH API 统一连接与探测
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { openaiLlm, complete, normalizeModel, DEFAULT_MODEL } from './llm.mjs'
 import { writeSecret, readSecrets } from './notify.mjs'
+
+export function readDshLocalDeepSeekKey() {
+  try {
+    const p = join(homedir(), '.dsh', '.credentials.yaml')
+    if (!existsSync(p)) return ''
+    const m = readFileSync(p, 'utf8').match(/DEEPSEEK_API_KEY:\s*([^\r\n]+)/)
+    return m ? m[1].trim() : ''
+  } catch { return '' }
+}
 
 const LOOPBACK = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i
 const PRESETS = [
@@ -31,7 +43,7 @@ export function createHybridCloudLlm({ dshAdapter, readSecretsFn = readSecrets }
   let custom = { at: 0, sig: '', adapter: null }
   async function customAdapter(ext) {
     const sec = Date.now() - custom.at < 4000 ? custom.sec : (custom.at = Date.now(), custom.sec = await readSecretsFn().catch(() => ({})))
-    const key = String(sec?.customApiKey || sec?.deepseekApiKey || process.env.INVESTAI_LLM_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim()
+    const key = String(sec?.customApiKey || sec?.deepseekApiKey || process.env.INVESTAI_LLM_API_KEY || process.env.DEEPSEEK_API_KEY || readDshLocalDeepSeekKey() || '').trim()
     const baseURL = String(ext?.customBaseURL || process.env.INVESTAI_LLM_BASE_URL || 'https://api.deepseek.com').trim()
     const model = normalizeModel(ext?.customModel || ext?.model || DEFAULT_MODEL)
     const isLocalCustom = LOOPBACK.test(baseURL)

@@ -3,7 +3,7 @@ import { renderDocx, renderPptx, renderXlsx } from './office.mjs'
 import { sheetsFromMarkdown } from './deliverables.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
 import { buildComprehensiveMarkdown, buildRichPptSlides } from './nb-deep-doc.mjs'
-import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml } from './nb-nlm-pipeline.mjs'
+import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml, synthesizeDeepSeekSection } from './nb-nlm-pipeline.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
   const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
@@ -15,7 +15,7 @@ export function buildFollowUps(p, question = '', checkedNames = []) {
   ]
 }
 
-export async function generateStudioArtifact({ db, kb, org, deliverables }, user, p, b) {
+export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, b) {
   const kind = String(b.kind || 'ppt')
   const theme = String(b.theme || 'mck')
   let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
@@ -36,18 +36,22 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
   const ws = db.one('mounts', x => x.kind === 'workspace')
   const stamp = new Date().toISOString().slice(0, 10)
   if (kind === 'ppt') {
+    const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
+    const aiBullets = aiSec ? aiSec.split('\n').map(s => s.replace(/^[-*#\d.]+\s*/, '').trim()).filter(s => s.length > 14 && s.length < 95).slice(0, 5) : []
     const slides = buildRichPptSlides(p, docs, snippets)
-    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成`, slides, sources: srcNames, theme })
+    if (aiBullets.length >= 3) slides.splice(1, 0, { title: `DeepSeek 实时底稿交叉核验：${p.name}核心财务与估值博弈`, bullets: aiBullets })
+    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `严格基于已勾选 ${docs.length} 份来源 + DeepSeek 实时研判生成`, slides, sources: srcNames, theme })
     const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
     await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: 'Studio 麦肯锡8页PPT引擎', sources: docs.length, note: '8页麦肯锡咨询版式PPT' })
     return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${stamp}.pptx`, buffer: buf, kind: 'ppt', sourceCount: docs.length, summary: `麦肯锡咨询版式 PPT（${(buf.length / 1048576).toFixed(2)} MB · ${docs.length} 份勾选资料）` })
   }
   if (kind === 'word' || kind === 'report') {
-    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets)
-    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成 · 完整八章核验版`, markdown: md })
+    const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
+    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets) + (aiSec ? `\n\n## 九、DeepSeek 实时专项研判与投资问题深度解答\n${aiSec}` : '')
+    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份来源生成 · 完整核验版`, markdown: md })
     const d = deliverables.ensure(p.id, '尽调报告', {}, user)
-    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: 'Studio 深度报告引擎', sources: docs.length, note: '完整八章尽调报告' })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${docs.length} 个来源 · 完整八章深度报告` })
+    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: aiSec ? 'DeepSeek API + 深度报告引擎' : 'Studio 深度报告引擎', sources: docs.length, note: '完整尽调报告' })
+    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${stamp}.docx`, buffer: buf, kind: 'word', sourceCount: docs.length, summary: `${docs.length} 个来源 · DeepSeek 完整核验报告` })
   }
   if (kind === 'table' || kind === 'xlsx') {
     const baseSheets = sheetsFromMarkdown(buildComprehensiveMarkdown(p, '尽调清单', docs, snippets), '核验表')
@@ -59,7 +63,7 @@ export async function generateStudioArtifact({ db, kb, org, deliverables }, user
   const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与双人对谈', video: '视频概览脚本' }
   const label = labelMap[kind] || '专项成果'
   const grounded = extractGroundedFacts(p, docs)
-  const turns = kind === 'audio' ? await generateTwoHostScript(null, p, docs, grounded) : []
+  const turns = kind === 'audio' ? await generateTwoHostScript(ai, p, docs, grounded) : []
   const html = renderInteractiveNlmHtml(p, kind, docs, { ...grounded, turns })
   return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_${label}_${stamp}.html`, buffer: Buffer.from(html, 'utf8'), kind, sourceCount: docs.length, summary: `${label}（源自 ${docs.length} 份勾选资料）` })
 }

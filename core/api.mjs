@@ -235,7 +235,7 @@ export function createApi(ctx) {
       return deliverables.saveText(user, d.id, md, b.note || '左上方 PPT 工坊本地修改保存')
     },
     'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, meetings, settings: S() }, user, b),
-    'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables }, user, project(user, b.projectId), b),
+    'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.flow.submit': (user, b) => submitArtifactToNode({ db, deliverables, lifecycle }, user, project(user, b.projectId), b),
     'nb.folder.open': (user, b) => {
       const p = project(user, b.projectId)
