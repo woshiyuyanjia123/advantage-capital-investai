@@ -32,8 +32,9 @@ function renderLeftPane(x, p, checked) {
   return `<div class="nb-col">
     <div class="nb-col-hd"><b>项目底稿资料 (${x.files.length})</b><span class="grow"></span>
       <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">📂 项目档案室</button></div>
-    <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 上传底稿资料</button>
-      <button class="btn sm grow" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 新增尽调纪要</button></div>
+    <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 上传底稿</button>
+      <button class="btn sm pri" data-act="nb-tyc-open" data-p="${p.id}">🔍 天眼查穿透</button>
+      <button class="btn sm" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 纪要</button></div>
     <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">勾选底稿以定向编制右侧工作成果</span><span class="grow"></span>
       <label class="dim" style="font-size:11.5px;cursor:pointer"><input type="checkbox" class="ck" data-act="nb-src-all" ${checked.size && checked.size === x.files.length ? 'checked' : ''}> 全选</label></div>
     <div class="nb-sources">${x.files.map((f, idx) => `<label class="nb-src-row">
@@ -193,6 +194,37 @@ Object.assign(ACT, {
   'nb-cfg-mb': el => { S.studioCfg ??= {}; S.studioCfg.targetMB = Number(el.value) || 6; if ($('#nbMbVal')) $('#nbMbVal').textContent = `~${S.studioCfg.targetMB} MB` },
   'nb-cfg-theme': el => { S.studioCfg ??= {}; S.studioCfg.theme = el.value || 'mck' },
   'nb-cfg-den': el => { S.studioCfg ??= {}; S.studioCfg.density = el.value || 'standard' },
+  'nb-tyc-open': async el => {
+    const pid = el.dataset.p || S.sel
+    const p = S.project?.project
+    const meta = await get('nb.tyc.meta')
+    drawer(`${drawerHead('🔍 天眼查七维商事与司法尽调穿透', '一键调取工商基本、股东穿透、司法风险、对外担保、动产抵押、严重违法与票据催告 7 大维度，自动生成底稿入库并勾选')}
+      <div class="body">
+        <div class="row" style="margin-bottom:8px">
+          <input class="input sm grow" id="nbTycCompany" value="${esc(S.project?.company?.name || p?.name?.split(' ')[0] || '')}" placeholder="输入目标企业全称或简称…">
+          <input class="input sm" id="nbTycToken" type="password" style="width:220px" placeholder="可选：天眼查 Open API Token">
+          <button class="btn sm pri" data-act="nb-tyc-run" data-p="${pid}">⚡ 立即穿透并写入项目底稿</button>
+        </div>
+        <div class="box"><b>七大商事与司法尽调核查维度</b>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px">${(meta.dimensions || []).map(d => `<div class="wcard"><b>${esc(d.name)}</b><div class="dim" style="font-size:11px;margin-top:3px">${esc(d.fields)}</div></div>`).join('')}</div>
+        </div>
+        <div id="nbTycResult" style="margin-top:10px"></div>
+      </div>`, true)
+  },
+  'nb-tyc-run': async el => {
+    const pid = el.dataset.p || S.sel
+    const companyName = $('#nbTycCompany')?.value?.trim()
+    const apiToken = $('#nbTycToken')?.value?.trim()
+    toast('🔍 正在执行天眼查七维商事与司法尽调穿透…')
+    const r = await act('nb.tyc.query', { projectId: pid, companyName, apiToken })
+    if (r?.file) {
+      if (!S.ctx.fileIds.includes(r.file.id)) S.ctx.fileIds.push(r.file.id)
+      toast(`✅ 已生成《${r.file.name}》（${r.mode}），已自动加入左侧底稿勾选池`, 'ok')
+      if ($('#nbTycResult')) $('#nbTycResult').innerHTML = `<div class="box" style="border-color:#10B981"><div class="md">${md(r.markdown || '')}</div></div>`
+      S.project = await get('project', { id: pid })
+      hooks.refresh()
+    }
+  },
   'nb-dify-open': async el => {
     const pid = el.dataset.p || S.sel
     const data = await get('nb.dify.templates', { projectId: pid })
