@@ -91,10 +91,10 @@ function renderCenterPane(x, p, f, rawFiles) {
 function renderRightNotes(x, p) {
   const notes = x.notes ?? []
   const arts = x.artifacts?.items ?? []
-  S.studioCfg ??= { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard', specKind: 'ppt' }
+  S.studioCfg ??= { pageCount: 8, theme: 'mck', density: 'standard', specKind: 'ppt' }
   const cfg = S.studioCfg
   const SPECS = {
-    ppt: '🖼️ 演示文稿规范：建议 6–14 页 · 单页 130–240 字（3–5 条结论先行要点）· 封面+金字塔摘要+条带卡/2×2 Bento 交替 · 留白率 ≥35% · 画布体积 3–25 MB',
+    ppt: '🖼️ 演示文稿规范：建议 6–14 页 · 单页 130–240 字（3–5 条结论先行要点）· 封面+金字塔摘要+条带卡/2×2 Bento 交替 · 留白率 ≥35%',
     word: '📄 深度报告规范：建议 7–10 章 · 总字数 2,500–6,500 字 · 深海蓝章节底线 + 左侧蓝条溯源框 + 深蓝表头斑马纹数据表 · 1.4x 舒适行距',
     table: '📋 数据表格规范：4 个标准工作表（工商交易要素 + 原文财务/合同表 + 三维尽调清单 + 勾选资料逐条事实溯源）· 自动列宽与千分位格式',
     audio: '🎙️ 双人播客规范：Host A（合伙人）× Host B（分析师）6–10 轮交叉追问 · 1,400–2,400 字口语化实证交锋 · 支持双声线语音联播',
@@ -124,7 +124,7 @@ function renderRightNotes(x, p) {
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
     <div style="padding:6px 12px;border-top:1px solid var(--line);background:#0B1528;font-size:11.5px">
       <div class="row" style="flex-wrap:nowrap">
-        <span style="cursor:pointer" data-act="nb-cfg-toggle">🎛️ 规格：<b style="color:#60A5FA">${cfg.pageCount}页/章</b> · <b style="color:#34D399">~${cfg.targetMB}MB</b> <span class="lnk">${S.showStudioCfg ? '▴' : '▾'}</span></span>
+        <span style="cursor:pointer" data-act="nb-cfg-toggle">🎛️ 规格：<b style="color:#60A5FA">${cfg.pageCount}页/章</b> <span class="lnk">${S.showStudioCfg ? '▴' : '▾'}</span></span>
         <span class="grow"></span>
         <button class="btn sm ghost" style="padding:2px 6px;font-size:11px" data-act="nb-studio-ppt" data-p="${p.id}">PPT工坊</button>
         <button class="btn sm ghost" style="padding:2px 6px;font-size:11px" data-act="nb-studio-word" data-p="${p.id}">文书工坊</button>
@@ -132,18 +132,16 @@ function renderRightNotes(x, p) {
       ${S.showStudioCfg ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
         <div class="row"><span>📏 页数 / 章节数：<b id="nbPgVal" style="color:#60A5FA">${cfg.pageCount} 页/章</b> <span class="dim">(4–24)</span></span><span class="grow"></span>
           <input type="range" min="4" max="24" step="1" value="${cfg.pageCount}" style="width:120px;accent-color:#3B82F6" data-act="nb-cfg-pg"></div>
-        <div class="row"><span>💎 目标文件大小：<b id="nbMbVal" style="color:#34D399">~${cfg.targetMB} MB</b> <span class="dim">(3–30MB)</span></span><span class="grow"></span>
-          <input type="range" min="3" max="30" step="1" value="${cfg.targetMB}" style="width:120px;accent-color:#10B981" data-act="nb-cfg-mb"></div>
         <div class="row">
           <select class="select sm grow" data-act="nb-cfg-theme">
-            <option value="mck" ${cfg.theme === 'mck' ? 'selected' : ''}>🎨 麦肯锡深海蓝 (Mck)</option>
-            <option value="swiss" ${cfg.theme === 'swiss' ? 'selected' : ''}>🎨 瑞士国际网格 (Swiss)</option>
-            <option value="emerald" ${cfg.theme === 'emerald' ? 'selected' : ''}>🎨 黑金翡翠投研 (Emerald)</option>
+            <option value="mck" ${cfg.theme === 'mck' ? 'selected' : ''}>配色：松绿</option>
+            <option value="swiss" ${cfg.theme === 'swiss' ? 'selected' : ''}>配色：藏青</option>
+            <option value="emerald" ${cfg.theme === 'emerald' ? 'selected' : ''}>配色：赭石</option>
           </select>
           <select class="select sm grow" data-act="nb-cfg-den">
-            <option value="concise" ${cfg.density === 'concise' ? 'selected' : ''}>📐 高管精炼 (每页3要点)</option>
-            <option value="standard" ${cfg.density === 'standard' ? 'selected' : ''}>📐 咨询标准 (每页5要点)</option>
-            <option value="dense" ${cfg.density === 'dense' ? 'selected' : ''}>📐 尽调详实 (每页6要点)</option>
+            <option value="concise" ${cfg.density === 'concise' ? 'selected' : ''}>篇幅：精简</option>
+            <option value="standard" ${cfg.density === 'standard' ? 'selected' : ''}>篇幅：标准</option>
+            <option value="dense" ${cfg.density === 'dense' ? 'selected' : ''}>篇幅：详细</option>
           </select>
         </div>
         <div class="dim" id="nbSpecHint" style="padding:5px 8px;background:#111F3D;border-radius:6px;border-left:3px solid #3B82F6;line-height:1.45">${esc(SPECS[cfg.specKind] || SPECS.ppt)}</div>
@@ -157,7 +155,7 @@ function renderRightNotes(x, p) {
         ${ficon(a.ext, true)}
         <div class="grow" style="min-width:0">
           <div class="ell"><b>${esc(a.name)}</b></div>
-          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿溯源 · ${(a.bytes / 1048576).toFixed(2)} MB · 点击本机检阅</div>
+          <div class="dim ell" style="font-size:11px">${esc(a.summary || `${a.sourceCount || S.ctx.fileIds.length} 份底稿`)}</div>
         </div>
         <button class="btn sm pri" data-act="nb-submit-art" data-p="${p.id}" data-i="${idx}" onclick="event.stopPropagation()">报送阶段复核</button>
       </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方编制按钮，产出的正式工作成果将陈列于此（右下角）并可直接报送阶段复核</div>'}
@@ -182,9 +180,9 @@ Object.assign(ACT, {
     const v = $('#nbChatInput')?.value?.trim()
     if (!v) return
     $('#nbChatInput').value = ''
-    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6 }
+    const cfg = S.studioCfg ?? { pageCount: 8 }
     toast('⚡ Agent OS 正在群内执行跨工具操作（IM 群聊 × Office 文档 × SaaS 流程）…')
-    const r = await act('nb.os.dispatch', { projectId: el?.dataset?.p || S.sel, text: v, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB })
+    const r = await act('nb.os.dispatch', { projectId: el?.dataset?.p || S.sel, text: v, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount })
     if (r) {
       toast(`✅ 跨工具执行完成：已生成《${r.artifact.name}》并同步至项目群与业务流程`, 'ok')
       S.project = await get('project', { id: el?.dataset?.p || S.sel })
@@ -202,7 +200,6 @@ Object.assign(ACT, {
   },
   'nb-studio-xlsx': el => ACT['nb-open-board']({ dataset: { p: el.dataset.p, b: 'evidence' } }),
   'nb-cfg-pg': el => { S.studioCfg ??= {}; S.studioCfg.pageCount = Number(el.value) || 8; if ($('#nbPgVal')) $('#nbPgVal').textContent = `${S.studioCfg.pageCount} 页/章` },
-  'nb-cfg-mb': el => { S.studioCfg ??= {}; S.studioCfg.targetMB = Number(el.value) || 6; if ($('#nbMbVal')) $('#nbMbVal').textContent = `~${S.studioCfg.targetMB} MB` },
   'nb-cfg-theme': el => { S.studioCfg ??= {}; S.studioCfg.theme = el.value || 'mck' },
   'nb-cfg-den': el => { S.studioCfg ??= {}; S.studioCfg.density = el.value || 'standard' },
   'nb-tyc-open': async el => {
@@ -250,9 +247,9 @@ Object.assign(ACT, {
   },
   'nb-dify-run': async () => {
     const st = S.difySt || { pid: S.sel, curId: 'ac_dd_word' }
-    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
+    const cfg = S.studioCfg ?? { pageCount: 8, theme: 'mck', density: 'standard' }
     toast('🏛️ 正在按机构标准工作流节点执行核验并扣减配额…')
-    const r = await act('nb.dify.run', { projectId: st.pid, workflowId: st.curId, dslYaml: $('#nbDifyYaml')?.value, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density, autoSubmit: !!$('#nbDifyAutoSub')?.checked })
+    const r = await act('nb.dify.run', { projectId: st.pid, workflowId: st.curId, dslYaml: $('#nbDifyYaml')?.value, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, theme: cfg.theme, density: cfg.density, autoSubmit: !!$('#nbDifyAutoSub')?.checked })
     if (r) {
       S.difySt.trace = r.trace
       if (r.gov) { S.difySt.quota = r.gov.quota; S.difySt.tpls = r.gov.templates }
@@ -264,14 +261,14 @@ Object.assign(ACT, {
   },
   'nb-make': async el => {
     const k = el.dataset.k
-    const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
+    const cfg = S.studioCfg ?? { pageCount: 8, theme: 'mck', density: 'standard' }
     cfg.specKind = k
-    S.makingStudio = `${el.textContent.trim()} (${cfg.pageCount}页/章 · ~${cfg.targetMB}MB)`
+    S.makingStudio = `${el.textContent.trim()}（${cfg.pageCount} 页/章）`
     hooks.refresh()
-    const r = await act('nb.studio.make', { projectId: el.dataset.p || S.sel, kind: k, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, targetMB: cfg.targetMB, theme: cfg.theme, density: cfg.density })
+    const r = await act('nb.studio.make', { projectId: el.dataset.p || S.sel, kind: k, fileIds: S.ctx.fileIds, pageCount: cfg.pageCount, theme: cfg.theme, density: cfg.density })
     S.makingStudio = null
     if (r) {
-      toast(`✅ 已按规格 (${cfg.pageCount}页/章 · ${(r.bytes / 1048576).toFixed(2)} MB) 编制「${r.name}」并置于右下角`, 'ok')
+      toast(`已生成「${r.name}」：${r.summary || ''}`, r.engine === '底稿摘编' ? 'info' : 'ok')
       S.project = await get('project', { id: el.dataset.p || S.sel })
     }
     hooks.refresh()

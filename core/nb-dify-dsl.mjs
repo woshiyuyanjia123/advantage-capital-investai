@@ -112,7 +112,6 @@ export async function runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai
     fileIds: b.fileIds,
     prompt: b.prompt || `按机构标准工作流「${tpl.name}」节点拓扑执行深度核验与成果编制`,
     pageCount: b.pageCount || 8,
-    targetMB: b.targetMB || 6,
     theme: b.theme || 'mck',
     density: b.density || 'standard',
   })
