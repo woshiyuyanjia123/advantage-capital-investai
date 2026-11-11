@@ -98,7 +98,17 @@ export function buildEquityResearchMemoHtml(p, docs = [], user = {}) {
     <table class="opc-tbl"><tr><th>等级</th><th>蓝军反驳核心论点 / 风险事实</th><th>交割前置核验与缓释路径</th></tr>
       ${(risks.length ? risks : ['需核对 BP 收入预测与审计报告附注一致性']).map((r, i) => `<tr><td><b style="color:${i === 0 ? '#c00000' : '#c67000'}">${i === 0 ? 'CRITICAL' : 'HIGH'}</b></td><td>${esc(r)}</td><td>纳入投资协议先决条件（CP）与法务/财务专项穿行核查</td></tr>`).join('')}</table>
   </div>
-  <div class="opc-sec"><div class="opc-sec-t">VIII. Investment Recommendation · 投委会决策建议（Verdict Box）</div>
+  <div class="opc-sec"><div class="opc-sec-t">VIII. Investment Recommendation & Interactive Valuation Sandbox · 投决建议与动态假设沙盘</div>
+    <div class="opc-box" style="margin-bottom:10px;border:1.5px solid var(--pri);background:#f0f4ff">
+      <div style="font:700 8.5pt Arial,sans-serif;color:var(--pri);margin-bottom:6px">🎛️ 投决现场压力测试沙盘（拖动滑块实时测算下行保护与隐含回报）</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font:9pt Arial,sans-serif">
+        <label>业绩达成率假设：<b id="sbRevLbl">100%</b> <input type="range" id="sbRev" min="50" max="140" value="100" oninput="recalcSb()"></label>
+        <label>退出估值倍数：<b id="sbMulLbl">12x</b> <input type="range" id="sbMul" min="6" max="25" value="12" oninput="recalcSb()"></label>
+        <span>➔ 隐含退出估值重算：<b id="sbVal" style="color:var(--pri);font-size:11pt">1.20x 基准</b></span>
+        <span>预期回报倍数 (MOIC)：<b id="sbMoic" style="color:var(--green);font-size:11pt">2.40x</b></span>
+      </div>
+    </div>
+    <script>function recalcSb(){const r=Number(document.getElementById('sbRev').value)/100,m=Number(document.getElementById('sbMul').value);document.getElementById('sbRevLbl').textContent=Math.round(r*100)+'%';document.getElementById('sbMulLbl').textContent=m+'x';const idx=(r*(m/10)).toFixed(2);const moic=(r*(m/5)).toFixed(2);document.getElementById('sbVal').textContent=idx+'x 基准锚点';const el=document.getElementById('sbMoic');el.textContent=moic+'x';el.style.color=moic>=2?'#0a6e2a':moic>=1.2?'#7a4f00':'#8b0000';}</script>
     <div class="opc-verdict"><div style="font:700 7.5pt Arial,sans-serif;color:#666;letter-spacing:1.5px">INVESTMENT COMMITTEE VERDICT · 投委会综合裁定</div>
       <p style="margin-top:6px">综合基本面、财务勾稽与蓝军压力测试，建议对 <b>${esc(p.name)}</b> 采取「<b>${verdict}</b>」策略：在完成蓝军所列 CRITICAL/HIGH 级事项闭环核验并落实估值调整与回购保护条款后，提请投委会表决。</p>
       <span class="opc-pill ${vClass}" style="display:inline-block;margin-top:8px">最终建议：${verdict}</span></div>

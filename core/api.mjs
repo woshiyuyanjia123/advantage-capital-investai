@@ -582,6 +582,13 @@ export function createApi(ctx) {
     'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.tyc.meta': () => ({ dimensions: TYC_DIMENSIONS }),
+    'nb.artifact.preview': async (user, q) => {
+      const p = project(user, q.get('projectId'))
+      const fp = String(q.get('fp') || '')
+      if (!fp || !fp.includes(p.id)) throw fail('非法成果路径', 403)
+      const txt = await readFile(fp, 'utf8')
+      return { name: fp.split(/[\\/]/).pop(), content: txt }
+    },
     'nb.dify.templates': (user, q) => {
       const p = q.get('projectId') ? project(user, q.get('projectId')) : null
       const gov = getEnterpriseGovState(db, user, org)

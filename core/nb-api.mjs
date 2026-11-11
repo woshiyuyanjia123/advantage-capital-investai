@@ -14,8 +14,20 @@ export function readDshLocalDeepSeekKey() {
   } catch { return '' }
 }
 
+export function readLocalCarbonConfig() {
+  try {
+    const p = join(homedir(), '.jeikcode', 'config.toml')
+    if (!existsSync(p)) return null
+    const txt = readFileSync(p, 'utf8')
+    const baseURL = txt.match(/base_url\s*=\s*"([^"]+)"/)?.[1] || 'http://127.0.0.1:8046/v1'
+    const apiKey = txt.match(/api_key\s*=\s*"([^"]+)"/)?.[1] || ''
+    return apiKey ? { baseURL, apiKey, model: 'gemini-4-carbon-high' } : null
+  } catch { return null }
+}
+
 const LOOPBACK = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i
 const PRESETS = [
+  { name: 'Carbon 高阶推理网关 (本机 8046)', baseURL: 'http://127.0.0.1:8046/v1' },
   { name: 'Ollama 本地离线', baseURL: 'http://127.0.0.1:11434/v1' },
   { name: 'LM Studio 本地离线', baseURL: 'http://127.0.0.1:1234/v1' },
   { name: 'vLLM / LocalAI 本地', baseURL: 'http://127.0.0.1:8000/v1' },

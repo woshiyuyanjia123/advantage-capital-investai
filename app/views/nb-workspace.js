@@ -37,6 +37,12 @@ export function renderNbWorkspace(v) {
   </div>`
 }
 
+function sourceCredTag(name = '') {
+  if (/审计|财务|财报|利润|合同|天眼查|工商/.test(name)) return '<span style="font-size:10px;padding:1px 5px;border-radius:4px;background:#064E3B;color:#6EE7B7;white-space:nowrap" title="A级强公信证据：审计/财务/合同/工商底稿">A级·强公信</span>'
+  if (/商业计划|BP|路演/i.test(name)) return '<span style="font-size:10px;padding:1px 5px;border-radius:4px;border:1px dashed #F59E0B;color:#FCD34D;white-space:nowrap" title="C级管理层自述：需与A级审计/工商底稿交叉核实">C级·BP自述</span>'
+  return '<span style="font-size:10px;padding:1px 5px;border-radius:4px;background:#1E3A8A;color:#93C5FD;white-space:nowrap" title="B级尽调访谈与内部纪要">B级·尽调核实</span>'
+}
+
 function renderLeftPane(rawFiles, p, checked) {
   return `<div class="nb-col">
     <div class="nb-col-hd"><b style="white-space:nowrap">项目底稿资料 (${rawFiles.length})</b><span class="grow"></span>
@@ -44,10 +50,10 @@ function renderLeftPane(rawFiles, p, checked) {
     <div class="row" style="padding:10px 12px 6px"><button class="btn sm grow" data-act="proj-upload">${icon('plus', 12)} 上传底稿</button>
       <button class="btn sm pri" data-act="nb-tyc-open" data-p="${p.id}">🔍 天眼查穿透</button>
       <button class="btn sm" data-act="nb-note-add" data-p="${p.id}">${icon('plus', 12)} 纪要</button></div>
-    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">已勾选 ${checked.size} 份原始底稿参与编制</span><span class="grow"></span>
+    <div class="row" style="padding:4px 12px"><span class="dim" style="font-size:11.5px">已勾选 ${checked.size} 份底稿（自动标注证据效力等级）</span><span class="grow"></span>
       <label class="dim" style="font-size:11.5px;cursor:pointer"><input type="checkbox" class="ck" data-act="nb-src-all" ${checked.size && checked.size >= rawFiles.length ? 'checked' : ''}> 全选</label></div>
     <div class="nb-sources">${rawFiles.map((f, idx) => `<label class="nb-src-row">
-      <span class="mono dim">${idx + 1}</span>${ficon(f.ext, true)}<span class="ell grow" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="mono dim">${idx + 1}</span>${ficon(f.ext, true)}<span class="ell grow" title="${esc(f.name)}">${esc(f.name)}</span>${sourceCredTag(f.name)}
       <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}></label>`).join('') || '<div class="empty">请点击上方「+ 上传底稿」</div>'}
     </div>
   </div>`
@@ -78,7 +84,8 @@ function renderCenterPane(x, p, f, rawFiles) {
         <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于已勾选底稿深度研判…' : ''))}</div>
         ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 存入尽调纪要</button></div>` : ''}</div>`).join('')
         : `<div class="box" style="margin-bottom:14px"><b>✨ 底稿溯源深度研判（已锚定左侧勾选的 ${S.ctx.fileIds.length || rawFiles.length} 份原始底稿）</b>
-          <div class="dim" style="margin-top:6px;line-height:1.6">向 AI 提问任何有关财务勾稽、客户合同、估值条款或潜在诉讼的问题，回答将逐句标注 <code>[n]</code> 底稿出处；也可直接点击下方推荐追问或右侧九宫格一键编制专业成果。</div></div>`}
+          <div class="dim" style="margin-top:6px;line-height:1.6">向 AI 提问任何有关财务勾稽、客户合同、估值条款或潜在诉讼的问题，回答将逐句标注 <code>[n]</code> 底稿出处；也可点击下方开启 <b>红蓝军跨源对质</b> 一眼揪出 BP 与财报/尽调底稿的矛盾点。</div>
+          <div class="row" style="margin-top:8px"><button class="btn sm pri" data-act="nb-q" data-q="请以红蓝军对质视角，逐项比对当前勾选的 C级商业计划书(BP) 与 A级财务报表/合同/尽调访谈底稿，列出所有口径背离、过度承诺与潜在 Deal-breaker 致命风险，并标注 [n] 出处。">⚔️ 启动红蓝军跨源矛盾对质雷达</button></div></div>`}
       <div class="nb-follow-grid">${(x.followUps ?? []).map(q => `<button class="nb-follow-card" data-act="nb-q" data-q="${esc(q)}"><span>${esc(q)}</span><span class="dim">↳ 点击基于已勾选底稿立即深度研判</span></button>`).join('')}</div>
     </div>
     <div class="composer" style="padding:10px 14px;border-top:1px solid var(--line)"><div class="row">
@@ -150,14 +157,14 @@ function renderRightNotes(x, p) {
       </div>` : ''}
     </div>
     <div class="nb-notes-list" style="border-top:1px solid var(--line)">
-      ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6"><span class="spin"></span><div class="grow"><b>正在编制 ${esc(S.makingStudio)}…</b><div class="dim" style="font-size:11px">严格依据已勾选 ${S.ctx.fileIds.length} 份底稿编制并归档至项目档案室</div></div></div>` : ''}
+      ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6;background:#0F1E3A"><span class="spin"></span><div class="grow"><b>Carbon 深度思考编排中：${esc(S.makingStudio)}</b><div class="dim" style="font-size:11px;margin-top:2px">① 多源底稿采集(${S.ctx.fileIds.length}份) ➔ ② 财务与BP红蓝军互校 ➔ ③ 自主视觉版式设计 ➔ ④ 反幻觉溯源归档</div></div></div>` : ''}
       <div class="row" style="margin:2px 2px 4px"><b>✨ 已编制工作成果 (${arts.length})</b><span class="grow"></span>
         <button class="lnk" data-act="nb-flowboard" data-p="${p.id}">进入阶段门禁与投决 ›</button></div>
-      ${arts.map((a, idx) => `<div class="nb-art-item" data-act="nb-open-folder" data-p="${p.id}" data-fp="${esc(a.fullPath)}">
+      ${arts.map((a, idx) => `<div class="nb-art-item" data-act="nb-preview-art" data-p="${p.id}" data-ext="${esc(a.ext)}" data-fp="${esc(a.fullPath)}">
         ${ficon(a.ext, true)}
         <div class="grow" style="min-width:0">
           <div class="ell"><b>${esc(a.name)}</b></div>
-          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿溯源 · ${(a.bytes / 1048576).toFixed(2)} MB · 点击本机检阅</div>
+          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿溯源 · ${(a.bytes / 1048576).toFixed(2)} MB · ${a.ext === '.html' ? '点击应用内沉浸直览' : '点击唤起本机 Office 检阅'}</div>
         </div>
         <button class="btn sm pri" data-act="nb-submit-art" data-p="${p.id}" data-i="${idx}" onclick="event.stopPropagation()">报送阶段复核</button>
       </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方编制按钮，产出的正式工作成果将陈列于此（右下角）并可直接报送阶段复核</div>'}
@@ -275,6 +282,19 @@ Object.assign(ACT, {
       S.project = await get('project', { id: el.dataset.p || S.sel })
     }
     hooks.refresh()
+  },
+  'nb-preview-art': async el => {
+    const { p, fp, ext } = el.dataset
+    if (ext === '.html') {
+      const r = await get('nb.artifact.preview', { projectId: p || S.sel, fp }).catch(() => null)
+      if (r?.content) {
+        drawer(`${drawerHead(`📄 应用内沉浸直览 · ${esc(r.name)}`, '支持直接在下方拖动敏感性滑块、展开导图或判分测验')}<div class="body" style="padding:0;height:82vh"><iframe id="nbArtFrame" style="width:100%;height:100%;border:none;background:#fff"></iframe></div>`, true)
+        const fr = $('#nbArtFrame')
+        if (fr) fr.srcdoc = r.content
+        return
+      }
+    }
+    ACT['nb-open-folder']?.(el)
   },
   'nb-submit-art': async el => {
     const pid = el.dataset.p || S.sel
