@@ -1,5 +1,6 @@
 // 咨询级高审美 PPT 工作流引擎（融合 Mck-ppt-design-skill 62 种版式语法 + PptxGenJS 原生图表 + 高清渐变纹理画布，单份 PPT ≥ 3.2MB）
 import { deflateSync, crc32 } from 'node:zlib'
+import { addDarkKeynoteFrame, renderDarkKeynoteBody } from './nb-ppt-keynote.mjs'
 
 function pngChunk(type, data) {
   const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0)
@@ -108,6 +109,11 @@ async function finishDeck(pptx, T, slides, sources, { bgSec, totalPages = 8, sca
     const slideArt = i === 0 ? bgSec : `data:image/png;base64,${renderHdArtPng(400 + i * 37, T.pal, scale).toString('base64')}`
     const cards = normalizeSlideCards(s)
     const kpis = s.kpis?.length ? s.kpis : [{ val: '100%', label: '底稿核对率', sub: '原文逐项勾稽' }, { val: `0${i + 1}`, label: '核心研判模块', sub: '多维交叉验证' }, { val: 'CP闭环', label: '风控缓释机制', sub: '交割前置条件' }]
+    if (i % 2 === 0) {
+      addDarkKeynoteFrame(pptx, sl, slideArt, { secNo: `0${i + 1}`, secTag: (s.kicker || '深度研判').slice(0, 18), title: s.title || `专项分析章节 ${i + 1}`, subtitle: s.banner || cards[0]?.body || '', logicLabel: '底稿实证', logicText: s.footnote || '', quote: cards[3]?.body?.slice(0, 48) || '带源、成体系、可编辑——从“能看”直接跨到“能交”。', pageNo: i + 2 })
+      renderDarkKeynoteBody(pptx, sl, Math.floor(i / 2), s, cards, kpis)
+      continue
+    }
     addHead(sl, s.kicker || `SECTION 0${i + 1} · 深度投研`, s.title || `专项分析章节 ${i + 1}`, i + 2, s.footnote)
 
     // 顶部深色纹理导语条 + 右侧 3 个量化 KPI 胶囊
