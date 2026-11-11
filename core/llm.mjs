@@ -175,8 +175,9 @@ export function openaiLlm({ baseURL, apiKey, model, dialect, retryDelay = 1000 }
           if (tc.function?.name) slot.name += tc.function.name
           if (tc.function?.arguments) slot.arguments += tc.function.arguments
         }
-        if (choice.finish_reason) out.finish = choice.finish_reason
+        if (choice.finish_reason) { out.finish = choice.finish_reason; if (choice.finish_reason !== 'length') break }
       }
+      r.body?.cancel?.().catch(() => {})
       out.toolCalls = out.toolCalls.filter(Boolean)
       if (out.finish === 'length') {
         if (!out.text && !out.toolCalls.length) throw Object.assign(new Error('模型输出达到长度上限：思考阶段已用完额度，没有产出正文'), { permanent: false })
@@ -195,8 +196,11 @@ export function openaiLlm({ baseURL, apiKey, model, dialect, retryDelay = 1000 }
         if (choice?.finish_reason === 'length') {
           if (!any) throw Object.assign(new Error('模型输出达到长度上限：思考阶段已用完额度，没有产出正文'), { permanent: false })
           yield TRUNCATED
+          break
         }
+        if (choice?.finish_reason) break
       }
+      r.body?.cancel?.().catch(() => {})
     },
   }
 }

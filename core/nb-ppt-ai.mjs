@@ -1,6 +1,6 @@
 // AI 驱动的麦肯锡/投行级 PPT 蓝图架构师（给本机接入的 DeepSeek API 注入完整视觉与投研提示词，由 AI 机器人自主完成每页版式选型、结论先行标题、KPI 指标卡、四象限深度分析卡与对比矩阵表设计）
-import { complete, openaiLlm, DEFAULT_MODEL } from './llm.mjs'
-import { readDshLocalDeepSeekKey, readLocalCarbonConfig } from './nb-api.mjs'
+import { parseJson } from './llm.mjs'
+import { carbonComplete } from './nb-api.mjs'
 import { parseSourceTables, classifySourceSentences } from './nb-deep-doc.mjs'
 
 const PPT_ARCHITECT_SYSTEM_PROMPT = `你是优势资本（Advantage Capital）首席投研合伙人兼顶级商业演示视觉总监。
@@ -41,42 +41,28 @@ const PPT_ARCHITECT_SYSTEM_PROMPT = `你是优势资本（Advantage Capital）�
   ]
 }`
 
-export async function planPptDeckWithAi(ai, p, docs = [], { pageCount = 8, density = 'standard', userPrompt = '' } = {}) {
+export async function planPptDeckWithAi(ai, p, docs = [], { pageCount = 8, density = 'standard', userPrompt = '', mesh = null } = {}) {
   const tables = parseSourceTables(docs)
   const b = classifySourceSentences(docs)
   const f = p.fields ?? {}
   const bodySlidesCount = Math.max(2, Number(pageCount || 8) - 2)
-  const srcDigest = docs.map((d, i) => `【底稿[${i + 1}]：《${d.name}》】\n${d.text.slice(0, 2600)}`).join('\n\n')
-  let adapter = null
-  const carbon = readLocalCarbonConfig()
-  if (carbon?.apiKey) adapter = openaiLlm({ baseURL: carbon.baseURL, apiKey: carbon.apiKey, model: carbon.model })
-  if (!adapter) {
-    const route = await ai?.route?.(0).catch(() => ({ adapter: null }))
-    adapter = route?.adapter
-  }
-  if (!adapter) {
-    const key = process.env.DEEPSEEK_API_KEY || readDshLocalDeepSeekKey()
-    if (key) adapter = openaiLlm({ baseURL: 'https://api.deepseek.com', apiKey: key, model: DEFAULT_MODEL })
-  }
+  const srcDigest = docs.map((d, i) => `【底稿[${i + 1}]：《${d.name}》】\n${d.text.slice(0, 2200)}`).join('\n\n')
   let aiPlan = null
-  if (adapter && docs.length) {
+  if (docs.length) {
+    const meshHint = mesh ? `【Agent×Agent 网状互校结论】\n核心主线：${mesh.thesis}\n跨源矛盾对质：${JSON.stringify(mesh.conflicts || [])}` : ''
     const prompt = [
       `项目名称：${p.name}（阶段：${p.stage || '尽职调查'}；轮次：${f.round || '未披露'}；拟投金额：${f.amount || '未披露'}；估值：${f.valuation || '未披露'}）`,
+      meshHint,
       `已勾选底稿共 ${docs.length} 份：\n${srcDigest}`,
       userPrompt ? `用户特别指令：${userPrompt}` : '',
-      `请先深度思考该项目在行业、技术、客户合同、财务三表及法务上的核心看点与风险，自主规划 ${bodySlidesCount + 1} 页 PPT 蓝图。每页从 ["chart_bar","process_flow","kpi_table","timeline_roadmap","spotlight_asymmetric","bento_quad"] 中自主挑选不同 layout，写满 3 个 kpis 和 4 个详实 cards（每张 card body 60-100 字，带 [1][2] 出处）。不要输出 task ready，直接只输出 JSON 对象：`,
+      `请围绕上述底稿与跨源矛盾，自主规划 ${bodySlidesCount + 1} 页 PPT 蓝图。每页从 ["chart_bar","process_flow","kpi_table","timeline_roadmap","spotlight_asymmetric","bento_quad"] 中自主挑选不同 layout，写满 3 个 kpis 和 4 个详实 cards（每张 card body 55-90 字，带 [1][2] 出处）。不要输出 task ready，直接只输出 JSON 对象：`,
     ].filter(Boolean).join('\n\n')
-    const raw = await complete(adapter, {
+    const { text: raw } = await carbonComplete({
+      ai, tier: 'low', maxTokens: 6144, timeoutMs: 50000,
       system: PPT_ARCHITECT_SYSTEM_PROMPT,
       user: prompt,
-      maxTokens: 12288,
-      reasoning: 'on',
-      signal: AbortSignal.timeout(95000),
-    }).catch(() => '')
-    const m = String(raw || '').match(/\{[\s\S]*\}/)
-    if (m) {
-      try { aiPlan = JSON.parse(m[0]) } catch { aiPlan = null }
-    }
+    })
+    aiPlan = parseJson(raw)
   }
   return normalizeDeckPlan(aiPlan, p, docs, b, tables, bodySlidesCount)
 }

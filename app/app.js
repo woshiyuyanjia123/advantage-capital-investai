@@ -455,7 +455,8 @@ ACT['tour-start'] = () => { closeDrawer(); startTour() }
 ACT['top-settings-menu'] = el => {
   const r = el.getBoundingClientRect()
   popup(`<div class="hd">⚙️ 系统设置 · 账户 · 帮助中心</div>
-    <div class="it" data-act="nb-api">${icon('spark', 14)}<div class="grow"><b>AI 模型与 API 路由设置</b><div class="dim" style="font-size:11px">配置 DeepSeek / 本地 Ollama / 混合路由</div></div></div>
+    <div class="it" data-act="nb-api">${icon('spark', 14)}<div class="grow"><b>AI 模型与 API 路由设置</b><div class="dim" style="font-size:11px">配置 Carbon / DeepSeek / 本地 Ollama / 混合路由</div></div></div>
+    <div class="it" data-act="nb-arch-open">${icon('flow', 14)}<div class="grow"><b>五层生产架构与 Agent×Agent 监控</b><div class="dim" style="font-size:11px">查看四层解耦底座状态、网状互校日志与快照回滚</div></div></div>
     <div class="it" data-act="persona">${icon('users', 14)}<div class="grow"><b>账户与岗位视角切换</b><div class="dim" style="font-size:11px">切换 15 个一级市场岗位体验四层权限</div></div></div>
     <div class="it" data-act="go" data-view="settings">${icon('set', 14)}<div class="grow"><b>机构治理与系统配置</b><div class="dim" style="font-size:11px">人员角色、流程模板、密级规则与审计</div></div></div>
     <div class="it" data-act="go" data-view="knowledge">${icon('kb', 14)}<div class="grow"><b>全机构底稿资料库</b><div class="dim" style="font-size:11px">管理 NAS 挂载目录与项目原始底稿</div></div></div>
@@ -536,7 +537,7 @@ function showLogin(info = {}) {
   if ($('.login')) return
   const el = document.createElement('div')
   el.className = 'login'
-  el.innerHTML = `<form class="dialog"><div class="row" style="margin-bottom:14px"><span class="logo"><span class="mk">A /</span><span class="nm">深蓝投研工作台</span></span></div>
+  el.innerHTML = `<form class="dialog"><div class="row" style="margin-bottom:14px"><span class="logo"><span class="mk">AC /</span><span class="nm">优势资本 · 智能投研工作台</span></span></div>
     <label class="f">账号<input class="input" name="username" autocomplete="username" required></label>
     <label class="f">密码<input class="input" name="password" type="password" autocomplete="current-password" required></label>
     <div id="lerr" style="color:#FCA5A5;min-height:18px;font-size:12px"></div><button class="btn pri" style="width:100%">登录</button>

@@ -1,14 +1,8 @@
 // 优势资本智能投研 100% 级生成流水线：
 // Stage 1: 全量勾选来源分块与带页码/句段锚定 (Source-Anchored Fact & Metric Map)
 // Stage 2: LLM / 深度结构化双通道合成（双人播客对谈、可折叠思维导图、3D翻转闪卡、交互判分测验、Bento信息图）
-import { complete, parseJson, openaiLlm } from './llm.mjs'
-import { readLocalCarbonConfig } from './nb-api.mjs'
-
-function pickCarbonOrRoute(route) {
-  const c = readLocalCarbonConfig()
-  if (c?.apiKey) return openaiLlm({ baseURL: c.baseURL, apiKey: c.apiKey, model: c.model })
-  return route?.adapter || null
-}
+import { parseJson } from './llm.mjs'
+import { carbonComplete } from './nb-api.mjs'
 
 export function extractGroundedFacts(p, docs = []) {
   const facts = []
@@ -30,32 +24,25 @@ export function extractGroundedFacts(p, docs = []) {
 }
 
 export async function synthesizeDeepSeekSection(ai, p, docs = [], userPrompt = '') {
-  const route = await ai?.route?.(0).catch(() => ({ adapter: null }))
-  const adapter = pickCarbonOrRoute(route)
-  if (!adapter) return ''
   try {
-    const ctx = docs.slice(0, 6).map((d, i) => `【来源 ${i + 1}：${d.name}】\n${String(d.text || '').slice(0, 2600)}`).join('\n\n')
+    const ctx = docs.slice(0, 6).map((d, i) => `【来源 ${i + 1}：${d.name}】\n${String(d.text || '').slice(0, 2400)}`).join('\n\n')
     const q = userPrompt || `请针对「${p.name}」（当前阶段：${p.stage || '尽调'}，估值：${p.fields?.valuation || '待定'}），严格基于上述勾选资料，深入剖析：1) 核心投资亮点与技术/客户壁垒；2) 财务数据与业务口径交叉核验发现（重点挑出BP与财报/访谈的潜在张力）；3) 投委会必须关注的三大致命风险与交易协议保护性条款建议。每处事实与数字必须标注 [1][2] 来源编号。不要输出 task ready，直接输出中文分析正文。`
-    const out = await complete(adapter, {
+    const { text: out } = await carbonComplete({
+      ai, tier: 'low', maxTokens: 4096, timeoutMs: 45000,
       system: '你是优势资本首席投委会合伙人。只依据提供的来源资料撰写严谨、量化的深度投研分析，用 Markdown 小标题与要点排版，每处引用标注 [n]。',
       user: `${ctx}\n\n【专项分析任务】\n${q}`,
-      maxTokens: 8192,
-      reasoning: 'on',
-      signal: AbortSignal.timeout(75000),
     })
     return String(out || '').trim()
   } catch { return '' }
 }
 
 export async function generateTwoHostScript(ai, p, docs, { facts, metrics }) {
-  const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
-  if (route?.adapter) {
-    try {
-      const prompt = `项目：${p.name}\n来源事实：\n${[...metrics.slice(0, 6), ...facts.slice(0, 6)].map(x => `${x.text} ${x.cite}`).join('\n')}\n请生成 优势资本投研对谈 风格的双主持人（Host A 资深投研合伙人 / Host B 敏锐尽调分析师）深度对谈脚本 JSON：{"turns":[{"speaker":"Host A","text":"..."},{"speaker":"Host B","text":"..."}]}，共 8 轮，自然口语且引用具体数字。`
-      const out = parseJson(await complete(route.adapter, { system: '只输出 JSON。', user: prompt, maxTokens: 2500, reasoning: 'off', signal: AbortSignal.timeout(25000) }))
-      if (Array.isArray(out?.turns) && out.turns.length >= 4) return out.turns
-    } catch { /* 回退至高拟真双人深度对谈模板 */ }
-  }
+  try {
+    const prompt = `项目：${p.name}\n来源事实：\n${[...metrics.slice(0, 6), ...facts.slice(0, 6)].map(x => `${x.text} ${x.cite}`).join('\n')}\n请生成 优势资本投研对谈 风格的双主持人（Host A 资深投研合伙人 / Host B 敏锐尽调分析师）深度对谈脚本 JSON：{"turns":[{"speaker":"Host A","text":"..."},{"speaker":"Host B","text":"..."}]}，共 8 轮，自然口语且引用具体数字。不输出 task ready。`
+    const { text: raw } = await carbonComplete({ ai, tier: 'low', maxTokens: 2500, timeoutMs: 30000, system: '只输出 JSON。', user: prompt })
+    const out = parseJson(raw)
+    if (Array.isArray(out?.turns) && out.turns.length >= 4) return out.turns
+  } catch { /* 回退至高拟真双人深度对谈模板 */ }
   const m0 = metrics[0]?.text || `本轮拟投 ${p.fields?.amount || '1亿元'}`
   const m1 = metrics[1]?.text || facts[0]?.text
   const f0 = facts[0]?.text || '核心技术具备国产替代壁垒'

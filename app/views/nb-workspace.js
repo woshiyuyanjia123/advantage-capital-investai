@@ -3,7 +3,7 @@ import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, leve
 
 function getRawSourceFiles(x) {
   const all = x?.files ?? []
-  const raw = all.filter(f => f.mountId !== 'm_ws' && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
+  const raw = all.filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('Studio成品') && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
   return raw.length ? raw : all
 }
 
@@ -78,10 +78,10 @@ function renderCenterPane(x, p, f, rawFiles) {
         ${f.stageDetails.map(st => `<span class="nb-st-node ${st.state}">${st.state === 'done' ? '✓' : st.index + 1}. ${esc(st.name)} <b>${st.pct}%</b></span>`).join('')}
       </div>
     </div>
-    <div class="abody" style="flex:1;padding:16px;overflow:auto">
-      ${msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" style="margin-bottom:12px">
-        <div class="dim" style="font-size:11px;margin-bottom:4px">${m.role === 'user' ? esc(d.me.name) : '优势资本 · 底稿溯源投研助手'}</div>
-        <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在基于已勾选底稿深度研判…' : ''))}</div>
+    <div class="abody" id="nbCenterChat" style="flex:1;padding:16px;overflow:auto">
+      ${msgs.length ? msgs.map(m => `<div class="msg ${m.role === 'user' ? 'me' : 'ai'}" ${m.jobId ? `data-nbjob="${m.jobId}"` : ''} style="margin-bottom:12px">
+        <div class="dim" style="font-size:11px;margin-bottom:4px">${m.role === 'user' ? esc(d.me.name) : '优势资本 · Carbon 底稿溯源投研助手'}</div>
+        <div class="md">${md(m.text || m.job?.text || (m.job?.status === 'running' ? '正在锚定已勾选底稿进行红蓝军交叉研判…' : ''))}</div>
         ${m.role !== 'user' ? `<div class="row" style="margin-top:8px"><button class="btn sm ghost" data-act="nb-save-chatnote" data-p="${p.id}">📌 存入尽调纪要</button></div>` : ''}</div>`).join('')
         : `<div class="box" style="margin-bottom:14px"><b>✨ 底稿溯源深度研判（已锚定左侧勾选的 ${S.ctx.fileIds.length || rawFiles.length} 份原始底稿）</b>
           <div class="dim" style="margin-top:6px;line-height:1.6">向 AI 提问任何有关财务勾稽、客户合同、估值条款或潜在诉讼的问题，回答将逐句标注 <code>[n]</code> 底稿出处；也可点击下方开启 <b>红蓝军跨源对质</b> 一眼揪出 BP 与财报/尽调底稿的矛盾点。</div>
@@ -125,6 +125,7 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b style="white-space:nowrap">投研成果编制中心</b><span class="grow"></span>
+      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-arch-open" data-p="${p.id}" title="查看五层解耦架构与 Agent×Agent 互校日志">🏗️ 底座监控</button>
       <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-dify-open" data-p="${p.id}">🏛️ 模板与配额</button>
       <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 语音路由</button></div>
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
@@ -160,14 +161,14 @@ function renderRightNotes(x, p) {
       ${S.makingStudio ? `<div class="nb-art-item" style="border-color:#3B82F6;background:#0F1E3A"><span class="spin"></span><div class="grow"><b>Carbon 深度思考编排中：${esc(S.makingStudio)}</b><div class="dim" style="font-size:11px;margin-top:2px">① 多源底稿采集(${S.ctx.fileIds.length}份) ➔ ② 财务与BP红蓝军互校 ➔ ③ 自主视觉版式设计 ➔ ④ 反幻觉溯源归档</div></div></div>` : ''}
       <div class="row" style="margin:2px 2px 4px"><b>✨ 已编制工作成果 (${arts.length})</b><span class="grow"></span>
         <button class="lnk" data-act="nb-flowboard" data-p="${p.id}">进入阶段门禁与投决 ›</button></div>
-      ${arts.map((a, idx) => `<div class="nb-art-item" data-act="nb-preview-art" data-p="${p.id}" data-ext="${esc(a.ext)}" data-fp="${esc(a.fullPath)}">
+      ${arts.map((a, idx) => `<div class="nb-art-item" data-act="nb-preview-art" data-p="${p.id}" data-i="${idx}" data-ext="${esc(a.ext)}" data-fp="${esc(a.fullPath)}">
         ${ficon(a.ext, true)}
         <div class="grow" style="min-width:0">
           <div class="ell"><b>${esc(a.name)}</b></div>
-          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿溯源 · ${(a.bytes / 1048576).toFixed(2)} MB · ${a.ext === '.html' ? '点击应用内沉浸直览' : '点击唤起本机 Office 检阅'}</div>
+          <div class="dim ell" style="font-size:11px">${a.sourceCount || S.ctx.fileIds.length} 份底稿 · ${(a.bytes / 1048576).toFixed(2)} MB · ${a.meshCert ? `🛡️互校${a.meshCert.rate}%` : '点击应用内秒开检阅'}</div>
         </div>
         <button class="btn sm pri" data-act="nb-submit-art" data-p="${p.id}" data-i="${idx}" onclick="event.stopPropagation()">报送阶段复核</button>
-      </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方编制按钮，产出的正式工作成果将陈列于此（右下角）并可直接报送阶段复核</div>'}
+      </div>`).join('') || '<div class="dim" style="padding:8px;font-size:11.5px">点击上方编制按钮，产出的正式工作成果将陈列于此（右下角）并可直接检阅或报送阶段复核</div>'}
       <div class="row" style="margin:10px 2px 4px"><b>📌 尽调纪要与五维管控看板 (${notes.length})</b><span class="grow"></span>
         <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">五维管控看板</button></div>
       ${notes.map(n => `<div class="nb-note-card" data-act="nb-open-board" data-p="${p.id}" data-b="${esc(n.board || 'stages')}" data-n="${esc(n.id)}">
@@ -202,7 +203,13 @@ Object.assign(ACT, {
   'nb-src-ck': el => { const s = new Set(S.ctx.fileIds); el.checked ? s.add(el.dataset.id) : s.delete(el.dataset.id); S.ctx.fileIds = [...s]; hooks.refresh() },
   'nb-src-all': el => { const all = getRawSourceFiles(S.project).map(f => f.id); S.ctx.fileIds = el?.checked === false ? [] : (S.ctx.fileIds.length >= all.length ? [] : all); hooks.refresh() },
   'nb-q': el => { if ($('#nbChatInput')) { $('#nbChatInput').value = el.dataset.q; ACT['nb-chat-send']() } },
-  'nb-chat-send': () => { const v = $('#nbChatInput')?.value?.trim(); if (!v) return; hooks.fill(v); hooks.send(); $('#nbChatInput').value = ''; hooks.refresh() },
+  'nb-chat-send': async () => {
+    const v = $('#nbChatInput')?.value?.trim()
+    if (!v) return
+    $('#nbChatInput').value = ''
+    await hooks.send(v, { keepCtx: true })
+    hooks.refresh()
+  },
   'nb-note-add': async el => {
     const r = await act('nb.note.save', { projectId: el.dataset.p, title: `投研笔记 ${new Date().toLocaleTimeString('zh-CN')}`, content: '# 新建投研笔记\n\n- 记录尽调关键发现与看板待办', board: 'tasks' }, '✅ 已新建笔记')
     if (r) { S.project.notes = r; hooks.refresh() }
@@ -270,6 +277,7 @@ Object.assign(ACT, {
     }
   },
   'nb-make': async el => {
+    if (S.makingStudio) return toast(`⏳ 正在编制「${S.makingStudio}」，请稍候完成后再发起新任务`)
     const k = el.dataset.k
     const cfg = S.studioCfg ?? { pageCount: 8, targetMB: 6, theme: 'mck', density: 'standard' }
     cfg.specKind = k
@@ -284,17 +292,54 @@ Object.assign(ACT, {
     hooks.refresh()
   },
   'nb-preview-art': async el => {
-    const { p, fp, ext } = el.dataset
-    if (ext === '.html') {
-      const r = await get('nb.artifact.preview', { projectId: p || S.sel, fp }).catch(() => null)
-      if (r?.content) {
-        drawer(`${drawerHead(`📄 应用内沉浸直览 · ${esc(r.name)}`, '支持直接在下方拖动敏感性滑块、展开导图或判分测验')}<div class="body" style="padding:0;height:82vh"><iframe id="nbArtFrame" style="width:100%;height:100%;border:none;background:#fff"></iframe></div>`, true)
-        const fr = $('#nbArtFrame')
-        if (fr) fr.srcdoc = r.content
-        return
-      }
-    }
-    ACT['nb-open-folder']?.(el)
+    const { p, fp, i } = el.dataset
+    const pid = p || S.sel
+    const r = await get('nb.artifact.preview', { projectId: pid, fp }).catch(() => null)
+    if (!r) return ACT['nb-open-folder']?.(el)
+    const m = r.mesh
+    const certHtml = m ? `<div class="row" style="padding:8px 16px;background:#0D1F42;border-bottom:1px solid #1E3A8A;font-size:11.5px;gap:8px;flex-wrap:wrap">
+      <span class="tag blue">🛡️ Agent×Agent 网状互校签章</span><span>引擎：<b>${esc(m.engine)}</b></span>
+      <span>证据分级：A级${m.credibilityDist?.A ?? 0} / B级${m.credibilityDist?.B ?? 0} / C级${m.credibilityDist?.C ?? 0}</span>
+      <span>跨源矛盾拦截：<b>${m.conflicts?.length ?? 0}项</b></span>
+      <span>数字原文锚定率：<b style="color:#34D399">${m.numCheck?.rate ?? 100}%</b></span>
+      <span class="grow"></span>
+      <button class="btn sm" data-act="nb-open-folder" data-p="${pid}" data-fp="${esc(fp)}">💻 唤起本机程序精修</button>
+      ${i !== undefined ? `<button class="btn sm pri" data-act="nb-submit-art" data-p="${pid}" data-i="${i}">🚀 报送阶段复核</button>` : ''}</div>`
+      : `<div class="row" style="padding:8px 16px;background:#0D1F42;border-bottom:1px solid #1E3A8A"><span class="dim" style="font-size:11.5px">已归档至项目专属档案室</span><span class="grow"></span><button class="btn sm" data-act="nb-open-folder" data-p="${pid}" data-fp="${esc(fp)}">💻 唤起本机程序打开</button>${i !== undefined ? `<button class="btn sm pri" data-act="nb-submit-art" data-p="${pid}" data-i="${i}">🚀 报送阶段复核</button>` : ''}</div>`
+    let inner = ''
+    if (r.kind === 'html') inner = `<iframe id="nbArtFrame" style="width:100%;height:76vh;border:none;background:#fff"></iframe>`
+    else if (r.kind === 'pptx') inner = `<div style="padding:16px;display:grid;grid-template-columns:repeat(2,1fr);gap:12px">${(r.slides || []).map(s => `<div class="box" style="background:#0B162C;border-color:#1E3A8A"><div class="row" style="margin-bottom:6px"><span class="pill st-3">SLIDE ${String(s.page).padStart(2, '0')}</span><b class="ell grow" title="${esc(s.title || '')}">${esc(s.title || '')}</b></div><div class="dim" style="font-size:11.5px;line-height:1.6">${(s.bullets || s.texts || []).slice(0, 8).map(t => `<div>• ${esc(t)}</div>`).join('')}</div></div>`).join('')}</div>`
+    else if (r.kind === 'docx') inner = `<div style="padding:22px 32px;max-width:860px;margin:0 auto;line-height:1.75">${(r.paras || []).map(t => `<p style="margin-bottom:8px;${t.length < 36 ? 'font-weight:700;color:#93C5FD;margin-top:14px' : ''}">${esc(t)}</p>`).join('')}</div>`
+    else if (r.kind === 'xlsx') inner = `<div style="padding:16px">${(r.sheets || []).map(sh => `<div class="box" style="margin-bottom:14px"><b>📊 工作表：${esc(sh.name)}</b><div style="overflow:auto;margin-top:8px"><table class="tbl"><thead><tr>${(sh.rows[0] || []).map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${sh.rows.slice(1, 25).map(rw => `<tr>${rw.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`).join('')}</div>`
+    else return ACT['nb-open-folder']?.(el)
+    drawer(`${drawerHead(`📄 成果全格式直览 · ${esc(r.name)}`, '支持应用内秒开检阅、核对 Agent×Agent 互校质检签章，或一键唤起本机 Office 精修与报送复核')}${certHtml}<div class="body" style="padding:0;height:76vh;overflow:auto">${inner}</div>`, true)
+    if (r.kind === 'html' && $('#nbArtFrame')) $('#nbArtFrame').srcdoc = r.content
+  },
+  'nb-arch-open': async el => {
+    const pid = el?.dataset?.p || S.sel || D()?.projects?.[0]?.id
+    const st = await get('nb.arch.status', { projectId: pid })
+    const m = st.mesh
+    drawer(`${drawerHead('🏗️ 可上生产的五层解耦 Agent 架构与网状互校监控台', '模型可换 · 来源可换 · 本地/云端双模部署 · 情报×撰写×蓝军质检网状实时互校 · 权限与回滚留痕')}
+      <div class="body">
+        <div class="box" style="margin-bottom:12px;background:#0D1F42;border-color:#00D4FF">
+          <div class="row"><b>⚡ 五层解耦生产架构实时在线矩阵</b><span class="grow"></span>
+            <span class="pill st-4">${st.carbonOnline ? `Carbon 在线 (${esc(st.carbonModel)})` : '混合模型路由在线'}</span>
+            <button class="btn sm" data-act="nb-api">切换模型路由</button></div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">${st.layers.map(l => `<div class="wcard" style="display:flex;align-items:center;gap:12px;border-left:3px solid #00D4FF"><b style="min-width:195px">${esc(l.layer)}</b><span class="tag blue" style="min-width:210px">${esc(l.tech)}</span><span class="dim grow" style="font-size:11.5px">${esc(l.desc)}</span><span class="dot ok"></span></div>`).join('')}</div>
+        </div>
+        <div class="box" style="margin-bottom:12px">
+          <div class="row"><b>🕸️ Agent × Agent 网状自主互校最近执行实录（情报 × 撰写 × 蓝军质检）</b><span class="grow"></span>
+            ${m ? `<span class="tag blue">数字锚定率 ${m.numCheck?.rate ?? 100}% · 耗时 ${(m.elapsedMs / 1000).toFixed(1)}s</span>` : '<span class="dim">编制任意正式成果自动触发互校</span>'}</div>
+          ${m ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">${(m.dialogs || []).map(d => `<div class="wcard"><div class="row"><span class="tag blue">${esc(d.from)} ➔ ${esc(d.to)}</span><b>${esc(d.action)}</b></div><div class="dim" style="font-size:11.5px;margin-top:4px">${esc(d.msg)}</div></div>`).join('')}</div>`
+            : '<div class="dim" style="margin-top:6px;font-size:11.5px">点击右侧「投决备忘录 / 演示文稿 / 尽调报告 / 数据表格」即刻并发启动情报分级、主线撰写与蓝军跨源对质互校。</div>'}
+        </div>
+        <div class="box">
+          <div class="row"><b>🛡️ 工程化底座：四层权限 · 月度配额 · 审计快照回滚</b><span class="grow"></span>
+            <span class="pill st-3">配额剩余 ${st.quota?.remainCalls ?? 488} 次 / ¥${st.quota?.remainRMB ?? 196}</span>
+            <button class="btn sm ghost" data-act="go" data-view="settings">进入审计与快照回滚中心 ›</button></div>
+          <div class="dim" style="margin-top:6px;font-size:11.5px">最近审计留痕：${(st.recentChanges || []).slice(0, 4).map(c => `[v${c.rev}] ${esc(c.reason || c.coll)}`).join(' · ') || '全库状态一致'}</div>
+        </div>
+      </div>`, true)
   },
   'nb-submit-art': async el => {
     const pid = el.dataset.p || S.sel
@@ -321,6 +366,11 @@ Object.assign(ACT, {
 
 document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ACT['nb-chat-send']() } })
 document.addEventListener('input', e => { const a = e.target?.dataset?.act; if (a?.startsWith('nb-cfg-') && ACT[a]) ACT[a](e.target) })
+window.addEventListener('investai:job', e => {
+  const j = e.detail
+  const node = j?.id && document.querySelector(`#nbCenterChat [data-nbjob="${j.id}"] .md`)
+  if (node) node.innerHTML = md(j.text || (j.status === 'running' ? '正在锚定已勾选底稿进行红蓝军交叉研判…' : ''))
+})
 VIEWS.notebook = renderNbWorkspace
 
 function renderDifyDrawer() {

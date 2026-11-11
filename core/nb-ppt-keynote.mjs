@@ -69,32 +69,61 @@ function renderDarkKeynoteRest(pptx, sl, m, s, cards, kpis) {
     return
   }
   if (m === 'a2a_network_compare') {
+    // 复刻照片图4：左侧 Agent-to-Agent 四步串联框 vs 中间演进箭头 vs 右侧 Agent×Agent 7节点多边形网状发光连线图
     ;[0, 1].forEach(col => {
-      const cx = 0.6 + col * 6.25
-      sl.addShape(pptx.ShapeType.rect, { x: cx, y: 1.82, w: 5.88, h: 3.95, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
-      sl.addShape(pptx.ShapeType.rect, { x: cx, y: 1.82, w: 5.88, h: 0.05, fill: { color: '00D4FF' } })
+      const cx = 0.6 + col * 6.35
+      sl.addShape(pptx.ShapeType.rect, { x: cx, y: 1.82, w: 5.78, h: 3.95, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
+      sl.addShape(pptx.ShapeType.rect, { x: cx, y: 1.82, w: 5.78, h: 0.05, fill: { color: '00D4FF' } })
       const cA = cards[col * 2] || cards[0], cB = cards[col * 2 + 1] || cards[1]
-      sl.addText(col === 0 ? 'PHASE A · 单点串联核查' : 'PHASE B · 多维网状交叉协同', { x: cx + 0.25, y: 2.0, w: 5.3, h: 0.26, fontSize: 9.5, bold: true, color: '38BDF8', fontFace: FONT })
-      sl.addText(cA.heading, { x: cx + 0.25, y: 2.3, w: 5.3, h: 0.38, fontSize: 14, bold: true, color: 'FFFFFF', fontFace: FONT })
-      sl.addText(`■ ${cA.body}\n\n■ ${cB?.body || ''}`, { x: cx + 0.25, y: 2.85, w: 5.3, h: 2.7, fontSize: 10.2, color: 'E2E8F0', valign: 'top', fontFace: FONT })
+      sl.addText(col === 0 ? 'AGENT TO AGENT · 单向串联核查' : 'AGENT × AGENT · 网状自主互校演进', { x: cx + 0.25, y: 1.98, w: 5.3, h: 0.24, fontSize: 9, bold: true, color: '38BDF8', fontFace: FONT })
+      sl.addText(cA.heading, { x: cx + 0.25, y: 2.25, w: 5.3, h: 0.34, fontSize: 13.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+      if (col === 0) {
+        ;['01 情报', '02 规划', '03 撰写', '04 质检'].forEach((st, si) => {
+          sl.addShape(pptx.ShapeType.rect, { x: cx + 0.25 + si * 1.32, y: 2.72, w: 1.15, h: 0.42, fill: { color: '162A56' }, line: { color: '3B82F6', pt: 0.6 } })
+          sl.addText(st, { x: cx + 0.25 + si * 1.32, y: 2.78, w: 1.15, h: 0.3, fontSize: 9, bold: true, align: 'center', color: 'CBD5E1', fontFace: FONT })
+        })
+      } else {
+        const pts = [[7.45, 2.82], [8.55, 2.7], [9.85, 2.95], [11.35, 2.76], [7.85, 3.42], [9.45, 3.32], [10.85, 3.48]]
+        const edges = [[0, 1], [1, 2], [2, 3], [0, 4], [4, 5], [5, 6], [3, 6], [1, 5], [2, 5], [0, 5]]
+        edges.forEach(([a, b]) => {
+          const [x1, y1] = pts[a], [x2, y2] = pts[b]
+          sl.addShape(pptx.ShapeType.line, { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.max(0.02, Math.abs(x2 - x1)), h: Math.max(0.02, Math.abs(y2 - y1)), flipV: (x2 - x1) * (y2 - y1) < 0, line: { color: '38BDF8', pt: 0.9 } })
+        })
+        pts.forEach(([px, py], pi) => sl.addShape(pptx.ShapeType.ellipse, { x: px - 0.07, y: py - 0.07, w: 0.14, h: 0.14, fill: { color: pi === 5 ? '00D4FF' : '60A5FA' } }))
+      }
+      sl.addText(`■ ${cA.body}\n■ ${cB?.body || ''}`, { x: cx + 0.25, y: 3.66, w: 5.3, h: 1.98, fontSize: 9.8, color: 'E2E8F0', valign: 'top', fontFace: FONT })
     })
+    sl.addText('➔', { x: 6.42, y: 3.55, w: 0.48, h: 0.45, fontSize: 20, bold: true, align: 'center', color: '00D4FF', fontFace: FONT })
     return
   }
-  // five_layer_stack (Photo 5: 左五层解耦架构栈 + 右侧能力指标矩阵表)
-  cards.slice(0, 4).forEach((c, idx) => {
-    const cy = 1.82 + idx * 0.98
-    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: cy, w: 7.55, h: 0.86, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
-    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: cy, w: 0.06, h: 0.86, fill: { color: '00D4FF' } })
-    sl.addText(c.heading, { x: 0.82, y: cy + 0.12, w: 2.4, h: 0.6, fontSize: 11, bold: true, color: 'FFFFFF', fontFace: FONT })
-    sl.addText(c.body, { x: 3.3, y: cy + 0.12, w: 4.7, h: 0.64, fontSize: 9.5, color: 'CBD5E1', valign: 'middle', fontFace: FONT })
+  // five_layer_stack (复刻照片图5：左侧5层解耦架构横栈 + 右侧6行平台能力矩阵表)
+  const layers = [
+    ['接入层 · 多端工作台', cards[0]?.body || '桌面端 / Web / DSH 插件，三栏溯源研判与在线精修'],
+    ['接口层 · 统一 API 网关', cards[1]?.body || 'REST + 实时作业流，建任务、补料、改稿、回滚'],
+    ['编排层 · Agent Runtime', cards[2]?.body || '状态机、工具调用、7 套机构标准工作流与配额门禁'],
+    ['执行层 · 异步 Worker 池', cards[3]?.body || '长任务异步执行、心跳检测与本地 SQLite/快照持久化'],
+    ['模型层 · 多模型混合路由', 'Carbon 高阶网关 · DeepSeek · 本地离线引擎按密级自动路由'],
+  ]
+  layers.forEach(([lh, lb], idx) => {
+    const cy = 1.80 + idx * 0.80
+    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: cy, w: 7.55, h: 0.70, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
+    sl.addShape(pptx.ShapeType.rect, { x: 0.6, y: cy, w: 0.06, h: 0.70, fill: { color: '00D4FF' } })
+    sl.addText(lh, { x: 0.82, y: cy + 0.08, w: 2.35, h: 0.54, fontSize: 10.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+    sl.addText(String(lb).slice(0, 76), { x: 3.25, y: cy + 0.08, w: 4.75, h: 0.54, fontSize: 9.2, color: 'CBD5E1', valign: 'middle', fontFace: FONT })
   })
-  sl.addShape(pptx.ShapeType.rect, { x: 8.4, y: 1.82, w: 4.33, h: 3.92, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
-  sl.addText('核心量化指标矩阵', { x: 8.65, y: 2.0, w: 3.8, h: 0.32, fontSize: 11.5, bold: true, color: '93C5FD', fontFace: FONT })
-  kpis.slice(0, 3).forEach((k, ki) => {
-    const ky = 2.52 + ki * 1.02
-    sl.addText(String(k.label), { x: 8.65, y: ky, w: 2.2, h: 0.36, fontSize: 10.5, color: 'CBD5E1', fontFace: FONT })
-    sl.addText(String(k.val), { x: 10.8, y: ky - 0.04, w: 1.7, h: 0.42, fontSize: 16, bold: true, align: 'right', color: 'FFFFFF', fontFace: FONT })
-    sl.addShape(pptx.ShapeType.rect, { x: 8.65, y: ky + 0.48, w: 3.8, h: 0.01, fill: { color: '1E3A8A' } })
+  sl.addShape(pptx.ShapeType.rect, { x: 8.4, y: 1.80, w: 4.33, h: 3.92, fill: { color: '102044', transparency: 14 }, line: { color: '1E3A8A', pt: 0.8 } })
+  sl.addText('核心量化与底座能力矩阵', { x: 8.65, y: 1.94, w: 3.8, h: 0.3, fontSize: 11, bold: true, color: '93C5FD', fontFace: FONT })
+  const matrixRows = [
+    ...(kpis.slice(0, 3).map(k => [String(k.label), String(k.val)])),
+    ['成果编制形态', '9 类'],
+    ['全周期门禁阶段', '8 阶'],
+    ['岗位四层权限角色', '15 岗'],
+  ]
+  matrixRows.slice(0, 6).forEach(([ml, mv], mi) => {
+    const ky = 2.34 + mi * 0.54
+    sl.addText(ml, { x: 8.65, y: ky, w: 2.3, h: 0.32, fontSize: 9.8, color: 'CBD5E1', fontFace: FONT })
+    sl.addText(mv, { x: 10.85, y: ky - 0.02, w: 1.65, h: 0.34, fontSize: 13.5, bold: true, align: 'right', color: 'FFFFFF', fontFace: FONT })
+    if (mi < 5) sl.addShape(pptx.ShapeType.rect, { x: 8.65, y: ky + 0.40, w: 3.8, h: 0.01, fill: { color: '1E3A8A' } })
   })
 }
 

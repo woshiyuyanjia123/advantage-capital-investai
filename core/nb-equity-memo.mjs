@@ -43,15 +43,16 @@ body{font-family:"Times New Roman","Songti SC","SimSun",serif;background:var(--b
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
 
-export function buildEquityResearchMemoHtml(p, docs = [], user = {}) {
+export function buildEquityResearchMemoHtml(p, docs = [], user = {}, mesh = null) {
   const b = classifySourceSentences(docs)
   const f = p.fields ?? {}
   const srcNames = docs.map((d, i) => `[${i + 1}]《${esc(d.name)}》`).join(' · ') || '已登记项目底稿'
-  const hasLitigation = b.risk.some(r => /诉讼|仲裁|差异|下滑/.test(r))
+  const hasLitigation = b.risk.some(r => /诉讼|仲裁|差异|下滑/.test(r)) || (mesh?.conflicts?.length > 0)
   const verdict = hasLitigation ? '谨慎观察（前置条件核实后推进）' : '积极跟进（推荐上立项/投委会）'
   const vClass = hasLitigation ? 'watch' : 'buy'
-  const pillars = (b.business?.length ? b.business : b.overview).slice(0, 3)
-  const risks = (b.risk?.length ? b.risk : b.todo).slice(0, 6)
+  const pillars = (mesh?.highlights?.length ? mesh.highlights : b.business?.length ? b.business : b.overview).slice(0, 3)
+  const risks = (mesh?.redFlags?.length ? [...mesh.redFlags, ...(b.risk || [])] : b.risk?.length ? b.risk : b.todo).slice(0, 6)
+  const meshBanner = mesh ? `<div class="opc-box" style="margin-bottom:16px;border-left:4px solid var(--green)"><b>🛡️ Agent × Agent 网状实时互校签章（${esc(mesh.engine)} · 耗时 ${(mesh.elapsedMs / 1000).toFixed(1)}s）</b><div style="font-size:8.5pt;margin-top:4px;color:#333">证据分级：A级强公信 ${mesh.credibilityDist?.A ?? 0} 份 / B级访谈 ${mesh.credibilityDist?.B ?? 0} 份 / C级BP ${mesh.credibilityDist?.C ?? 0} 份 · 跨源矛盾对质：${mesh.conflicts?.length ?? 0} 项 · 量化数字原文锚定率：<b>${mesh.numCheck?.rate ?? 100}%</b></div></div>` : ''
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${esc(p.name)} · 投资备忘录 (IC Memo)</title><style>${OPC_CSS}</style></head><body><div class="opc-page">
   <div class="opc-header-bar"><div class="opc-firm">ADVANTAGE CAPITAL · 优势资本一级市场投研中心</div><div class="opc-meta">类别：Investment Committee Memo (I–IX)<br>日期：${new Date().toISOString().slice(0, 10)} · 版本：v1.0</div></div>
   <div class="opc-conf">CONFIDENTIAL · 机构内部机密 · 仅限投资决策委员会（IC）审阅 · 严禁外传</div>
@@ -65,9 +66,10 @@ export function buildEquityResearchMemoHtml(p, docs = [], user = {}) {
     <div><div class="opc-snap-lb">预期收益目标</div><div class="opc-snap-val">${esc(f.irr || '未披露')}</div><div class="opc-snap-sub">目标 IRR / MOIC</div></div>
   </div>
   <div class="opc-sec"><div class="opc-sec-t">I. Executive Summary · 投资核心摘要（事实 → 推理 → 判断）</div>
-    <p>${esc(b.overview[0] || `本项目为「${p.name}」，当前处于「${p.stage}」阶段。`)}</p>
-    <div class="opc-callout">核心研判结论：基于已勾选 ${docs.length} 份原始底稿交叉核验，拒绝主观打分，聚焦客户合同真实性、财务毛利走势与条款保护，整体评级为「${verdict}」。</div>
-    <p>${esc(b.finance[0] || b.business[0] || '')}</p>
+    ${meshBanner}
+    <p>${esc(mesh?.thesis || b.overview[0] || `本项目为「${p.name}」，当前处于「${p.stage}」阶段。`)}</p>
+    <div class="opc-callout">核心研判结论：基于已勾选 ${docs.length} 份原始底稿经【情报×撰写×蓝军质检】三侧网状互校，拒绝主观打分，聚焦客户合同真实性、财务毛利走势与条款保护，整体评级为「${verdict}」。</div>
+    <p>${esc(mesh?.valuationNote || b.finance[0] || b.business[0] || '')}</p>
   </div>
   <div class="opc-sec"><div class="opc-sec-t">II. Company Overview · 公司基本面与交易要素</div>
     <table class="opc-tbl"><tr><th>要素维度</th><th>底稿核实内容</th></tr>
@@ -92,9 +94,10 @@ export function buildEquityResearchMemoHtml(p, docs = [], user = {}) {
     <table class="opc-tbl"><tr><th>序号</th><th>财务与经营实证摘录（含原文角标）</th></tr>
       ${(b.finance.length ? b.finance : ['财务报表与大客户合同台账详见已勾选底稿']).map((x, i) => `<tr><td>F-0${i + 1}</td><td>${esc(x)}</td></tr>`).join('')}</table>
   </div>
-  <div class="opc-sec"><div class="opc-sec-t">VII. Blue Team Risk Assessment · 蓝军反驳视角与风险矩阵（Red-Flag 前置）</div>
+  <div class="opc-sec"><div class="opc-sec-t">VII. Blue Team Risk Assessment · 蓝军反驳视角与跨源矛盾矩阵（Red-Flag 前置）</div>
     <div class="opc-blue"><b style="color:var(--red)">🛡️ BLUE TEAM DEVIL'S ADVOCATE · 蓝军挑战人核心质询：</b>
-      <p style="font-size:9.5pt;margin-top:4px">不为路演材料背书：重点挑战 BP 预测与审计报表口径差异、前五大客户集中度、应收账款周转及潜在未决诉讼。</p></div>
+      <p style="font-size:9.5pt;margin-top:4px">不为路演材料背书：已由 Agent×Agent 蓝军通道自动交叉比对 C级BP预测 与 A级审计报表/合同底稿口径差异。</p></div>
+    ${mesh?.conflicts?.length ? `<table class="opc-tbl" style="margin-bottom:10px"><tr><th>冲突核查维度</th><th>C级商业计划书(BP)自述</th><th>A/B级审计与尽调底稿实证</th><th>对估值与交割条款影响</th></tr>${mesh.conflicts.map(c => `<tr><td><b>${esc(c.topic)}</b></td><td>${esc(c.bpClaim)}</td><td>${esc(c.auditFact)}</td><td>${esc(c.impact)}</td></tr>`).join('')}</table>` : ''}
     <table class="opc-tbl"><tr><th>等级</th><th>蓝军反驳核心论点 / 风险事实</th><th>交割前置核验与缓释路径</th></tr>
       ${(risks.length ? risks : ['需核对 BP 收入预测与审计报告附注一致性']).map((r, i) => `<tr><td><b style="color:${i === 0 ? '#c00000' : '#c67000'}">${i === 0 ? 'CRITICAL' : 'HIGH'}</b></td><td>${esc(r)}</td><td>纳入投资协议先决条件（CP）与法务/财务专项穿行核查</td></tr>`).join('')}</table>
   </div>

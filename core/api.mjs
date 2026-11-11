@@ -28,6 +28,8 @@ import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
 import { getOsState, dispatchAgentOs, inlineCoCreateRewrite, toggleAutoTask } from './nb-qwen-os.mjs'
 import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow, getEnterpriseGovState } from './nb-dify-dsl.mjs'
 import { TYC_DIMENSIONS, runTianyanchaDueDiligence } from './nb-tianyancha.mjs'
+import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
+import { readLocalCarbonConfig } from './nb-api.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -586,8 +588,34 @@ export function createApi(ctx) {
       const p = project(user, q.get('projectId'))
       const fp = String(q.get('fp') || '')
       if (!fp || !fp.includes(p.id)) throw fail('非法成果路径', 403)
-      const txt = await readFile(fp, 'utf8')
-      return { name: fp.split(/[\\/]/).pop(), content: txt }
+      const parsed = await previewAnyArtifact(fp)
+      const mesh = db.get('kvstate', `mesh_${p.id}`) ?? null
+      return { ...parsed, mesh }
+    },
+    'nb.arch.status': async (user, q) => {
+      const pid = q.get('projectId')
+      const p = pid ? db.get('projects', pid) : visibleProjects(user)[0]
+      const mStat = await ai.status().catch(() => ({}))
+      const carbon = readLocalCarbonConfig('medium')
+      const gov = getEnterpriseGovState(db, user)
+      const mesh = p ? db.get('kvstate', `mesh_${p.id}`) : null
+      const recentChanges = db.recent(12)
+      return {
+        layers: [
+          { layer: '01 接入层 · 多端融合工作台', tech: 'Electron 桌面端 / Web SaaS / DSH 插件', desc: '三界面贯通：项目总览 · 三栏溯源工作台 · 阶段门禁与投决中心', ok: true },
+          { layer: '02 接口层 · 统一 API 网关', tech: 'HTTP REST + 400ms 实时流式作业同步', desc: '支持建任务、天眼查补料、在线精修、全格式直览、快照回滚', ok: true },
+          { layer: '03 编排层 · Agent×Agent Runtime', tech: '情报×撰写×蓝军质检 网状互校 + 7套机构DSL', desc: 'A/B/C 底稿证据效力分级 · 跨源矛盾对质 · 企业级月度配额门禁', ok: true },
+          { layer: '04 执行层 · 异步作业与持久化池', tech: '非阻塞 Worker 队列 · 版本链 · 审计快照', desc: '9 类成果异步落盘项目档案室，每次变更自动生成可回滚快照', ok: true },
+          { layer: '05 模型层 · 密级感知混合路由', tech: carbon ? `Carbon (${carbon.model}) + DeepSeek + 离线引擎` : `${mStat.label || 'DeepSeek'} + 本地离线引擎`, desc: '机密底稿可锁死本机推理；云端与本地网关无感热切换', ok: true },
+        ],
+        carbonOnline: !!carbon,
+        carbonModel: carbon?.model || null,
+        modelStatus: mStat,
+        quota: gov.quota,
+        caps: org.capabilities(user),
+        mesh,
+        recentChanges,
+      }
     },
     'nb.dify.templates': (user, q) => {
       const p = q.get('projectId') ? project(user, q.get('projectId')) : null
