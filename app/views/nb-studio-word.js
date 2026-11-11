@@ -1,5 +1,5 @@
-// 左上方本地 Word 文书修改工坊：支持章节本地快改、模板填充、本机 Word/WPS 检出修改与一键回传
-import { S, ACT, hooks, $, esc, icon, get, act, drawer, drawerHead, downloadFile, opts } from '/api/investai?asset=ui.js'
+// 尽调文书（工作台左上方的工具）：直接改正文、选中一段让模型改写，或用本机 Word/WPS 打开修订后回传
+import { S, ACT, hooks, $, esc, md, icon, get, act, toast, drawer, drawerHead, downloadFile, opts } from '/api/investai?asset=ui.js'
 
 let wordSt = null
 
@@ -14,46 +14,58 @@ export async function openLocalWordStudio(projectId, preferredType) {
   renderWordDrawer()
 }
 
+let wordSplit = true
+const chars = t => String(t ?? '').replace(/\s/g, '').length
+
 function renderWordDrawer() {
   const st = wordSt
-  const docTypes = ['尽调报告', '投决报告', '保密协议', '投资框架协议', '法务审阅意见']
-  drawer(`${drawerHead(`📝 本地 Word 修改工坊 · ${esc(st.type)}`, '直接在线修改章节生成真实 .DOCX，或用本机 Word / WPS 打开修改后一键回传')}
+  const docTypes = [...new Set([st.type, '尽调报告', '投决报告', '保密协议', '投资框架协议', '法务审阅意见'])]
+  drawer(`${drawerHead(`尽调文书 · ${esc(st.type)}`, st.checkout ? '本机修订中' : '')}
     <div class="body">
-      <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
-        <select class="select sm" id="nbWordType">${opts(docTypes.map(t => [t, t]), st.type)}</select>
-        <button class="btn sm" data-act="nb-word-switch">切换文书</button>
-        <button class="btn sm pri" data-act="nb-word-ai">${icon('spark', 13)}AI/离线起草或填模板</button>
-        <button class="btn sm" data-act="nb-word-office">${icon('open', 13)}用本机 Word/WPS 打开修改</button>
-        ${st.checkout ? `<button class="btn sm pri" data-act="nb-word-checkin">回传本机 Word 修改件</button>` : ''}
-        <button class="btn sm" data-act="nb-open-folder" data-p="${st.projectId}">📂 打开项目专属文件夹</button>
+      <div class="nb-bar">
+        <select class="select sm" id="nbWordType" data-act-change="nb-word-switch" title="换一种文书">${opts(docTypes.map(t => [t, t]), st.type)}</select>
+        <button class="btn sm pri" data-act="nb-word-ai">${icon('spark', 13)}用勾选的底稿起草</button>
+        <button class="btn sm" data-act="nb-word-office">${icon('open', 13)}用本机 Word/WPS 打开</button>
+        ${st.checkout ? `<button class="btn sm pri" data-act="nb-word-checkin">${icon('check', 13)}回传本机修订件</button>` : ''}
+        <span class="grow"></span>
+        <div class="seg sm"><button class="${wordSplit ? '' : 'on'}" data-act="nb-word-view" data-v="edit">编辑</button><button class="${wordSplit ? 'on' : ''}" data-act="nb-word-view" data-v="split">对照</button></div>
+        <button class="btn sm ghost ico" data-act="nb-open-folder" data-p="${st.projectId}" title="项目档案室">${icon('folder', 13)}</button>
       </div>
-      <div class="row" style="margin-bottom:8px;padding:6px 10px;background:#0F1E3A;border:1px solid #2563EB;border-radius:8px">
-        <span style="font-size:12px;color:#93C5FD"><b>✍️ 段落级人机共创</b>：在下方正文框用鼠标选中一段文字 →</span>
-        <input class="input sm grow" id="nbInlineInst" placeholder="输入原地改写要求（如：补充勾选底稿财务数据 / 精炼为投决要点 / 强化风险条款）…">
-        <button class="btn sm pri" data-act="nb-word-inline">✨ 让 Agent 原地改写选中段落</button>
+      <div class="nb-bar nb-inline">
+        <input class="input sm grow" id="nbInlineInst" value="${esc(st.inst ?? '')}" placeholder="选中正文里的一段，写上改写要求">
+        <button class="btn sm" data-act="nb-word-inline">${icon('edit', 13)}改写选中段落</button>
       </div>
-      <textarea class="input area mono" id="nbWordArea" style="height:52vh;line-height:1.65">${esc(st.text)}</textarea>
-      <div class="row" style="margin-top:10px"><span class="dim">保存即生成带版本留痕的真实 .DOCX 文件</span><span class="grow"></span>
-        <button class="btn pri" data-act="nb-word-save">保存本地修改并提交新版本</button></div>
+      <div class="nb-word ${wordSplit ? 'split' : ''}"><textarea id="nbWordArea" spellcheck="false">${esc(st.text)}</textarea>
+        ${wordSplit ? `<div class="pv"><div class="md doc" id="nbWordPv">${md(st.text)}</div></div>` : ''}</div>
+      <div class="row" style="margin-top:12px"><span class="dim" style="font-size:12px"><span id="nbWordCount">${chars(st.text)}</span> 字</span><span class="grow"></span>
+        <button class="btn pri" data-act="nb-word-save">保存并生成 DOCX</button></div>
     </div>`, true)
 }
+
+document.addEventListener('input', e => {
+  if (!wordSt || e.target?.id !== 'nbWordArea') return
+  wordSt.text = e.target.value
+  if ($('#nbWordPv')) $('#nbWordPv').innerHTML = md(wordSt.text)
+  if ($('#nbWordCount')) $('#nbWordCount').textContent = chars(wordSt.text)
+})
 
 Object.assign(ACT, {
   'nb-studio-word': el => openLocalWordStudio(el.dataset.p || S.sel),
   'nb-word-switch': () => openLocalWordStudio(wordSt.projectId, $('#nbWordType')?.value),
+  'nb-word-view': el => { wordSt.text = $('#nbWordArea')?.value ?? wordSt.text; wordSplit = el.dataset.v === 'split'; renderWordDrawer() },
   'nb-word-save': async () => {
     wordSt.text = $('#nbWordArea')?.value ?? wordSt.text
-    const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '左上 Word 工坊本地修改' }, '✅ 已保存本地 Word 修改并生成新版 .DOCX')
+    const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '在尽调文书里修订' }, '已保存，DOCX 已重新生成')
     if (r) await hooks.reload({ files: false })
   },
   'nb-word-office': async () => {
     wordSt.text = $('#nbWordArea')?.value ?? wordSt.text
     await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '检出前同步' })
-    const r = await act('deliverable.checkout', { id: wordSt.did }, '已用本机 Word / WPS 打开工作副本')
+    const r = await act('deliverable.checkout', { id: wordSt.did }, '已用本机程序打开')
     if (r) { wordSt.checkout = r; renderWordDrawer(); await hooks.reload({ files: false }) }
   },
   'nb-word-checkin': async () => {
-    const r = await act('nb.plugin.submit', { projectId: wordSt.projectId, deliverableId: wordSt.did, channel: 'local-checkin' }, '✅ 已回传本机 Word 修改并更新节点')
+    const r = await act('nb.plugin.submit', { projectId: wordSt.projectId, deliverableId: wordSt.did, channel: 'local-checkin' }, '已回传本机修订件')
     if (r) { wordSt.checkout = null; await hooks.reload({ files: false }); openLocalWordStudio(wordSt.projectId, wordSt.type) }
   },
   'nb-word-dl': async () => {
@@ -61,17 +73,25 @@ Object.assign(ACT, {
     const r = await act('deliverable.save', { id: wordSt.did, text: wordSt.text, note: '导出 DOCX' })
     if (r?.version?.fileId) downloadFile(r.version.fileId, `${wordSt.type}.docx`)
   },
-  'nb-word-inline': async () => {
+  // 段落改写：没选中文字时不动正文
+  'nb-word-inline': async el => {
     const area = $('#nbWordArea')
-    const fullText = area?.value ?? wordSt.text
-    const sel = area ? fullText.slice(area.selectionStart, area.selectionEnd).trim() : ''
-    const selectedText = sel || fullText.split('\n\n').find(p => p.length > 20) || fullText.slice(0, 200)
+    if (!area) return
+    const fullText = area.value
+    const selectedText = fullText.slice(area.selectionStart, area.selectionEnd).trim()
+    if (!selectedText) { toast('先在正文里选中要改写的一段', 'deny'); area.focus(); return }
     const instruction = $('#nbInlineInst')?.value?.trim() || '结合勾选底稿强化量化论证并精炼表述'
-    const r = await act('nb.os.inline', { projectId: wordSt.projectId, deliverableId: wordSt.did, workType: wordSt.type, fullText, selectedText, instruction }, '✍️ Agent 已在原文原地改写并同步至项目群聊')
-    if (r?.markdown) { wordSt.text = r.markdown; if (area) area.value = r.markdown; await hooks.reload({ files: false }) }
+    wordSt.inst = $('#nbInlineInst')?.value ?? ''
+    el.disabled = true
+    const r = await act('nb.os.inline', { projectId: wordSt.projectId, deliverableId: wordSt.did, workType: wordSt.type, fullText, selectedText, instruction }, '已改写选中段落，存为新版本')
+    el.disabled = false
+    if (!r?.markdown) return
+    wordSt.text = r.markdown
+    renderWordDrawer()
+    await hooks.reload({ files: false })
   },
   'nb-word-ai': async () => {
-    const j = await act('ai.generate', { projectId: wordSt.projectId, deliverableId: wordSt.did, type: wordSt.type, fileIds: S.ctx.fileIds, prompt: `生成并完善「${wordSt.type}」` }, '正在生成 Word 文稿…')
+    const j = await act('ai.generate', { projectId: wordSt.projectId, deliverableId: wordSt.did, type: wordSt.type, fileIds: S.ctx.fileIds, prompt: `生成并完善「${wordSt.type}」` }, '正在起草文书')
     if (j) hooks.track(j)
   },
 })

@@ -61,8 +61,8 @@
 | **打包独立桌面安装程序** | `cd desktop && npm install && npm run dist:mac` | `cd desktop && npm install && npm run dist:win` |
 | **本地离线语音引擎配置** | `sh scripts/setup-asr.sh` | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-asr.ps1` |
 
-### 自动化验收测试套件（27 项全链路测试）
+### 自动化验收测试套件（11 套文件 · 69 项全链路测试）
 ```bash
 npm test
-node --test test/dsh.test.mjs test/lifecycle.test.mjs test/llm.test.mjs test/notebook.test.mjs test/studio-quality.test.mjs test/harness.test.mjs test/saas-e2e.test.mjs
+node --test test/accounts.test.mjs test/cloud.test.mjs test/review.test.mjs test/dsh.test.mjs test/lifecycle.test.mjs test/llm.test.mjs test/notebook.test.mjs test/studio-quality.test.mjs test/harness.test.mjs test/saas-e2e.test.mjs
 ```
