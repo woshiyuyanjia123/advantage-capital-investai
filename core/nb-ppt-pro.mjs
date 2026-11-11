@@ -137,7 +137,45 @@ function normalizeSlideCards(s = {}) {
 }
 
 function renderSlideBodyLayout(pptx, sl, T, i, s, cards) {
-  const mode = s.layout || (['bento_quad', 'kpi_table', 'split_cards'][i % 3])
+  const mode = s.layout || (['spotlight_asymmetric', 'chart_bar', 'process_flow', 'kpi_table', 'timeline_roadmap', 'bento_quad'][i % 6])
+  if (mode === 'chart_bar' && s.chartData?.values?.length >= 2) {
+    sl.addShape(pptx.ShapeType.roundRect, { x: 0.55, y: 2.22, w: 6.1, h: 4.18, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+    sl.addShape(pptx.ShapeType.rect, { x: 0.55, y: 2.22, w: 6.1, h: 0.38, fill: { color: T.pri } })
+    sl.addText(`📈 ${String(s.chartData.title || '底稿量化指标趋势与对比')}`, { x: 0.72, y: 2.26, w: 5.7, h: 0.3, fontSize: 10.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+    sl.addChart(pptx.ChartType.bar, [{ name: s.chartData.title || '数值', labels: s.chartData.labels, values: s.chartData.values }], { x: 0.7, y: 2.68, w: 5.8, h: 3.55, barDir: 'col', chartColors: [T.acc, '10B981', 'F59E0B'], showValue: true, valAxisMinVal: 0 })
+    cards.slice(0, 3).forEach((c, ci) => {
+      const cy = 2.22 + ci * 1.42
+      sl.addShape(pptx.ShapeType.roundRect, { x: 6.82, y: cy, w: 5.95, h: 1.32, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+      sl.addShape(pptx.ShapeType.rect, { x: 6.82, y: cy, w: 0.12, h: 1.32, fill: { color: ci === 0 ? T.pri : T.acc } })
+      sl.addText(`${c.tag} · ${c.heading}`, { x: 7.05, y: cy + 0.08, w: 5.55, h: 0.28, fontSize: 10.5, bold: true, color: T.pri, fontFace: FONT })
+      sl.addText(String(c.body), { x: 7.05, y: cy + 0.38, w: 5.55, h: 0.86, fontSize: 10, color: '1E293B', valign: 'top', fontFace: FONT })
+    })
+    return
+  }
+  if (mode === 'process_flow' || mode === 'timeline_roadmap') {
+    cards.slice(0, 4).forEach((c, idx) => {
+      const cx = 0.55 + idx * 3.1
+      sl.addShape(pptx.ShapeType.roundRect, { x: cx, y: 2.22, w: 2.92, h: 4.18, rectRadius: 0.06, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+      sl.addShape(pptx.ShapeType.rect, { x: cx, y: 2.22, w: 2.92, h: 0.72, fill: { color: idx % 2 === 0 ? T.pri : T.acc } })
+      sl.addText(`STEP 0${idx + 1}\n${c.heading}`, { x: cx + 0.14, y: 2.26, w: 2.64, h: 0.64, fontSize: 10.5, bold: true, color: 'FFFFFF', fontFace: FONT })
+      sl.addText(String(c.body), { x: cx + 0.14, y: 3.06, w: 2.64, h: 3.18, fontSize: 10.5, color: '1E293B', valign: 'top', fontFace: FONT })
+    })
+    return
+  }
+  if (mode === 'spotlight_asymmetric') {
+    const c0 = cards[0]
+    sl.addShape(pptx.ShapeType.roundRect, { x: 0.55, y: 2.22, w: 4.85, h: 4.18, rectRadius: 0.06, fill: { color: T.pri } })
+    sl.addText(`★ 核心聚光灯发现\n${c0.heading}`, { x: 0.8, y: 2.45, w: 4.35, h: 0.85, fontSize: 14, bold: true, color: '60A5FA', fontFace: FONT })
+    sl.addText(String(c0.body), { x: 0.8, y: 3.4, w: 4.35, h: 2.75, fontSize: 11.5, color: 'FFFFFF', valign: 'top', fontFace: FONT })
+    cards.slice(1, 4).forEach((c, ci) => {
+      const cy = 2.22 + ci * 1.42
+      sl.addShape(pptx.ShapeType.roundRect, { x: 5.58, y: cy, w: 7.18, h: 1.32, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
+      sl.addShape(pptx.ShapeType.rect, { x: 5.58, y: cy, w: 0.12, h: 1.32, fill: { color: T.acc } })
+      sl.addText(`${c.tag} · ${c.heading}`, { x: 5.82, y: cy + 0.08, w: 6.75, h: 0.28, fontSize: 10.5, bold: true, color: T.pri, fontFace: FONT })
+      sl.addText(String(c.body), { x: 5.82, y: cy + 0.38, w: 6.75, h: 0.86, fontSize: 10.2, color: '1E293B', valign: 'top', fontFace: FONT })
+    })
+    return
+  }
   if (mode === 'kpi_table' && Array.isArray(s.tableRows) && s.tableRows.length >= 2) {
     sl.addShape(pptx.ShapeType.roundRect, { x: 0.55, y: 2.22, w: 6.45, h: 4.18, rectRadius: 0.05, fill: { color: 'FFFFFF' }, line: { color: 'CBD5E1', pt: 0.8 } })
     sl.addShape(pptx.ShapeType.rect, { x: 0.55, y: 2.22, w: 6.45, h: 0.4, fill: { color: T.pri } })
