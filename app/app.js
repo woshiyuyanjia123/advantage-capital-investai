@@ -1,6 +1,6 @@
-// 深蓝投研工作台 · InvestAI v2 前端外壳（零构建 ES 模块）
+// 前端外壳（零构建 ES 模块）
 // 顶栏 | 左导航（DSH 内嵌时由 DSH 原生侧栏代替）| 中栏视图 | 右栏 AI 协作
-import { S, D, ACT, VIEWS, hooks, $, esc, gated, applyVocab, roleName, AI_LEVEL, md, icon, avatar, avColor, ficon, get, post, act, toast, popup, closePopup, closeDrawer, drawer, drawerHead, dialog, pick, toB64, can, proj, fmt, ymd, size, rel, levelTag, EMBED, VERSION, userName, LEVELS, saveB64, rawUrl, downloadFile } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, esc, gated, applyVocab, roleName, AI_LEVEL, md, icon, avatar, avColor, ficon, get, post, act, toast, popup, menuAt, mi, closePopup, closeDrawer, drawer, drawerHead, dialog, pick, toB64, can, proj, fmt, ymd, size, rel, levelTag, EMBED, VERSION, userName, LEVELS, saveB64, rawUrl, downloadFile, theme, setTheme } from '/api/investai?asset=ui.js'
 import '/api/investai?asset=views/work.js'
 import '/api/investai?asset=views/project.js'
 import '/api/investai?asset=views/data.js'
@@ -45,12 +45,14 @@ function renderHdr() {
   const w = d.wisburg
   const route = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }[d.model.mode] ?? d.model.mode
   $('#hdr').innerHTML = `
-    <div class="logo"><span class="mk">AC /</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')} · DSH 插件版</span></div>
-    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或直接提问…" autocomplete="off"><span class="kbd">⌘ K</span></div>
-    <button class="nb-api-pill" data-act="nb-api" title="点击配置本地离线 API / DSH / 云端 API"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
-    <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span>设置与帮助</span></button>
+    <div class="logo"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')}</span></div>
+    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或提问" autocomplete="off"><span class="kbd">${/Mac/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</span></div>
+    <button class="nb-model" data-act="nb-api" title="模型连接"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
+    <button class="btn ghost ico" data-act="theme-toggle" title="${theme() === 'dark' ? '换成浅色' : '换成深色'}">${icon(theme() === 'dark' ? 'sun' : 'moon', 16)}</button>
+    <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span class="hd-lbl">设置与帮助</span></button>
     <button class="btn ghost ico bellbtn" data-act="notifications" title="通知">${icon('bell', 17)}${d.unread ? `<i>${d.unread > 99 ? '99+' : d.unread}</i>` : ''}</button>
-    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>`
+    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>
+    ${!S.aiOpen ? `<button class="btn ghost ico" data-act="ai-toggle" title="打开 AI 协作">${icon('bot', 17)}</button>` : ''}`
   const input = $('#gsearch')
   input.value = searchTerm
   input.addEventListener('input', () => { searchTerm = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 180) })
@@ -81,8 +83,7 @@ function renderNav() {
 }
 function renderChrome() {
   const hideRight = !S.aiOpen || ['notebook', 'workbench', 'flowboard'].includes(S.view)
-  const full3Col = ['notebook', 'flowboard'].includes(S.view)
-  $('#app').classList.toggle('embed', EMBED || full3Col)
+  $('#app').classList.toggle('embed', EMBED || ['notebook', 'flowboard'].includes(S.view))
   $('#app').classList.toggle('ai-off', hideRight)
   renderHdr(); renderNav()
 }
@@ -121,7 +122,7 @@ hooks.go = go
 window.addEventListener('hashchange', () => {
   const [view, sub] = location.hash.slice(1).split(':')
   if (!S.data || !VIEWS[view] || (view === S.view && (sub ?? '') === (S.sub ?? ''))) return
-  view === 'project' && sub ? go('project', { id: sub }) : go(view, { sub })
+  ['project', 'notebook', 'flowboard'].includes(view) && sub ? go(view, { id: sub }) : go(view, { sub })
 })
 window.addEventListener('message', e => {
   if (e.origin !== location.origin || e.data?.type !== 'investai:go') return
@@ -134,7 +135,7 @@ function renderView() {
   v.innerHTML = ''
   fn(v)
   const nas = D().mounts.find(m => m.kind === 'nas')
-  if (nas && !nas.online) v.querySelector('.page')?.insertAdjacentHTML('afterbegin', `<div class="banner">⚠ ${esc(nas.name)} 未连接 · 正在使用缓存索引，预览与 AI 引用读取本地缓存<span class="grow"></span><button class="btn sm" data-act="rescan" data-id="${nas.id}">重新探测</button></div>`)
+  if (nas && !nas.online) v.querySelector('.page')?.insertAdjacentHTML('afterbegin', `<div class="banner">${esc(nas.name)} 未连接 · 正在使用缓存索引，预览与 AI 引用读取本地缓存<span class="grow"></span><button class="btn sm" data-act="rescan" data-id="${nas.id}">重新探测</button></div>`)
 }
 function refreshView() {
   if (document.activeElement?.closest('#view input, #view textarea, #view select')) return
@@ -167,7 +168,7 @@ function renderAI() {
   const files = S.ctx.fileIds.map(id => S.files.find(f => f.id === id)).filter(Boolean)
   $('#actx').innerHTML = `<div class="hd">${icon('file', 13)}当前上下文<button class="lnk" data-act="pick-project">${p ? '更换项目' : '选择项目'}</button></div>
     <div class="bd">${p ? `<b>${esc(p.name)}</b><span class="tag blue">${esc(p.businessName ?? '')}</span><span class="tag">${esc(p.stage ?? '')}</span>` : '<span class="dim">未选择项目（通用问答）</span>'}</div>
-    ${files.length ? `<div class="att">${files.map(f => `<span>📎 ${esc(f.name)}<button data-act="ctx-file" data-id="${f.id}">×</button></span>`).join('')}</div>` : ''}`
+    ${files.length ? `<div class="att">${files.map(f => `<span>${esc(f.name)}<button data-act="ctx-file" data-id="${f.id}">×</button></span>`).join('')}</div>` : ''}`
   $('#prompt').placeholder = caps.ai === 0 ? '你的岗位未开通 AI 协作' : { chat: `例如：${p ? `检查${p.name}能否发起${p.stage}决策；总结尽调风险` : '搜索智堡最近关于储能的研报并总结'}`, draft: '描述起草要求，例如：重点写风险与估值，篇幅 3 页', parse: '选择上方资料点「解析」，或输入问题' }[S.atab]
   $('#prompt').disabled = caps.ai === 0
   const m = D().model
@@ -219,9 +220,9 @@ function msgHTML(m) {
   if (!job) return `<div class="msg a ${m.tone ?? ''}"><div class="md">${md(m.text ?? '')}</div></div>`
   const running = job.status === 'running'
   const base = x => String(x ?? '').split('/').pop()
-  const head = { generate: `✦ 起草 · ${esc(job.title)}`, agent: '✦ 智能体', asr: `🎙 ${esc(job.title)}`, extract: `⧉ ${esc(job.title)}` }[job.kind] ?? `💬 ${esc(job.mode === 'compliance' ? '合规检查' : job.mode === 'summary' ? '资料解析' : '问答')}`
+  const head = { generate: `起草 · ${esc(job.title)}`, agent: '智能体', asr: esc(job.title), extract: esc(job.title) }[job.kind] ?? `${esc(job.mode === 'compliance' ? '合规检查' : job.mode === 'summary' ? '资料解析' : '问答')}`
   const steps = job.steps?.length ? `<div class="steps">${job.steps.map(s => `<div class="sp ${s.ok ? '' : 'bad'}"><i>${s.ok ? '✓' : '!'}</i><span class="ell">${esc(s.label)}${s.summary ? ` · <span class="dim">${esc(String(s.summary).slice(0, 60))}</span>` : ''}</span></div>`).join('')}${running ? '<div class="sp"><span class="spin" style="width:14px;height:14px"></span>思考中…</div>' : ''}</div>` : ''
-  const readList = (job.reads ?? []).map(r => r.wisburg ? `<button class="src" data-act="wis" data-res="${esc(r.wisburg.resource)}" data-id="${esc(r.wisburg.id)}">🌐 ${esc(r.path)}</button>` : `<button class="src" data-act="file" data-id="${r.fileId}" title="${esc(r.role ?? '')} · ${esc(r.path)}">📎 ${esc(base(r.path))}</button>`).join('')
+  const readList = (job.reads ?? []).map(r => r.wisburg ? `<button class="src" data-act="wis" data-res="${esc(r.wisburg.resource)}" data-id="${esc(r.wisburg.id)}">${esc(r.path)}</button>` : `<button class="src" data-act="file" data-id="${r.fileId}" title="${esc(r.role ?? '')} · ${esc(r.path)}">${esc(base(r.path))}</button>`).join('')
   const reads = !job.reads?.length || job.kind === 'agent' ? '' : running ? `<div class="srcs">${readList}</div>` : `<details class="rd"><summary>已读取 ${job.reads.length} 份资料</summary><div class="srcs">${readList}</div></details>`
   const pi = PHASES.findIndex(([k]) => k === job.phase)
   const phases = job.kind === 'generate' ? `<div class="phases">${PHASES.map(([k, l], i) => `<span class="${job.status === 'done' || i < pi ? 'done' : i === pi && running ? 'cur' : ''}">${l}</span>`).join('')}</div>` : ''
@@ -230,13 +231,13 @@ function msgHTML(m) {
   if (job.kind === 'generate' && running) body = `<div class="stream ${job.text?.length > 500 ? 'fade' : ''}"><div class="md">${md((job.text ?? '').slice(-1800))}</div></div><div class="prog" style="margin:6px 0"><i style="width:${Math.min(96, (job.text?.length ?? 0) / 30)}%"></i></div>`
   else if (job.deliverableId && job.status === 'done') {
     const cc = job.citeCheck
-    body = `${job.kind === 'agent' && job.text ? `<div class="md">${md(job.text, cites)}</div>` : ''}<div>✅ 已保存为成果 v${job.version ?? ''}（草稿，需人工审核定稿）${job.missing?.length ? `；待补充字段 ${job.missing.length} 个` : ''}</div>
+    body = `${job.kind === 'agent' && job.text ? `<div class="md">${md(job.text, cites)}</div>` : ''}<div>已保存为成果 v${job.version ?? ''}（草稿，需人工审核定稿）${job.missing?.length ? `；待补充字段 ${job.missing.length} 个` : ''}</div>
       <div class="filecard" data-act="open-deliverable" data-p="${job.projectId}" data-d="${job.deliverableId}">${ficon('.' + String(job.path ?? '.docx').split('.').pop())}<div class="grow" style="min-width:0"><div class="ell" style="font-weight:600">${esc(base(job.path))}</div><div class="dim ell" style="font-size:11px">${esc(job.path ?? '')}</div></div><span class="pill st-0">草稿</span></div>
       ${cc ? `<div class="ccheck ${cc.unverified?.length || cc.unsourced?.length ? 'warn' : 'ok'}">引用核对：${cc.verified}/${cc.total} 条数字在原文中找到${cc.unverified?.length ? `，${cc.unverified.length} 条未能核对` : ''}${cc.unsourced?.length ? `，${cc.unsourced.length} 处数字未标注来源` : ''}</div>` : ''}
-      ${cites.length ? `<div class="srcs">${cites.map(c => c.wisburg ? `<button class="src" data-act="wis" data-res="${esc(c.wisburg.resource)}" data-id="${esc(c.wisburg.id)}">[${c.n}] 🌐 ${esc(c.wisburg.title ?? c.path)}</button>` : `<button class="src" data-act="file" data-id="${c.fileId}" title="${esc(c.path)}">[${c.n}] ${esc(base(c.path))}</button>`).join('')}</div>` : ''}`
+      ${cites.length ? `<div class="srcs">${cites.map(c => c.wisburg ? `<button class="src" data-act="wis" data-res="${esc(c.wisburg.resource)}" data-id="${esc(c.wisburg.id)}">[${c.n}] ${esc(c.wisburg.title ?? c.path)}</button>` : `<button class="src" data-act="file" data-id="${c.fileId}" title="${esc(c.path)}">[${c.n}] ${esc(base(c.path))}</button>`).join('')}</div>` : ''}`
   } else body = `<div class="md">${md(job.text ?? '', cites.length ? cites : job.sources?.map(s => ({ n: s.n, fileId: s.fileId, wisburg: s.wisburg, path: s.path })))}</div>${running && !job.steps?.length ? '<span class="spin"></span>' : ''}`
-  const route = job.route?.reason ? `<div class="dim" style="font-size:11px;margin-top:6px">🛡 ${esc(job.route.reason)}</div>` : ''
-  const tail = (job.fallback ? `<div class="dim" style="font-size:11px;margin-top:6px">⚠ 模型不可用，已用离线引擎：${esc(job.fallback)}</div>` : '') + (job.status === 'failed' ? `<div style="color:#FCA5A5;margin-top:6px;font-size:12px">✕ ${esc(job.error ?? '')}</div>` : job.status === 'cancelled' ? '<div class="dim" style="margin-top:6px">已取消，未写入任何文件。</div>' : '')
+  const route = job.route?.reason ? `<div class="dim" style="font-size:11px;margin-top:6px">${esc(job.route.reason)}</div>` : ''
+  const tail = (job.fallback ? `<div class="dim" style="font-size:11px;margin-top:6px">模型不可用，已用离线引擎：${esc(job.fallback)}</div>` : '') + (job.status === 'failed' ? `<div class="bad" style="margin-top:6px;font-size:12px">${esc(job.error ?? '')}</div>` : job.status === 'cancelled' ? '<div class="dim" style="margin-top:6px">已取消，未写入任何文件。</div>' : '')
   return `<div class="msg a" data-job="${job.id}"><div class="who">${head}<span class="grow"></span>${esc(job.engine ?? '')}${running ? `<button class="btn sm" data-act="cancel" data-id="${job.id}">取消</button>` : ''}</div>${phases}${steps}${reads}${body}${route}${tail}</div>`
 }
 function updateJobMsg(job) {
@@ -265,7 +266,7 @@ function track(job, onDone) {
       updateJobMsg(next)
       window.dispatchEvent(new CustomEvent('investai:job', { detail: next }))
       if (next.status !== 'running') {
-        if (next.deliverableId && next.status === 'done') toast(`✅ ${next.title || '成果'} 已保存为 v${next.version}（草稿）`, 'ok')
+        if (next.deliverableId && next.status === 'done') toast(`${next.title || '成果'} 已保存为 v${next.version}（草稿）`, 'ok')
         if (next.status === 'failed' && !/已改用检索问答/.test(next.error ?? '')) toast(`AI 任务失败：${next.error}`, 'deny')
         S.onDone?.get(next.id)?.(next)
         await hooks.reload()
@@ -291,7 +292,7 @@ async function send(textArg, extra = {}) {
     const p = ctxProject()
     const r = await post('chat', { text, context: { projectId: p?.id, fileIds: extra.fileIds ?? S.ctx.fileIds } })
     if (r.job) track(r.job, extra.onDone)
-    if (r.nav?.projectId && S.view !== 'project') go('project', { id: r.nav.projectId })
+    if (r.nav?.projectId && S.view !== 'project' && !extra.stay) go('project', { id: r.nav.projectId })
     if (!extra.keepCtx) S.ctx.fileIds = []
     S.chat = await get('chat.history')
     for (const m of S.chat) if (m.job && S.live.has(m.job.id)) m.job = S.live.get(m.job.id)
@@ -299,7 +300,7 @@ async function send(textArg, extra = {}) {
     renderAI()
     if (S.atab === 'chat') renderAIBody(true)
   } catch (e) {
-    S.chat.push({ role: 'ai', text: `⚠️ ${e.message}`, tone: 'deny' })
+    S.chat.push({ role: 'ai', text: e.message, tone: 'deny' })
     renderAIBody(true)
   } finally { $('#sendBtn').disabled = false }
 }
@@ -344,6 +345,7 @@ async function openWis(resource, id) {
 // ───────── 通用事件 ─────────
 Object.assign(ACT, {
   go: el => go(el.dataset.view, { sub: el.dataset.sub }),
+  'theme-toggle': () => { setTheme(theme() === 'dark' ? 'light' : 'dark'); renderChrome() },
   'open-project': el => { closePopup(); closeDrawer(); go('project', { id: el.dataset.id }) },
   'ai-toggle': () => { S.aiOpen = !S.aiOpen; renderChrome(); renderAI() },
   'ai-info': () => {
@@ -394,7 +396,7 @@ Object.assign(ACT, {
   'wis-save': async () => { const f = await act('wisburg.save', S.drawer.wis, '已存入资料库（我的上传/智堡/手动收藏）'); if (f) hooks.reload() },
   'wis-ask': () => { const w = S.drawer.wis; const t = $('#drawer .fn').textContent; closeDrawer(); send(`读取智堡 ${w.resource}（id=${w.id}）《${t}》，总结核心观点，并说明对我们在看项目的启示`) },
   'drawer-close': closeDrawer,
-  rescan: async el => { toast('正在扫描…'); const r = await act('mount.rescan', { id: el.dataset.id }); if (r) toast(r.ok ? `扫描完成：${r.files} 个文件` : `⚠ ${r.reason}`, r.ok ? 'ok' : 'deny'); hooks.reload() },
+  rescan: async el => { closePopup(); toast('正在扫描…'); const r = await act('mount.rescan', { id: el.dataset.id }); if (r) toast(r.ok ? `扫描完成：${r.files} 个文件` : r.reason, r.ok ? 'ok' : 'deny'); hooks.reload() },
   notifications: el => {
     get('notifications').then(list => {
       const r = el.getBoundingClientRect()
@@ -450,18 +452,22 @@ document.addEventListener('keydown', e => {
 })
 // 灰色按钮：说明为什么不能做、找谁做
 ACT.explain = el => toast(el.dataset.why ?? '当前不可操作', 'deny')
-ACT.help = () => openHelp()
-ACT['tour-start'] = () => { closeDrawer(); startTour() }
+ACT.help = () => { closePopup(); openHelp() }
+ACT['tour-start'] = () => { closePopup(); closeDrawer(); startTour() }
 ACT['top-settings-menu'] = el => {
-  const r = el.getBoundingClientRect()
-  popup(`<div class="hd">⚙️ 系统设置 · 账户 · 帮助中心</div>
-    <div class="it" data-act="nb-api">${icon('spark', 14)}<div class="grow"><b>AI 模型与 API 路由设置</b><div class="dim" style="font-size:11px">配置 DeepSeek / 本地 Ollama / 混合路由</div></div></div>
-    <div class="it" data-act="persona">${icon('users', 14)}<div class="grow"><b>账户与岗位视角切换</b><div class="dim" style="font-size:11px">切换 15 个一级市场岗位体验四层权限</div></div></div>
-    <div class="it" data-act="go" data-view="settings">${icon('set', 14)}<div class="grow"><b>机构治理与系统配置</b><div class="dim" style="font-size:11px">人员角色、流程模板、密级规则与审计</div></div></div>
-    <div class="it" data-act="go" data-view="knowledge">${icon('kb', 14)}<div class="grow"><b>全机构底稿资料库</b><div class="dim" style="font-size:11px">管理 NAS 挂载目录与项目原始底稿</div></div></div>
-    <div class="it" data-act="rescan">${icon('refresh', 14)}<div class="grow"><b>重新扫描本地底稿目录</b><div class="dim" style="font-size:11px">同步最新放入文件夹的 PDF/Word/Excel</div></div></div>
-    <div class="it" data-act="help">${icon('info', 14)}<div class="grow"><b>使用帮助与一级市场术语指南</b><div class="dim" style="font-size:11px">快速上手、名词解释与常见问题</div></div></div>
-    <div class="it" data-act="tour-start">${icon('play', 14)}<div class="grow"><b>重新播放界面导览</b></div></div>`, r.right - 290, r.bottom + 6, 290)
+  const d = D()
+  const dir = d.mounts.find(m => m.kind === 'nas') ?? d.mounts.find(m => m.kind === 'local')
+  menuAt(el, [
+    mi('nb-api', '模型连接', {}, { ic: 'spark' }),
+    mi('persona', d.mode === 'saas' ? '账户' : '切换岗位', {}, { ic: 'user' }),
+    '<hr>',
+    mi('go', '机构治理与模型配置', { view: 'settings' }, { ic: 'set' }),
+    mi('go', '底稿资料库', { view: 'knowledge' }, { ic: 'kb' }),
+    dir && mi('rescan', '重新扫描底稿目录', { id: dir.id }, { ic: 'history' }),
+    '<hr>',
+    mi('help', '帮助与术语', {}, { ic: 'info' }),
+    mi('tour-start', '界面导览', {}, { ic: 'play' }),
+  ], 232)
 }
 
 const ROLE_GUIDE = [
@@ -484,11 +490,10 @@ function openHelp() {
 }
 
 const TOUR = [
-  ['#nav, #app.embed .main', '左侧导航', '工作台、项目管理、会议纪要、智能提取、公司库、资料库……在 DSH 中，这些入口出现在 DSH 自己的侧栏里。'],
-  ['.kpis, .page .ph', '工作台', '这里汇总轮到你处理的事：待表决、待审核成果、到期任务和最新动态。'],
-  ['.me-btn', '你的身份', '每个岗位看到的项目、敏感字段和能做的操作都不同。演示模式下可在这里切换 15 个岗位体验。'],
-  ['#ai', 'AI 协作助手', '提问、起草成果、解析资料。AI 只在你的权限范围内工作，只产出草稿，不做表决与定稿。'],
-  ['[data-act="help"]', '随时求助', '这里有快速上手、名词解释和常见问题；灰色按钮点一下也会告诉你原因和可以找谁。'],
+  ['#nav, #app.embed .main', '三个入口', '投研项目总览、尽调与研判工作台、阶段门禁与投决中心。在 DSH 里，这三个入口在 DSH 自己的侧栏。'],
+  ['.nb-list', '项目', '每行左边是全周期进度。点一行看各阶段的进度，旁边是成果报送入口。'],
+  ['.me-btn', '岗位', '每个岗位看到的项目、敏感字段和能做的操作不同。演示模式下可以在这里切换。'],
+  ['[data-act="top-settings-menu"]', '设置与帮助', '模型连接、机构治理、底稿资料库、名词解释和常见问题在这里。灰色按钮点一下会说明原因。'],
 ]
 function startTour(i = 0) {
   document.querySelectorAll('.tour-mask').forEach(e => e.remove())
@@ -523,7 +528,8 @@ window.addEventListener('drop', async e => {
   const projectId = ['project', 'notebook', 'flowboard'].includes(S.view) ? S.sel : undefined
   for (const file of files) {
     if (file.size > 40 * 1024 * 1024) { toast(`${file.name} 超过 40MB，请放入 NAS 目录后扫描`, 'deny'); continue }
-    await act('kb.upload', { projectId, mountId: projectId ? undefined : 'm_up', name: file.name, data: await toB64(file) }, `已上传 ${file.name}${projectId ? '（项目资料）' : ''}`)
+    const r = await act('kb.upload', { projectId, mountId: projectId ? undefined : 'm_up', name: file.name, data: await toB64(file) }, `已上传 ${file.name}${projectId ? '（项目底稿）' : ''}`)
+    if (projectId && r?.id && !S.ctx.fileIds.includes(r.id)) S.ctx.fileIds.push(r.id)
   }
   if (projectId) S.project = await get('project', { id: projectId }).catch(() => S.project)
   await hooks.reload()
@@ -536,10 +542,10 @@ function showLogin(info = {}) {
   if ($('.login')) return
   const el = document.createElement('div')
   el.className = 'login'
-  el.innerHTML = `<form class="dialog"><div class="row" style="margin-bottom:14px"><span class="logo"><span class="mk">A /</span><span class="nm">深蓝投研工作台</span></span></div>
+  el.innerHTML = `<form class="dialog"><div class="row" style="margin-bottom:14px"><span class="logo"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span></span></div>
     <label class="f">账号<input class="input" name="username" autocomplete="username" required></label>
     <label class="f">密码<input class="input" name="password" type="password" autocomplete="current-password" required></label>
-    <div id="lerr" style="color:#FCA5A5;min-height:18px;font-size:12px"></div><button class="btn pri" style="width:100%">登录</button>
+    <div id="lerr" class="bad" style="min-height:18px;font-size:12px"></div><button class="btn pri" style="width:100%">登录</button>
     ${info.sso ? '<a class="btn" style="width:100%;margin-top:8px" href="/sso/login">统一登录（企业账号）</a>' : ''}
     <div class="dim" style="font-size:11px;margin-top:10px">首次启动的初始密码在服务端数据目录 initial-credentials.txt 中</div></form>`
   document.body.append(el)
@@ -552,7 +558,7 @@ try {
   ;[S.data, S.meta, S.files] = await Promise.all([get('state'), get('meta'), get('files').catch(() => [])])
   applyVocab(S.meta.vocab)
   if (!VIEWS[S.view]) S.view = 'workbench'
-  if (S.view === 'project' && S.sub) S.sel = S.sub
+  if (['project', 'notebook', 'flowboard'].includes(S.view) && S.sub) S.sel = S.sub
   renderChrome()
   renderView()
   renderAI()

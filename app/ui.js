@@ -8,6 +8,35 @@ export const $$ = (s, el = document) => [...el.querySelectorAll(s)]
 export const EMBED = document.documentElement.dataset.embedded === '1'
 export const VERSION = 'v2.1'
 
+// ───────── 主题：浅色（默认）/ 深色，记在 localStorage，内嵌时通知 DSH 宿主一起切 ─────────
+const THEME_KEY = 'investai.theme'
+export function theme() { try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light' } catch { return 'light' } }
+export function setTheme(t) {
+  try { localStorage.setItem(THEME_KEY, t) } catch { /* 无痕模式下只在本次生效 */ }
+  document.documentElement.dataset.theme = t
+  if (EMBED) parent.postMessage({ type: 'investai:theme', theme: t }, location.origin)
+}
+document.documentElement.dataset.theme = theme()
+
+/** 同一个 key 只在第一次返回 true：进场动画只放一遍，轮询刷新时不重播。 */
+let enterKey = ''
+export function firstPaint(key) { if (enterKey === key) return false; enterKey = key; return true }
+/** 数字从 0 滚到目标值；页面在后台时直接显示终值。 */
+export function countUp(root) {
+  if (document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  for (const el of root.querySelectorAll('[data-count]')) {
+    const to = Number(el.dataset.count) || 0
+    const t0 = performance.now()
+    el.textContent = '0'
+    const step = now => { const k = Math.min(1, (now - t0) / 520); el.textContent = String(Math.round(to * (1 - (1 - k) ** 3))); if (k < 1) requestAnimationFrame(step) }
+    requestAnimationFrame(step)
+    setTimeout(() => { el.textContent = String(to) }, 700)
+  }
+}
+
+/** 进场动画放完后摘掉 enter 类，之后局部重画不再重播。 */
+export function entered(v) { countUp(v); setTimeout(() => v.querySelector('.enter')?.classList.remove('enter'), 900) }
+
 // ───────── 状态 ─────────
 export const S = {
   data: null, meta: null, view: 'workbench', sub: '', sel: null, project: null, ptab: 'works',
@@ -82,13 +111,25 @@ const P = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', open: '<path d="M14 3h7v7M10 14 21 3M21 14v7H3V3h7"/>',
   print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M6 14h12v7H6z"/>',
+  slides: '<rect x="3" y="4" width="18" height="13"/><path d="M12 17v4M8 21h8M7 9h6M7 12.5h10"/>',
+  doc: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 15.5h7M9 8.5h3"/>',
+  wave: '<path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/>',
+  video: '<rect x="3" y="5" width="18" height="14"/><path d="m10 9 5 3-5 3z"/>',
+  mind: '<rect x="9" y="9.5" width="6" height="5"/><path d="M9 12H6V6H3M6 12v6H3M15 12h3V6h3M18 12v6h3"/>',
+  cards: '<rect x="7" y="3" width="13" height="14"/><path d="M4 7v14h13"/>',
+  quiz: '<rect x="4" y="3" width="16" height="18"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8M12 16.5h.01"/>',
+  table: '<rect x="3" y="4" width="18" height="16"/><path d="M3 9.5h18M3 14.5h18M9 4v16"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  folder: '<path d="M3 6h7l2 2.5h9V19H3z"/>',
+  right: '<path d="m9 6 6 6-6 6"/>',
 }
 export const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] ?? P.file}</svg>`
-const AV = ['#4F46E5', '#2563EB', '#0891B2', '#7C3AED', '#DB2777', '#059669', '#D97706', '#DC2626']
+const AV = ['#5B6B5E', '#6B5B4E', '#4E5F6B', '#6B4E5B', '#5E5B6B', '#4E6B63', '#7A6A45', '#6B4E4E']
 export const avColor = name => AV[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length]
 export const avatar = (name, size = 26) => `<span class="av" style="width:${size}px;height:${size}px;background:${avColor(name)};font-size:${Math.round(size * .42)}px" title="${esc(name)}">${esc(String(name ?? '?').slice(0, 1))}</span>`
-const FTYPE = { '.md': ['MD', '#2563EB'], '.csv': ['CSV', '#059669'], '.xlsx': ['X', '#059669'], '.docx': ['W', '#2563EB'], '.pptx': ['P', '#EA580C'], '.pdf': ['PDF', '#DC2626'], '.txt': ['TXT', '#64748B'], '.m4a': ['♪', '#7C3AED'], '.mp3': ['♪', '#7C3AED'], '.wav': ['♪', '#7C3AED'] }
-export const ficon = (ext, small) => { const [t, c] = FTYPE[ext] ?? ['F', '#64748B']; return `<span class="fi${small ? ' sm' : ''}" style="background:${c}">${t}</span>` }
+const FTYPE = { '.md': ['MD', '#4E5F6B'], '.csv': ['CSV', '#2F6B4F'], '.xlsx': ['X', '#2F6B4F'], '.docx': ['W', '#3F5870'], '.pptx': ['P', '#A5562A'], '.pdf': ['PDF', '#A33B2B'], '.txt': ['TXT', '#77736A'], '.m4a': ['♪', '#5E4B7A'], '.mp3': ['♪', '#5E4B7A'], '.wav': ['♪', '#5E4B7A'], '.webm': ['♪', '#5E4B7A'], '.html': ['H', '#7A6A45'], '.json': ['J', '#77736A'], '.png': ['图', '#4E6B63'], '.svg': ['图', '#4E6B63'], '.mp4': ['▶', '#6B4E5B'] }
+export const ficon = (ext, small) => { const [t, c] = FTYPE[ext] ?? ['F', '#77736A']; return `<span class="fi${small ? ' sm' : ''}" style="background:${c}">${t}</span>` }
 export const levelTag = l => `<span class="tag lv${l ?? 1}" title="资料密级">${LEVELS[l ?? 1]}</span>`
 
 // ───────── 格式化 ─────────
@@ -119,7 +160,7 @@ export const roleName = id => S.meta?.roles?.find(r => r.id === id)?.name ?? id
 export const AI_LEVEL = ['关闭', '辅助建议', '起草待确认', '授权执行']
 
 // ───────── 提示 / 弹窗 / 抽屉 / 浮层 ─────────
-export function toast(text, tone = '') { const el = document.createElement('div'); el.className = `toast ${tone}`; el.textContent = tone === 'deny' && !/^⚠/.test(text) ? `⚠️ ${text}` : text; $('#toasts').append(el); setTimeout(() => el.remove(), tone === 'deny' ? 5000 : 2800) }
+export function toast(text, tone = '') { const el = document.createElement('div'); el.className = `toast ${tone}`; el.textContent = String(text ?? '').replace(/^(?:✅|⚠️?|✕)\s*/u, ''); $('#toasts').append(el); setTimeout(() => el.remove(), tone === 'deny' ? 5000 : 2800) }
 
 export function dialog(html, { wide } = {}) {
   const el = $('#modal')
@@ -212,5 +253,5 @@ export function sparkline(series, w = 120, h = 32) {
   const min = Math.min(...ys), max = Math.max(...ys)
   const pts = ys.map((y, i) => `${(i / (ys.length - 1)) * w},${h - 2 - ((y - min) / (max - min || 1)) * (h - 4)}`).join(' ')
   const up = ys.at(-1) >= ys[0]
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${up ? '#10B981' : '#EF4444'}" stroke-width="1.6"/></svg>`
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${up ? 'var(--green)' : 'var(--red)'}" stroke-width="1.6"/></svg>`
 }

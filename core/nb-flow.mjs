@@ -1,4 +1,4 @@
-// 优势资本智能投研：阶段进度百分比计算、插件提交记录与笔记存储
+// 优势资本智能投研：阶段进度百分比计算、成果报送记录与尽调纪要存储
 import { randomBytes } from 'node:crypto'
 
 const idOf = p => `${p}_${randomBytes(4).toString('hex')}`
@@ -48,13 +48,13 @@ export function listNotes(db, projectId) {
   const seed = dls.slice(0, 4).map(d => ({
     id: `dl_${d.id}`, title: `${d.type}（${d.status === 'final' ? '已定稿' : '草稿'}）`,
     tag: d.format.toUpperCase(), board: 'deliverables', deliverableId: d.id,
-    summary: `共 ${d.versions.length} 个版本 · 支持左上工坊本地编辑与插件提交`,
+    summary: `共 ${d.versions.length} 个版本`,
     pinned: d.status !== 'final', updatedAt: p.updatedAt || Date.now(),
   }))
   seed.unshift({
-    id: idOf('nt'), title: `${p.name} · 尽调与推进总览看板`,
-    tag: '看板入口', board: 'stages', pinned: true,
-    summary: '点击此笔记打开五维项目看板：阶段流程、插件交付、数据核验、投决门禁、待办时间轴。',
+    id: idOf('nt'), title: `${p.name} · 推进总览`,
+    tag: '看板', board: 'stages', pinned: true,
+    summary: '阶段工作、成果报送、底稿核验、决策准入、待办与纪要',
     content: `# ${p.name} 项目推进笔记\n\n- 当前阶段进度与必做成果实时同步\n- 点击上方看板页签切换不同管理视图`,
     updatedAt: Date.now(),
   })
