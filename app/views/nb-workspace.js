@@ -3,7 +3,7 @@ import { S, D, ACT, VIEWS, hooks, $, esc, md, icon, get, act, toast, ficon, leve
 
 function getRawSourceFiles(x) {
   const all = x?.files ?? []
-  const raw = all.filter(f => f.mountId !== 'm_ws' && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
+  const raw = all.filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('/Studio成品/') && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
   return raw.length ? raw : all
 }
 
@@ -278,7 +278,7 @@ Object.assign(ACT, {
     const art = S.project?.artifacts?.items?.[Number(el.dataset.i)]
     if (art) {
       const r = await act('nb.flow.submit', { projectId: pid, artifactPath: art.fullPath, artifactName: art.name, autoSubmitReview: true })
-      if (r) toast(`✅ 已将右下角成品「${art.name}」提交至项目管理节点「${r.workType}」v${r.version}`, 'ok')
+      if (r) toast(`「${art.name}」已报送到工作项「${r.workType}」v${r.version}`, 'ok')
     }
     S.sel = pid
     hooks.go('flowboard', { id: pid })

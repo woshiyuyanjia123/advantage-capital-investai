@@ -137,3 +137,25 @@ test('Q5 接上模型：先定提纲再分批撰写，坏 JSON 重试；模型�
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('Q6 报送成品：按成品对应的工作项报送，不重复加版本；不认项目文件夹以外的路径', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nb-q6-'))
+  const core = await createCore({ dir, mode: 'dsh' })
+  try {
+    const st = await call(core, 'state')
+    const p = st.projects.find(x => x.name.includes('衡远')) ?? st.projects[0]
+    const art = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ppt' })
+    assert.equal(art.workType, '立项报告')
+    const sub = await call(core, 'nb.flow.submit', { projectId: p.id, artifactPath: art.fullPath, artifactName: art.name, autoSubmitReview: true })
+    assert.equal(sub.workType, '立项报告')
+    assert.equal(sub.version, art.version, '生成时已存过的版本直接报送')
+    const outside = await core.handle(req('nb.flow.submit', { projectId: p.id, artifactPath: join(dir, '..', 'x.pptx'), artifactName: '不存在.pptx' }))
+    assert.equal(outside.status, 400)
+    const xlsx = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'table' })
+    const noNode = await core.handle(req('nb.flow.submit', { projectId: p.id, artifactPath: xlsx.fullPath, artifactName: xlsx.name }))
+    assert.equal(noNode.status, 400, '没有对应工作项时要求选择，不默认塞进第一个')
+  } finally {
+    await core.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})

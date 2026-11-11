@@ -67,8 +67,8 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     const buf = await renderDeck(deck, { theme })
     const pages = deck.slides.length + 2
     const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
-    await deliverables.addVersion(user, d, { buffer: buf, markdown: deckToMarkdown(deck), ext: '.pptx', engine: engine || '底稿摘编', sources: docs.length, note: `${pages} 页` })
-    return save(`${p.name}_演示文稿_${pages}页_${stamp}.pptx`, buf, { summary: `${pages} 页 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues, pages })
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: deckToMarkdown(deck), ext: '.pptx', engine: engine || '底稿摘编', sources: docs.length, note: `${pages} 页` })
+    return save(`${p.name}_演示文稿_${pages}页_${stamp}.pptx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `${pages} 页 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues, pages })
   }
 
   if (kind === 'word' || kind === 'report' || kind === 'ic_memo') {
@@ -87,9 +87,9 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     const title = md.match(/^#\s+(.+)$/m)?.[1] ?? `${p.name} ${type}`
     const buf = await renderDocx({ title, subtitle: `${engine ? `${engine} 依据 ${docs.length} 份底稿撰写` : `${docs.length} 份底稿的原文摘编`} · ${stamp}`, markdown: md.replace(/^#\s+.+\n+/, ''), footer: checkLine(check) + (check.unmatched.length ? `：${check.unmatched.slice(0, 8).map(u => u.value).join('、')}` : '') })
     const d = deliverables.ensure(p.id, memo ? '投资建议书' : '尽调报告', {}, user)
-    await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: engine || '底稿摘编', sources: docs.length, note: type })
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: engine || '底稿摘编', sources: docs.length, note: type })
     const chars = md.replace(/\s/g, '').length
-    return save(`${p.name}_${type}_${stamp}.docx`, buf, { summary: `约 ${chars} 字 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues })
+    return save(`${p.name}_${type}_${stamp}.docx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `约 ${chars} 字 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues })
   }
 
   if (kind === 'table' || kind === 'xlsx') {
