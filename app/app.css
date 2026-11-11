@@ -8,6 +8,12 @@
   --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
+:root[data-theme="light"] {
+  --bg: #F4F6FA; --bg2: #FFFFFF; --panel: #FFFFFF; --card: #F8FAFC; --card2: #EEF2F7; --line: #E2E8F0; --line2: #CBD5E1;
+  --text: #0F172A; --text2: #334155; --muted: #64748B; --dim: #94A3B8;
+  --blue: #2563EB; --blue2: #1D4ED8; --green: #059669; --amber: #D97706; --red: #DC2626; --violet: #7C3AED; --cyan: #0891B2;
+  color-scheme: light;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 var(--font); font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }

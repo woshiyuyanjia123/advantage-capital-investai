@@ -1,128 +1,68 @@
-# NotebookLM × WorkBuddy 企业 FDE 项目管理工作台 (DSH 插件 & 双平台桌面版 v3.0)
+# 优势资本 · 智能投研工作台（AC Investment SaaS · Agentic Harness & DSH 插件版 v4.0）
 
-本项目将 **Google NotebookLM（Gemini Notebook）的三栏源依据生产力范式** 与 **企业 FDE（Forward-Deployed Engineer）全流程投研/项目管理、四层权限治理及本地/离线 API 架构** 深度融合，提供 **DeepSeek Harness (DSH) 插件版**、**macOS / Windows 独立桌面安装包** 与 **本地/云端混合服务**。
-
----
-
-## 一、两大基线仓库与开源项目借鉴对照（Architecture & Provenance）
-
-本项目在架构演进中系统性吸收并重构了以下开源与内部基线项目的核心能力：
-
-### 1. 借鉴自 `cheng241105-gif/ai-investment-management`
-- **全生命周期项目治理与档案模型（Investment Dossier）**：吸收其从“项目线索 → 立项准备 → 立项会 → 尽调 → 投委会 → 协议交割 → 投后赋能 → 退出归档”的阶段门禁（Stage Gate）与 RACI 责任编排思想。
-- **视觉高度估算 PPT 自动分页引擎（`desktop-v2.4.1`）**：合入其 `core/office.mjs` 中基于汉字/英文字符视觉宽度的行高计算与长表格跨页表头重复算法，彻底解决长报告转 PPT 时只保留前 12 行或文字溢出页面的问题。
-- **桌面单机模式权限体验优化**：吸取其 2.4.1 修复经验，在桌面/插件单机模式下允许当前操作人直接配置与测试本地/外部模型 API，无需切回系统管理员账号。
-
-### 2. 借鉴自 `evanzhu0105-ship-it/InvestAI-Desktop` 及 `PR #1 (5ab645c)`
-- **零构建 ES Module + SQLite 全历史快照共核架构**：沿用其高内聚的 `core/`（SQLite 版本库、四层权限 `org.mjs`、成果版本生命周期 `lifecycle.mjs`、会议转写 `meetings.mjs`）与 `lib/`（DSH Cordis 插件宿主桥接）。
-- **PR #1 (`fix/deepseek-integration`) DeepSeek 协议与稳定性修复**：
-  - 默认模型 ID 规范化为官方 `deepseek-flash`（自动将旧配置中的 `deepseek-v4.1-flash` / `deepseek-chat` 映射为有效 ID）；
-  - 按任务类型显式控制 `thinking` 与 `reasoning_effort`（大纲规划关闭思考防截断，长文起草开启 `high` 并将 `max_tokens` 提升至 `32000`）；
-  - 带工具调用的多轮对话强制回传 `reasoning_content`，并将近期对话作为背景文本传入，避免拒绝指令后引发后续轮次 HTTP 400；
-  - 区分永久配置错误（401/402/404）与暂时性网络/限流错误（429/5xx），避免单次超时导致模型被连带离线 5 分钟。
-
-### 3. 借鉴并嵌入的第三方开源工作流项目
-- **`likaku/Mck-ppt-design-skill`（Apache-2.0，已嵌入 `vendor/mck-ppt-design-skill`）**：借鉴其麦肯锡咨询级 Action Title（结论先行标题）、封面三大核心指标卡、三栏金字塔执行摘要、底栏来源溯源规范，并结合 `core/nb-ppt-pro.mjs` 的 1280×720 多图层高清渐变几何纹理画布，使生成的每一份 `.pptx` 兼具专业审美与 **≥ 3.2 MB** 的印刷级图文品质。
-- **`dataelement/dsh-desktop` & `zarazhangrui/beautiful-html-templates`（MIT）**：对齐 DSH Desktop 插件装载契约（`cordis.patch.yml` + `@deepseek-ai/dsh-client-ui-*` 槽位注入）。
+本项目是面向一级市场股权投资机构的 **生产级智能投研与全周期流程治理系统**，提供 **Agentic Harness 插件版**、**macOS / Windows 独立桌面安装包** 与 **本地/机构私有模型混合服务**。系统内置 **Harness 受控思考与操作编排引擎（`core/nb-harness.mjs`）**、**Agent × Agent 三侧实时并发互校（`core/nb-agent-mesh.mjs`）** 与 **原文逐数字溯源核验（`core/nb-ground.mjs`）**，通过操作能力可控地调用全套 9 大类投研材料制作管线并闭环报送阶段门禁。
 
 ---
 
-## 二、原创三界面产品架构（NotebookLM × 企业 FDE 全流程闭环）
+## 一、核心工程演进与多仓库架构融合（Architecture & Provenance）
 
-1. **第一界面：`① 项目书架 (图2风格)` (`app/views/nb-shelf.js`)**
-   - 顶部展示 **5 大精选行业智库与方法论笔记本**（PE/VC 硬科技尽调、产业基金资本招商、审计 vs BP 冲突核验、投委会 IC 范式、投后退出控制）；
-   - 下方展示 **最近打开过的项目笔记本网格**：轻点任意项目卡片即原位展开 **全流程总进度百分比（`overallPct%`）+ 阶段准入进度百分比（`curStagePct%`）**，右侧紧邻 **插件提交通道** 与 **打开项目专属文件夹** 入口。
-2. **第二界面：`② Notebook 制作台 (图1风格)` (`app/views/nb-workspace.js`)**
-   - **左栏（来源勾选 + 左下角项目专属文件夹产出池）**：支持 `+ 添加来源`、`+ 创建笔记` 与复选框精准挑选资料（`S.ctx.fileIds`）；彻底移除繁琐的“导出/下载”按钮，每个项目自动生成配套专属文件夹（`项目专属文件夹/<项目名>_<ID>/`），所有生成的成品自动落盘并实时陈列在左下角；
-   - **中栏（带角标源依据问答 + 3 张智能追问卡片）**：每次问答后自动给出 3 张针对当前阶段与已勾选资料的「下一步适合怎么办」追问卡片，底部实时显示 `N 个来源`；
-   - **右栏（Studio 9 宫格 + 笔记五维看板）**：严格基于左栏勾选资料定向制作 **演示文稿 PPT（≥3.2MB）、深度报告 Word、音频概览、视频概览、思维导图、闪卡、测验、信息图、数据表格 XLSX**，并提供本地逐页 PPT / Word / 录音转文字修改工坊。
-3. **第三界面：`③ 流程提交与权限看板` (`app/views/nb-flow-board.js` + `core/nb-flow-board.mjs`)**
-   - **优于传统企业 OA 的槽位式协同**：左栏直接选用图1左下角专属夹中的任意成品，支持 **零修改原件直交** 或 **人工轻微修改后自主提交** 到任意流程节点；
-   - **中栏完整企业项目阶段流水线**：可视化全部阶段、必做成果、责任人与定稿人，支持一键入槽、送审、定稿；
-   - **右栏四层权限实时矩阵与岗位胶囊切换器**：实时透视数据范围、密级上限、业务操作权、敏感字段脱敏状态，支持一键切换岗位视角并完成阶段门禁表决。
+1. **全生命周期门禁治理（借鉴 `cheng241105-gif/ai-investment-management`）**
+   - 覆盖“项目线索 → 立项准备 → 立项会 → 尽职调查 → 投资决策（IC）→ 协议交割 → 投后赋能 → 退出归档” 8 大阶段门禁（Stage Gate）与 15 岗位四层权限矩阵；
+   - 基于中英字符视觉宽度的行高估算与长表跨页表头重复算法（`core/office.mjs`）。
+2. **零构建 SQLite 快照共核与宿主协议适配（借鉴 `evanzhu0105-ship-it/InvestAI-Desktop`）**
+   - `core/`（SQLite 全版本快照、四层权限 `org.mjs`、生命周期 `lifecycle.mjs`、会议转写 `meetings.mjs`）与 `lib/`（Cordis 插件宿主与 `@deepseek-ai/dsh-agent-adapter-core` 工具注册）；
+   - 工具调用多轮思维链（`reasoning_content`）保真回传、流式 `finish_reason` 零挂起释放、永久配置错误与瞬时限流精准分流。
+3. **企业级扩展与机构投研规范融合**
+   - **`YFGaia/dify-plus` 企业配额与机构模板治理**（`core/nb-dify-plus.mjs`）：月度调用预算账本、密钥脱敏与高频机构工作流排序；
+   - **`bdim404/tianyancha-dify-plugin` 商事司法穿透**（`core/nb-tianyancha.mjs`）：一键生成工商、股权、实控人、司法涉诉七维穿透底稿并自动评级为 **A级·强公信**；
+   - **`garrettqmd/Multimodal-AI-Work-Assistant` 多模态语音四路路由**（`core/nb-voice-router.mjs`）：本地离线语音转写并自动分流至问答、尽调纪要、风险标记或材料编制；
+   - **`D-kart/investor-skill` 九章券商级 IC 备忘录**（`core/nb-equity-memo.mjs`）：零主观打星、内嵌跨源矛盾对质表与动态估值/MOIC 敏感性滑块沙盘。
 
 ---
 
-## 三、macOS 与 Windows 双平台完整区分与安装构建指南
+## 二、Agentic Harness：可控思考与操作调用制作引擎（`core/nb-harness.mjs`）
 
-| 维度 | macOS (Apple Silicon `arm64` / Intel `x64`) | Windows 10 / 11 (`x64`) |
+系统将 **Harness 的操作编排能力** 与 **Studio 9 大类投研材料编译能力** 深度贯通，告别黑盒一次性盲写：
+
+1. **三档可控思考深度（Controllable Thinking）**
+   - `fast`（快速直出）：轻量底稿盘点后直接调度编译器；
+   - `balanced`（均衡校验）：两阶段思考规划 + 原文数字核对；
+   - `deep`（五步深度反思 + 红蓝军互校 + 自愈重编）：先盘点 **A/B/C 证据信用等级** → 预判 BP 与审计/合同跨源矛盾 → 定制每件材料的专属指令与规格 → 顺序调度制作 → 二进制/XML 解压质检（不达标自动触发修正重编）。
+2. **先审批蓝图、可微调编辑、再受控执行**
+   - 支持 **「① 生成可控思考蓝图」**：向操作人透明展示思考链（`thinkingTrace`）、证据缺口（`gaps`）与每件材料的制作指令、页数与目标体积，允许人工在线增删调整后再点击执行；
+   - 支持 **「⚡ 一键思考并制作全套材料」**：内置 **投决会全套（IC 备忘录 + 路演 PPT + 深度尽调 Word + 财务对质台账 XLSX）**、**立项会标准包**、**尽调穿透核验包** 三套机构预设，自动携带天眼查穿透并在质检通过后一键报送当前阶段对应工作项。
+3. **三端操作能力全开放**
+   - **宿主会话工具（`core/tools.mjs`）**：向外部 Harness 会话注册 `investai_harness_plan`、`investai_harness_execute`、`investai_studio_make`、`investai_tianyancha_enrich` 等操作工具；
+   - **内置智能体（`core/agent.mjs`）**：在授权级别下可直接调用 `harness_plan`、`harness_execute`、`studio_make` 完成成套材料交付；
+   - **工作台可视化操控舱（`app/views/nb-workspace.js`）**：右栏内置 **「🧠 Harness 可控思考制作舱」**，实时追踪每一步操作状态与质检结果。
+
+---
+
+## 三、三界面一级市场机构产品架构
+
+1. **第一界面：`投研项目总览`（`app/views/nb-shelf.js`）**
+   - 顶部陈列 5 大优势资本方法论智库；下方展示在管项目组合网格，展开全周期总进度（`overallPct%`）、当前阶段完成度、快速报送通道与项目专属档案室。
+2. **第二界面：`尽调与研判工作台`（`app/views/nb-workspace.js`）**
+   - **左栏（纯净底稿池 + A/B/C 证据信用徽章）**：严格隔离原始底稿与生成产物，支持上传底稿、天眼查穿透与访谈纪要；
+   - **中栏（底稿溯源深度研判 + 红蓝军跨源矛盾对质雷达）**：实时流式带 `[n]` 角标问答，附带 3 张阶段化追问建议卡；
+   - **右栏（Harness 可控思考制作舱 + 9 宫格成果中心 + 右下角已编制成果直览）**：支持双轨高审美 PPT（麦肯锡咨询 6 版式 + 深蓝科技网格发布会 5 版式，单份 `≥ 3MB`）、九章 IC 备忘录、深度尽调 Word、5-Sheet 财务对质台账 XLSX 等 9 类成果；所有成果自动落盘项目档案室并陈列于右下角，支持 **0.1s 应用内全格式解压直览**、原文逐数字核对签章与一键报送阶段复核。
+3. **第三界面：`阶段门禁与投决中心`（`app/views/nb-flow-board.js` + `core/nb-flow-board.mjs`）**
+   - 左栏选用已编制成果（精准映射对应 `workType` 工作项，不重复冗余建版）直交或微调报送；中栏管控 8 大阶段门禁与定稿；右栏支持 15 岗位视角切换、四层权限透视与投决表决。
+   - 顶栏支持 **深色 / 浅色双主题一键切换** 与沉浸式 **⚙️ 设置与帮助** 菜单。
+
+---
+
+## 四、macOS 与 Windows 双平台安装与构建指南
+
+| 维度 | macOS (`arm64` / `x64`) | Windows 10 / 11 (`x64`) |
 |---|---|---|
-| **独立桌面安装包** | `DSH-NotebookLM-FDE-Setup-3.0.0-mac-arm64.dmg` / `mac-x64.dmg` | `DSH-NotebookLM-FDE-Setup-3.0.0-win-x64.exe` (NSIS 安装程序) |
-| **DSH 插件一键安装脚本** | `sh scripts/install-mac.sh` | `powershell -ExecutionPolicy Bypass -File scripts\install-win.ps1` |
-| **本地录音转写引擎安装** | `sh scripts/setup-asr.sh` (`bin/python`) | `powershell -ExecutionPolicy Bypass -File scripts\setup-asr.ps1` (`Scripts\python.exe`) |
-| **本机 Office 检出唤起方式** | `open <工作副本路径>`（调用 macOS Microsoft Office / WPS / Keynote） | `explorer.exe <工作副本路径>`（调用 Windows Office / WPS，防路径空格转义） |
-| **应用数据与项目专属夹默认路径** | Standalone: `~/Library/Application Support/dsh-notebooklm-fde`<br>DSH 插件: `~/.dsh/investai/workspace/项目专属文件夹/` | Standalone: `%APPDATA%\dsh-notebooklm-fde`<br>DSH 插件: `%USERPROFILE%\.dsh\investai\workspace\项目专属文件夹\` |
-| **桌面打包命令** | `cd desktop && npm run dist:mac` | `cd desktop && npm run dist:win` |
+| **Harness 插件一键挂载** | `sh scripts/install-mac.sh` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-win.ps1` |
+| **源码启动独立桌面端** | `npm install && npm run desktop` | `npm install && npm run desktop` |
+| **打包独立桌面安装程序** | `cd desktop && npm install && npm run dist:mac` | `cd desktop && npm install && npm run dist:win` |
+| **本地离线语音引擎配置** | `sh scripts/setup-asr.sh` | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-asr.ps1` |
 
-### 1. macOS 端快速安装与运行
+### 自动化验收测试套件（27 项全链路测试）
 ```bash
-# 方式 A：安装到 macOS 的 DeepSeek Harness (DSH Desktop / Web)
-sh scripts/install-mac.sh
-
-# 方式 B：源码直接启动本地桌面模式
-npm install
-npm run desktop
-
-# 方式 C：在 macOS 上打包 DMG 安装包
-cd desktop && npm install && npm run dist:mac
+npm test
+node --test test/dsh.test.mjs test/lifecycle.test.mjs test/llm.test.mjs test/notebook.test.mjs test/studio-quality.test.mjs test/harness.test.mjs test/saas-e2e.test.mjs
 ```
-> **macOS 首次打开提示**：若遇到 Gatekeeper 提示“无法验证开发者”，请在终端执行 `xattr -cr "/Applications/DSH NotebookLM FDE.app"` 后打开。
-
-### 2. Windows 端快速安装与运行
-```powershell
-# 方式 A：一键挂载到 Windows 的 DeepSeek Harness (desktop & web profiles)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-win.ps1
-
-# 方式 B：源码直接启动本地桌面模式
-npm install
-npm run desktop
-
-# 方式 C：在 Windows 上打包 NSIS .exe 安装程序
-cd desktop
-npm install
-npm run dist:win
-```
-
-### 3. 断网本地 API 与云端 API 连接
-- 点击界面顶部胶囊 **「API 连接」**：
-  - **断网本地模式**：选择「仅本地离线 API」，支持自动探测本机 `http://127.0.0.1:11434/v1` (Ollama)、`http://127.0.0.1:1234/v1` (LM Studio)、`http://127.0.0.1:8000/v1` (vLLM)，无本地模型时自动使用内置离线规则摘录引擎；
-  - **云端 / DSH 模式**：支持复用 DSH 宿主模型或填写 `deepseek-flash` / `deepseek-v4-pro` 及任意 OpenAI 兼容接口密钥。
-
----
-
-## 四、项目完整目录架构
-
-```text
-dsh-notebooklm-fde/
-├── core/
-│   ├── nb-api.mjs          # 本地离线 API (Ollama/LM Studio/vLLM) 探测与云端/DSH 混合路由
-│   ├── nb-flow.mjs         # 全流程进度百分比计算与项目笔记管理
-│   ├── nb-folder.mjs       # 每项目专属文件夹自动生成与成品落盘索引（无导出按钮设计）
-│   ├── nb-ppt-pro.mjs      # 麦肯锡咨询版式 + 1280x720 高清纹理画布 PPT 引擎（单份 ≥3.2MB）
-│   ├── nb-studio-gen.mjs   # Studio 9 宫格按勾选资料定向制作器 + 3 张智能追问建议生成
-│   ├── nb-studio.mjs       # 左上 PPT/Word/录音转文字工坊与插件提交通道
-│   ├── nb-flow-board.mjs   # 第三界面：左下角成品直交/微调自主提交与四层权限矩阵后端
-│   ├── llm.mjs             # DeepSeek (deepseek-flash) 与 OpenAI 兼容协议适配（含 PR #1 修复）
-│   ├── office.mjs          # Word/PPT/Excel 渲染与视觉高度估算自动分页引擎
-│   ├── deliverables.mjs    # 成果版本控制与跨平台（macOS open / Windows explorer）本地检出
-│   ├── org.mjs             # 企业四层权限（功能/数据范围/业务操作/敏感字段与密级）
-│   └── workflow.mjs        # 7 大业务类型可配置阶段与门禁表决引擎
-├── app/
-│   ├── notebook.css        # 图2项目书架 + 图1三栏工作台 + 第三界面流程权限看板样式
-│   └── views/
-│       ├── nb-shelf.js         # 第一界面：图2精选智库横幅 + 最近项目笔记本（进度% + 插件提交）
-│       ├── nb-workspace.js     # 第二界面：图1左栏勾选与左下角专属夹 + 中栏追问 + 右栏 Studio
-│       ├── nb-flow-board.js    # 第三界面：左下角成品直交/微调自主提交 + 全流程四层权限看板
-│       ├── nb-studio-ppt.js    # 本地 PPT 逐页可视化修改与本机 Office 检出工坊
-│       ├── nb-studio-word.js   # 本地 Word 章节修改与模板填充工坊
-│       └── nb-studio-audio.js  # 本地麦克风录音/离线 Whisper 转写与逐句校对工坊
-├── vendor/
-│   └── mck-ppt-design-skill/   # 嵌入的开源麦肯锡 62 种咨询版式工作流
-├── desktop/                    # Electron 跨平台独立桌面壳（支持 macOS DMG 与 Windows NSIS EXE）
-└── scripts/
-    ├── install-mac.sh          # macOS 专属 DSH 插件挂载与卸载脚本
-    ├── install-win.ps1         # Windows 专属 DSH 插件挂载与卸载脚本
-    ├── setup-asr.sh            # macOS / Linux 本地 faster-whisper 转写环境部署
-    └── setup-asr.ps1           # Windows 本地 faster-whisper 转写环境部署
-```
-

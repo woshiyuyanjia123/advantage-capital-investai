@@ -1,6 +1,6 @@
 // 深蓝投研工作台 · InvestAI v2 前端外壳（零构建 ES 模块）
 // 顶栏 | 左导航（DSH 内嵌时由 DSH 原生侧栏代替）| 中栏视图 | 右栏 AI 协作
-import { S, D, ACT, VIEWS, hooks, $, esc, gated, applyVocab, roleName, AI_LEVEL, md, icon, avatar, avColor, ficon, get, post, act, toast, popup, closePopup, closeDrawer, drawer, drawerHead, dialog, pick, toB64, can, proj, fmt, ymd, size, rel, levelTag, EMBED, VERSION, userName, LEVELS, saveB64, rawUrl, downloadFile } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, esc, gated, applyVocab, roleName, AI_LEVEL, md, icon, avatar, avColor, ficon, get, post, act, toast, popup, closePopup, closeDrawer, drawer, drawerHead, dialog, pick, toB64, can, proj, fmt, ymd, size, rel, levelTag, EMBED, VERSION, userName, LEVELS, saveB64, rawUrl, downloadFile, currentTheme, toggleTheme } from '/api/investai?asset=ui.js'
 import '/api/investai?asset=views/work.js'
 import '/api/investai?asset=views/project.js'
 import '/api/investai?asset=views/data.js'
@@ -452,11 +452,18 @@ document.addEventListener('keydown', e => {
 ACT.explain = el => toast(el.dataset.why ?? '当前不可操作', 'deny')
 ACT.help = () => openHelp()
 ACT['tour-start'] = () => { closeDrawer(); startTour() }
+ACT['theme-toggle'] = () => {
+  const next = toggleTheme()
+  renderChrome()
+  toast(next === 'light' ? '已切换至白底清爽投研主题' : '已切换至深蓝旗舰投研主题')
+}
 ACT['top-settings-menu'] = el => {
   const r = el.getBoundingClientRect()
+  const isDark = currentTheme() === 'dark'
   popup(`<div class="hd">⚙️ 系统设置 · 账户 · 帮助中心</div>
     <div class="it" data-act="nb-api">${icon('spark', 14)}<div class="grow"><b>AI 模型与 API 路由设置</b><div class="dim" style="font-size:11px">配置 Carbon / DeepSeek / 本地 Ollama / 混合路由</div></div></div>
-    <div class="it" data-act="nb-arch-open">${icon('flow', 14)}<div class="grow"><b>五层生产架构与 Agent×Agent 监控</b><div class="dim" style="font-size:11px">查看四层解耦底座状态、网状互校日志与快照回滚</div></div></div>
+    <div class="it" data-act="nb-arch-open">${icon('flow', 14)}<div class="grow"><b>五层生产架构与 Harness / Agent 监控</b><div class="dim" style="font-size:11px">查看受控思考执行器、网状互校日志与快照回滚</div></div></div>
+    <div class="it" data-act="theme-toggle">${icon(isDark ? 'sun' : 'moon', 14)}<div class="grow"><b>外观主题切换（当前：${isDark ? '深蓝旗舰' : '白底清爽'}）</b><div class="dim" style="font-size:11px">一键切换深色沉浸模式与日间研报阅读模式</div></div></div>
     <div class="it" data-act="persona">${icon('users', 14)}<div class="grow"><b>账户与岗位视角切换</b><div class="dim" style="font-size:11px">切换 15 个一级市场岗位体验四层权限</div></div></div>
     <div class="it" data-act="go" data-view="settings">${icon('set', 14)}<div class="grow"><b>机构治理与系统配置</b><div class="dim" style="font-size:11px">人员角色、流程模板、密级规则与审计</div></div></div>
     <div class="it" data-act="go" data-view="knowledge">${icon('kb', 14)}<div class="grow"><b>全机构底稿资料库</b><div class="dim" style="font-size:11px">管理 NAS 挂载目录与项目原始底稿</div></div></div>

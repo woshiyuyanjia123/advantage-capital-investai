@@ -6,7 +6,25 @@ export const API = '/api/investai'
 export const $ = (s, el = document) => el.querySelector(s)
 export const $$ = (s, el = document) => [...el.querySelectorAll(s)]
 export const EMBED = document.documentElement.dataset.embedded === '1'
-export const VERSION = 'v2.1'
+export const VERSION = 'v2.2'
+
+// ───────── 外观主题（深蓝投研默认，支持一键切换白底投研风） ─────────
+const THEME_KEY = 'investai.theme'
+export function currentTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY)
+    if (saved === 'light' || saved === 'dark') return saved
+  } catch {}
+  return 'dark'
+}
+export function applyTheme(mode = currentTheme()) {
+  const next = mode === 'light' ? 'light' : 'dark'
+  document.documentElement.dataset.theme = next
+  try { localStorage.setItem(THEME_KEY, next) } catch {}
+  return next
+}
+export const toggleTheme = () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark')
+applyTheme()
 
 // ───────── 状态 ─────────
 export const S = {
@@ -82,6 +100,10 @@ const P = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', open: '<path d="M14 3h7v7M10 14 21 3M21 14v7H3V3h7"/>',
   print: '<path d="M6 9V3h12v6M6 18H4v-7h16v7h-2M6 14h12v7H6z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/>',
+  users: '<circle cx="9" cy="8" r="4"/><path d="M2 20a7 7 0 0 1 14 0"/><circle cx="17" cy="9" r="3"/><path d="M17 14a5 5 0 0 1 5 5"/>',
 }
 export const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] ?? P.file}</svg>`
 const AV = ['#4F46E5', '#2563EB', '#0891B2', '#7C3AED', '#DB2777', '#059669', '#D97706', '#DC2626']

@@ -70,9 +70,13 @@ export async function createCore({ dir, mode, llm, wisburg = createWisburg(), fe
   const members = p => [p.owner, ...(p.members ?? []).map(m => m.userId)]
 
   // ───────── 事件 → 自动化 ─────────
+  let closed = false
   notify.on('deliverable.submitted', async ({ deliverable: d, user }) => {
+    if (closed) return
     const p = db.get('projects', d.projectId)
+    if (!p) return
     const review = db.get('settings', 'main').automation?.preReview ? await ai.preReview(d, user) : null
+    if (closed) return
     await notify.notify(finalizers(p).filter(id => id !== user.id), { kind: 'review', title: `「${d.type}」待审核 · ${p.name}`, text: `${user.name} 提交了 v${d.versions.length}${review ? `；AI 预审：${review.verdict}（引用核对 ${review.citeCheck.verified}/${review.citeCheck.total}${review.issues.length ? `，问题 ${review.issues.length} 条` : ''}）` : ''}`, projectId: p.id })
   })
   notify.on('deliverable.final', async ({ deliverable: d, user }) => {
@@ -149,6 +153,6 @@ export async function createCore({ dir, mode, llm, wisburg = createWisburg(), fe
   return {
     db, org, kb, ai, engine, deliverables, extractor, meetings, fill, sso, notify, scheduler, lifecycle, projection, persona, handle, ready: scanning,
     // 先等首次资料扫描结束再关库：否则扫描中的语句会在已关闭的数据库上执行（退出过快时报「database is not open」）
-    async close() { clearInterval(timer); scheduler.stop(); await scanning.catch(() => {}); db.close() },
+    async close() { closed = true; clearInterval(timer); scheduler.stop(); await scanning.catch(() => {}); db.close() },
   }
 }

@@ -5,6 +5,8 @@ import { WORK_TYPES } from './workflow.mjs'
 import { viewer } from './projection.mjs'
 import { RESOURCES } from './wisburg.mjs'
 import { computeFlowMetrics } from './nb-flow.mjs'
+import { planHarnessExecution, runHarnessPipeline } from './nb-harness.mjs'
+import { submitArtifactToNode } from './nb-flow-board.mjs'
 
 const output = { schema: {}, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] }
 const obj = (properties, required = []) => ({ type: 'object', additionalProperties: false, properties, required })
@@ -92,6 +94,77 @@ export function registerTools(ctx, ready) {
       core.db.put('kvstate', { id: `sub_${p.id}`, list: [{ id: `sub_${Date.now()}`, at: Date.now(), by: u.name, stage: core.engine.stageOf(p)?.name, channel: 'dsh-plugin', summary: `DSH 插件提交「${a.deliverableType}」v${r.version}` }, ...rec].slice(0, 50) }, { actor: u, reason: 'DSH 插件提交', action: 'plugin.submit' })
       const flow = computeFlowMetrics(core.db, core.engine, core.db.get('projects', p.id))
       return { saved: r.path, version: r.version, overallPct: flow.overallPct, stagePct: flow.curStagePct, status: '草稿已通过 DSH 插件提交（待人工确认）' }
+    },
+  })
+
+  tool({
+    name: 'investai_harness_plan',
+    description: '【Harness 可控思考规划】在制作材料前，先对项目底稿开展 A/B/C 信用分级盘点、跨源矛盾预判，输出结构化思考步骤、证据缺口与成套材料制作蓝图（供人工审阅或后续执行）。',
+    parameters: obj({
+      projectId: str('项目 ID'),
+      goal: str('制作目标与侧重点，例如：为衡远储能制作投委会全套上会材料包，重点核查收入确认时点'),
+      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: '思考深度：fast / balanced / deep（默认 deep）' },
+      kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] }, description: '可选，指定要制作的成果种类列表' },
+      pageCount: { type: 'integer', description: '页数或章节数（4-24，默认 8）' },
+      targetMB: { type: 'integer', description: 'PPT 目标体积 MB（3-35，默认 6）' },
+      withTianyancha: { type: 'boolean', description: '是否先调用天眼查七维商事司法穿透补齐 A 级底稿' },
+    }, ['projectId']),
+    async run(core, a, u) {
+      core.org.assertAi(u, 1)
+      const p = core.db.get('projects', String(a.projectId))
+      core.org.assertProject(u, p)
+      return planHarnessExecution(
+        { db: core.db, kb: core.kb, org: core.org, ai: core.ai },
+        u, p, a,
+      )
+    },
+  })
+
+  tool({
+    name: 'investai_harness_produce',
+    description: '【Harness 操作调用制作执行器】按已审阅的 planId 或直接按目标受控思考并调用完整制作能力（天眼查穿透 -> Agent×Agent 网状互校 -> 编译 PPT/Word/XLSX/九章IC备忘录等 -> 解压体积与数字核对质检 -> 可选自动报送阶段工作项）。',
+    parameters: obj({
+      projectId: str('项目 ID'),
+      planId: str('可选，investai_harness_plan 返回的蓝图 ID'),
+      goal: str('制作指令与核心诉求'),
+      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: '思考深度，默认 deep' },
+      kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] }, description: '要编译的成果列表' },
+      pageCount: { type: 'integer', description: '页数或章节数（4-24，默认 8）' },
+      targetMB: { type: 'integer', description: 'PPT 目标体积 MB（3-35，默认 6）' },
+      withTianyancha: { type: 'boolean', description: '是否联动天眼查七维穿透' },
+      autoSubmitStage: { type: 'boolean', description: '质检通过后是否自动挂接报送至当前阶段匹配工作项' },
+    }, ['projectId']),
+    async run(core, a, u) {
+      core.org.assertAi(u, 2)
+      const p = core.db.get('projects', String(a.projectId))
+      core.org.assertProject(u, p)
+      const ws = core.db.one('mounts', x => x.kind === 'workspace')
+      return runHarnessPipeline(
+        { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, lifecycle: core.lifecycle, ai: core.ai, dir: ws?.path },
+        u, p, a,
+      )
+    },
+  })
+
+  tool({
+    name: 'investai_artifact_submit',
+    description: '将项目专属成果舱中的某份成品（.pptx/.docx/.xlsx/.html）精准报送挂接至项目阶段门禁的指定工作项（待人工审核定稿）。',
+    parameters: obj({
+      projectId: str('项目 ID'),
+      artifactPath: str('成品文件完整路径 fullPath'),
+      artifactName: str('成品文件名'),
+      targetWorkType: { type: 'string', enum: Object.keys(WORK_TYPES), description: '可选，指定目标工作项名称' },
+      autoSubmitReview: { type: 'boolean', description: '是否同时提交审核（默认 true）' },
+    }, ['projectId', 'artifactPath', 'artifactName']),
+    async run(core, a, u) {
+      core.org.assertAi(u, 2)
+      const p = core.db.get('projects', String(a.projectId))
+      core.org.assertProject(u, p)
+      const ws = core.db.one('mounts', x => x.kind === 'workspace')
+      return submitArtifactToNode(
+        { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, lifecycle: core.lifecycle, dir: ws?.path },
+        u, p, { ...a, autoSubmitReview: a.autoSubmitReview !== false },
+      )
     },
   })
 }

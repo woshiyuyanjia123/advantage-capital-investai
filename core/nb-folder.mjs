@@ -12,7 +12,7 @@ export async function ensureProjectFolder(db, dir, p) {
   return { folderName, root }
 }
 
-export async function writeProjectArtifact({ db, kb, dir }, user, p, { fileName, buffer, kind, sourceCount = 0, summary = '', meshCert = null }) {
+export async function writeProjectArtifact({ db, kb, dir }, user, p, { fileName, buffer, kind, sourceCount = 0, summary = '', meshCert = null, ...meta }) {
   const { folderName, root } = await ensureProjectFolder(db, dir, p)
   const cleanName = safeDirName(fileName)
   const fullPath = join(root, cleanName)
@@ -25,7 +25,7 @@ export async function writeProjectArtifact({ db, kb, dir }, user, p, { fileName,
   const item = {
     id: f.id, fileId: f.id, name: cleanName, ext: extname(cleanName).toLowerCase(),
     kind: kind || 'report', bytes: buffer.length, fullPath, folderPath: root,
-    sourceCount, summary, meshCert, by: user.name, at: Date.now(),
+    sourceCount, summary, meshCert, by: user.name, at: Date.now(), ...meta,
   }
   const next = [item, ...prev.filter(x => x.name !== cleanName)].slice(0, 60)
   db.put('kvstate', { id: recKey, list: next }, { actor: user, reason: `生成成品入夹：${cleanName}`, action: 'artifact' })

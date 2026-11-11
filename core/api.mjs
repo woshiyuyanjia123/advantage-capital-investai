@@ -30,6 +30,7 @@ import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow, getEnterpr
 import { TYC_DIMENSIONS, runTianyanchaDueDiligence } from './nb-tianyancha.mjs'
 import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
 import { readLocalCarbonConfig } from './nb-api.mjs'
+import { planHarnessExecution, runHarnessPipeline, getHarnessStatus } from './nb-harness.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -242,7 +243,9 @@ export function createApi(ctx) {
     },
     'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, meetings, settings: S() }, user, b),
     'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables, ai }, user, project(user, b.projectId), b),
-    'nb.flow.submit': (user, b) => submitArtifactToNode({ db, deliverables, lifecycle }, user, project(user, b.projectId), b),
+    'nb.flow.submit': (user, b) => submitArtifactToNode({ db, kb, org, deliverables, lifecycle, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
+    'nb.harness.plan': (user, b) => planHarnessExecution({ db, kb, org, ai }, user, project(user, b.projectId), b),
+    'nb.harness.run': (user, b) => runHarnessPipeline({ db, kb, org, deliverables, lifecycle, ai, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.os.dispatch': (user, b) => dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
     'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
@@ -583,6 +586,7 @@ export function createApi(ctx) {
     'nb.notes': (user, q) => listNotes(db, project(user, q.get('projectId')).id),
     'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
+    'nb.harness.status': (user, q) => getHarnessStatus({ db }, q.get('projectId') ? project(user, q.get('projectId')) : null),
     'nb.tyc.meta': () => ({ dimensions: TYC_DIMENSIONS }),
     'nb.artifact.preview': async (user, q) => {
       const p = project(user, q.get('projectId'))

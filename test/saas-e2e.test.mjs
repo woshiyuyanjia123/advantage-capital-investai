@@ -70,7 +70,7 @@ test('一级市场机构 SaaS 全链路验收：天眼查穿透 · Agent×Agent 
     const pptArt = core.db.get('kvstate', `artifacts_${p.id}`).list.find(x => x.kind === 'ppt')
     const sub = await submitArtifactToNode(
       { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, lifecycle: core.lifecycle, dir },
-      u, p, { artifactPath: pptArt.fullPath, artifactName: pptArt.name, autoSubmitReview: true }
+      u, p, { artifactPath: pptArt.fullPath, artifactName: pptArt.name, targetWorkType: '尽调报告', autoSubmitReview: true }
     )
     assert.ok(sub.version >= 1, '右下角成品成功报送至阶段工作项并生成版本号')
     const board = await buildFlowBoardState({ db: core.db, org: core.org, engine: core.engine, lifecycle: core.lifecycle, dir }, u, p)

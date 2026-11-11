@@ -6,16 +6,17 @@ import { WORK_TYPES } from './workflow.mjs'
 import { RESOURCES } from './wisburg.mjs'
 import { createProjection, viewer } from './projection.mjs'
 import { VOCAB } from './vocab.mjs'
+import { planHarnessExecution, runHarnessPipeline } from './nb-harness.mjs'
 
 import { connectMcp } from './mcp.mjs'
-export const AGENT_SYSTEM = `你是投资管理机构的 AI 协作助手，运行在 InvestAI 中，可以调用工具。
+export const AGENT_SYSTEM = `你是优势资本（Advantage Capital）智能投研工作台的受控编排助手（Agentic Harness），可以调用操作工具与成果制作引擎。
 工作方式：
-1. 先用工具获取事实（项目、流程准入、知识库、外部研究），不要凭记忆编造公司数据。
+1. 先用工具获取事实（项目、流程准入、知识库、外部研究），严禁凭记忆编造公司数据。
 2. 引用资料时在句末标注来源编号 [n]，编号由读取工具返回。
-3. 用户要求起草/续写/优化成果时：读取足够资料后调用 save_draft 保存完整 Markdown；保存后只简短说明。
-4. 你不能表决、定稿、推进项目阶段、删除或导出；遇到这类请求，说明需要有权人员在界面中操作。
-5. 工具返回「无权」或「外部模型不可读取」时如实告诉用户，不要尝试绕过。
-6. 演示数据中的公司为虚构；外部研究（智堡）为真实数据，二者不要混为一谈。回答使用简体中文。`
+3. 当用户要求制作完整材料（如 PPT、Word 尽调报告、数据表格、九章 IC 备忘录或全套上会材料包）时：优先调用 harness_plan 输出可控思考蓝图，或直接调用 harness_produce 受控完成「底稿穿透 -> Agent×Agent 互校 -> 编译二进制成品 -> 解压质检」并落盘至右下角成果舱。
+4. 用户仅要求起草纯文本草稿时可调用 save_draft 保存完整 Markdown。
+5. 你不能表决、定稿、推进项目阶段、删除或导出；遇到这类请求，说明需要有权人员在界面中操作。
+6. 工具返回「无权」或「外部模型不可读取」时如实告诉用户，不要尝试绕过。回答使用简体中文。`
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false })
 const str = description => ({ type: 'string', description })
@@ -86,6 +87,50 @@ export function agentTools({ db, kb, org, wisburg, ai, route }, user, job, aiLev
         const o = owner ? db.one('users', u => u.name === owner) : null
         const t = db.put('tasks', { title: String(title).slice(0, 80), projectId: projectId ?? null, owner: o?.id ?? user.id, due: Date.now() + dueInDays * 864e5, done: false, by: 'AI' }, { actor: { id: 'ai', name: `AI（代 ${user.name}）` }, reason: '智能体新建任务', action: 'create' })
         return { created: t.title, owner: db.get('users', t.owner)?.name }
+      } },
+    { name: 'harness_plan', level: 1, label: 'Harness 可控思考规划', description: '在制作完整材料前进行受控思考：盘点 A/B/C 级底稿、预判红蓝军跨源冲突、输出透明分步制作蓝图与证据缺口。',
+      parameters: obj({
+        projectId: str('项目 ID'),
+        goal: str('制作目标与分析侧重'),
+        thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'] },
+        kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] } },
+        pageCount: { type: 'integer' },
+        targetMB: { type: 'integer' },
+      }, ['projectId', 'goal']),
+      run: async args => {
+        const p = db.get('projects', String(args.projectId))
+        org.assertProject(user, p)
+        return planHarnessExecution({ db, kb, org, ai }, user, p, args)
+      } },
+    { name: 'harness_produce', level: 2, label: 'Harness 受控制作完整材料', description: '调用 Harness 执行器受控思考并真实编译制作 PPT/Word/XLSX/九章IC备忘录/导图/闪卡等完整材料，自动完成 Agent×Agent 互校、解压体积质检并落盘项目成果舱。',
+      parameters: obj({
+        projectId: str('项目 ID'),
+        planId: str('可选，harness_plan 生成的蓝图 ID'),
+        goal: str('制作目标与定制指令'),
+        thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'] },
+        kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] } },
+        pageCount: { type: 'integer' },
+        targetMB: { type: 'integer' },
+        withTianyancha: { type: 'boolean' },
+        autoSubmitStage: { type: 'boolean' },
+      }, ['projectId']),
+      run: async args => {
+        const p = db.get('projects', String(args.projectId))
+        org.assertProject(user, p)
+        const ws = db.one('mounts', x => x.kind === 'workspace')
+        const res = await runHarnessPipeline(
+          { db, kb, org, deliverables: ai.deliverables, lifecycle: ai.lifecycle, ai, dir: ws?.path },
+          user, p, args,
+        )
+        job.saved = { path: res.artifacts.map(x => x.name).join('、'), version: res.artifacts[0]?.version || 1 }
+        return {
+          status: res.status,
+          engine: res.engine,
+          coreThesis: res.coreThesis,
+          artifacts: res.artifacts.map(a => ({ kind: a.kind, name: a.name, sizeMB: +(a.bytes / 1048576).toFixed(2), summary: a.summary })),
+          qualityGate: res.qualityGate,
+          submissions: res.submissions,
+        }
       } },
   ]
   return tools.filter(t => t.level <= aiLevel)

@@ -91,7 +91,8 @@ function renderCenterPane(x, p, f, rawFiles) {
     <div class="composer" style="padding:10px 14px;border-top:1px solid var(--line)"><div class="row">
       <input class="input grow" id="nbChatInput" placeholder="围绕左侧已勾选底稿提问（自动标注 [1][2] 原文出处）…">
       <span class="dim" style="font-size:12px;white-space:nowrap">${S.ctx.fileIds.length || rawFiles.length} 份底稿</span>
-      <button class="btn pri" style="white-space:nowrap" data-act="nb-chat-send">${icon('send', 13)} 提问研判</button></div></div>
+      <button class="btn pri" style="white-space:nowrap" data-act="nb-chat-send">${icon('send', 13)} 提问研判</button>
+      <button class="btn ghost" style="white-space:nowrap" data-act="nb-harness-open" data-p="${p.id}" title="将当前需求交由 Harness 受控思考并调用制作引擎">🧠 受控制作</button></div></div>
   </div>`
 }
 
@@ -125,9 +126,10 @@ function renderRightNotes(x, p) {
   ]
   return `<div class="nb-col">
     <div class="nb-col-hd"><b style="white-space:nowrap">投研成果编制中心</b><span class="grow"></span>
+      <button class="btn sm pri" style="white-space:nowrap" data-act="nb-harness-open" data-p="${p.id}" title="打开 Agentic Harness 受控思考与成套材料制作中枢">🧠 Harness 受控制作</button>
       <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-arch-open" data-p="${p.id}" title="查看五层解耦架构与 Agent×Agent 互校日志">🏗️ 底座监控</button>
-      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-dify-open" data-p="${p.id}">🏛️ 模板与配额</button>
-      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 语音路由</button></div>
+      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-dify-open" data-p="${p.id}">🏛️ 模板</button>
+      <button class="btn sm ghost" style="white-space:nowrap" data-act="nb-studio-audio" data-p="${p.id}">🎙️ 语音</button></div>
     <div class="nb-studio-pillgrid">${studioBtns.map(([k, c, l]) => `<button class="nb-pill-btn" data-act="nb-make" data-p="${p.id}" data-k="${k}">
       <span style="color:${c}">${l}</span></button>`).join('')}</div>
     <div style="padding:6px 12px;border-top:1px solid var(--line);background:#0B1528;font-size:11.5px">
@@ -362,6 +364,97 @@ Object.assign(ACT, {
     if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(txt)); toast('🎧 正在使用本机离线语音播报项目简报…', 'ok') }
     else toast(txt)
   },
+  'nb-harness-open': async el => {
+    const pid = el?.dataset?.p || S.sel
+    const draftGoal = $('#nbChatInput')?.value?.trim() || ''
+    const st = await get('nb.harness.status', { projectId: pid })
+    S.harnessSt = {
+      projectId: pid,
+      presets: st.presets || [],
+      allKinds: st.kinds || [],
+      runs: st.runs || [],
+      presetId: 'ic_full_pack',
+      goal: draftGoal || '围绕已勾选底稿进行红蓝军跨源核验，制作投委会全套上会标准材料包（IC备忘录 + 演示文稿PPT + 深度尽调Word + 对质数据表XLSX）',
+      thinkingDepth: 'deep',
+      kinds: ['ic_memo', 'ppt', 'word', 'table'],
+      pageCount: S.studioCfg?.pageCount || 8,
+      targetMB: S.studioCfg?.targetMB || 6,
+      withTianyancha: false,
+      autoSubmitStage: false,
+      plan: st.runs?.[0]?.status === 'planned' ? st.runs[0] : null,
+      lastRun: st.runs?.find(r => r.status === 'completed') || null,
+      busy: '',
+    }
+    renderHarnessDrawer()
+  },
+  'nb-harness-preset': el => {
+    if (!S.harnessSt) return
+    const pr = S.harnessSt.presets.find(x => x.id === el.value)
+    if (pr) {
+      S.harnessSt.presetId = pr.id
+      S.harnessSt.goal = pr.desc
+      S.harnessSt.kinds = [...pr.kinds]
+      S.harnessSt.thinkingDepth = pr.thinkingDepth
+      renderHarnessDrawer()
+    }
+  },
+  'nb-harness-kind': el => {
+    if (!S.harnessSt) return
+    const s = new Set(S.harnessSt.kinds)
+    el.checked ? s.add(el.dataset.k) : s.delete(el.dataset.k)
+    S.harnessSt.kinds = [...s]
+  },
+  'nb-harness-plan': async () => {
+    const h = S.harnessSt
+    if (!h) return
+    h.goal = $('#nbHGoal')?.value?.trim() || h.goal
+    h.thinkingDepth = $('#nbHDepth')?.value || 'deep'
+    h.pageCount = Number($('#nbHPages')?.value) || 8
+    h.targetMB = Number($('#nbHMB')?.value) || 6
+    h.withTianyancha = Boolean($('#nbHTyc')?.checked)
+    h.autoSubmitStage = Boolean($('#nbHSub')?.checked)
+    if (!h.kinds.length) { toast('请至少勾选 1 项要制作的成果材料', 'warn'); return }
+    h.busy = '① 正在执行受控思考：盘点 A/B/C 底稿证据等级、预判红蓝军冲突并规划制作蓝图…'
+    renderHarnessDrawer()
+    const plan = await act('nb.harness.plan', {
+      projectId: h.projectId, goal: h.goal, thinkingDepth: h.thinkingDepth,
+      kinds: h.kinds, pageCount: h.pageCount, targetMB: h.targetMB,
+      withTianyancha: h.withTianyancha, autoSubmitStage: h.autoSubmitStage,
+      fileIds: S.ctx.fileIds,
+    }, '🧠 Harness 受控思考蓝图已生成，请审阅各步决策后点击执行制作')
+    h.busy = ''
+    if (plan) h.plan = plan
+    renderHarnessDrawer()
+  },
+  'nb-harness-run': async () => {
+    const h = S.harnessSt
+    if (!h) return
+    h.goal = $('#nbHGoal')?.value?.trim() || h.goal
+    h.thinkingDepth = $('#nbHDepth')?.value || 'deep'
+    h.pageCount = Number($('#nbHPages')?.value) || 8
+    h.targetMB = Number($('#nbHMB')?.value) || 6
+    h.withTianyancha = Boolean($('#nbHTyc')?.checked)
+    h.autoSubmitStage = Boolean($('#nbHSub')?.checked)
+    if (!h.kinds.length) { toast('请至少勾选 1 项要制作的成果材料', 'warn'); return }
+    h.busy = `② Harness 正在调用操作与制作引擎编译 ${h.kinds.length} 份完整材料（含 Agent×Agent 互校与 ZIP/XML 质检自愈）…`
+    renderHarnessDrawer()
+    const res = await act('nb.harness.run', {
+      projectId: h.projectId, planId: h.plan?.id, goal: h.goal, thinkingDepth: h.thinkingDepth,
+      kinds: h.kinds, pageCount: h.pageCount, targetMB: h.targetMB,
+      withTianyancha: h.withTianyancha, autoSubmitStage: h.autoSubmitStage,
+      theme: S.studioCfg?.theme || 'mck', density: S.studioCfg?.density || 'standard',
+      fileIds: S.ctx.fileIds,
+    })
+    h.busy = ''
+    if (res) {
+      h.lastRun = res
+      h.plan = null
+      toast(`✅ Harness 受控制作完成：共交付 ${res.artifacts?.length || 0} 份完整材料并通过质检门禁`, 'ok')
+      S.project = await get('project', { id: h.projectId })
+      hooks.refresh()
+      renderHarnessDrawer()
+    }
+  },
 })
 
 document.addEventListener('keydown', e => { if (e.target?.id === 'nbChatInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); ACT['nb-chat-send']() } })
@@ -398,5 +491,58 @@ function renderDifyDrawer() {
         <span class="grow"></span>
         <button class="btn pri" data-act="nb-dify-run">▶ 立即执行此机构标准工作流</button>
       </div>
+    </div>`, true)
+}
+
+function renderHarnessDrawer() {
+  const h = S.harnessSt
+  if (!h) return
+  const plan = h.plan
+  const run = h.lastRun
+  drawer(`${drawerHead('🧠 Agentic Harness · 受控思考与成套材料操作执行中枢', '透明思考链规划 · 操作能力调用制作能力（天眼查穿透 × 红蓝军互校 × 9类成品编译 × 解压体积质检自愈 × 阶段报送）')}
+    <div class="body">
+      ${h.busy ? `<div class="box" style="margin-bottom:10px;border-color:#3B82F6;background:#0F1E3A"><div class="row"><span class="spin"></span><b>${esc(h.busy)}</b></div></div>` : ''}
+      <div class="grid2" style="margin-bottom:8px">
+        <label class="f">预设成套任务包
+          <select class="select" data-act="nb-harness-preset">${h.presets.map(p => `<option value="${p.id}" ${p.id === h.presetId ? 'selected' : ''}>📦 ${esc(p.name)}</option>`).join('')}</select></label>
+        <label class="f">思考控制深度（Controllable Thinking）
+          <select class="select" id="nbHDepth">
+            <option value="deep" ${h.thinkingDepth === 'deep' ? 'selected' : ''}>🔬 Deep · 深度反思 + 红蓝军互校 + 自愈质检</option>
+            <option value="balanced" ${h.thinkingDepth === 'balanced' ? 'selected' : ''}>⚖️ Balanced · 标准规划 + 原文数字核对</option>
+            <option value="fast" ${h.thinkingDepth === 'fast' ? 'selected' : ''}>⚡ Fast · 规则快速规划直出</option>
+          </select></label>
+      </div>
+      <label class="f" style="margin-bottom:8px">本次制作目标与定制重点（Harness 将据此分配每份材料的叙事重心）
+        <textarea class="input area" id="nbHGoal" style="height:62px">${esc(h.goal)}</textarea></label>
+      <div class="box" style="margin-bottom:8px">
+        <div class="row" style="margin-bottom:6px"><b>🛠️ 勾选需调用的成果制作能力（可多选组合）</b><span class="grow"></span>
+          <span class="dim" style="font-size:11.5px">页数/章 <input class="input sm" id="nbHPages" type="number" min="4" max="24" value="${h.pageCount}" style="width:54px;display:inline-block"> · 目标体积 <input class="input sm" id="nbHMB" type="number" min="3" max="35" value="${h.targetMB}" style="width:54px;display:inline-block"> MB</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">${h.allKinds.map(k => `<label class="wcard" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 8px">
+          <input type="checkbox" data-act="nb-harness-kind" data-k="${k.id}" ${h.kinds.includes(k.id) ? 'checked' : ''}>
+          <span style="font-size:12px">${esc(k.label)}</span></label>`).join('')}</div>
+        <div class="row" style="margin-top:8px;gap:16px">
+          <label class="dim"><input type="checkbox" id="nbHTyc" ${h.withTianyancha ? 'checked' : ''}> 🔍 先调用天眼查七维穿透补齐 A 级商事司法底稿</label>
+          <label class="dim"><input type="checkbox" id="nbHSub" ${h.autoSubmitStage ? 'checked' : ''}> 📤 质检达标后自动挂接报送至当前阶段工作项</label>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:10px;gap:8px">
+        <button class="btn" data-act="nb-harness-plan" ${h.busy ? 'disabled' : ''}>① 先生成受控思考蓝图（可审阅）</button>
+        <button class="btn pri grow" data-act="nb-harness-run" ${h.busy ? 'disabled' : ''}>▶ ${plan ? '审批通过并按此蓝图制作全套材料' : '一键受控思考并制作全套完整材料'}</button>
+      </div>
+      ${plan ? `<div class="box" style="margin-bottom:10px;border-color:#60A5FA">
+        <div class="row"><b>🧭 已生成的受控思考蓝图（${esc(plan.engine)}）</b><span class="grow"></span>
+          <span class="tag blue">A级${plan.sourceSummary?.gradeA || 0} / B级${plan.sourceSummary?.gradeB || 0} / C级${plan.sourceSummary?.gradeC || 0} 底稿</span></div>
+        <div style="margin-top:6px;font-size:12px"><b>核心立论：</b>${esc(plan.coreThesis)}</div>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">${(plan.thoughtSteps || []).map(s => `<div class="wcard"><div class="row"><span class="tag blue">${esc(s.phase)}</span><span class="dim" style="font-size:11.5px">➔ ${esc(s.decision)}</span></div><div style="font-size:11.5px;margin-top:3px">${esc(s.thought)}</div></div>`).join('')}</div>
+        ${plan.gaps?.length ? `<div class="dim" style="margin-top:6px;font-size:11.5px">⚠️ 识别到的证据缺口：${plan.gaps.map(esc).join('；')}</div>` : ''}
+      </div>` : ''}
+      ${run ? `<div class="box" style="border-color:#10B981">
+        <div class="row"><b>✅ 最近一次成套材料交付与质检报告（耗时 ${(run.elapsedMs / 1000).toFixed(1)}s · 锚定率 ${run.meshSummary?.anchorRate ?? 100}%）</b></div>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">${(run.qualityGate || []).map(q => `<div class="wcard row">
+          <span class="pill ${q.passed ? 'st-4' : 'st-2'}">${q.passed ? '✓ 质检通过' : '需复核'}</span>
+          <b class="ell grow">${esc(q.name)}</b>
+          <span class="dim" style="font-size:11.5px">${esc(q.detail)}</span></div>`).join('')}</div>
+        ${run.submissions?.length ? `<div style="margin-top:6px;font-size:11.5px;color:#34D399">📤 已自动报送阶段工作项：${run.submissions.map(s => `${esc(s.workType)}(v${s.version})`).join('、')}</div>` : ''}
+      </div>` : ''}
     </div>`, true)
 }

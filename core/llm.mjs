@@ -131,7 +131,8 @@ export function openaiLlm({ baseURL, apiKey, model, dialect, retryDelay = 1000 }
   const host = ok ? new URL(baseURL).host : ''
   const deepseek = (dialect ?? (/(^|\.)deepseek\.com$/.test(ok ? new URL(baseURL).hostname : '') ? 'deepseek' : '')) === 'deepseek'
   const label = deepseek && host.endsWith('deepseek.com') ? `DeepSeek · ${model}` : `${host} · ${model}`
-  const thinking = reasoning => !deepseek ? {} : reasoning === 'off' ? { thinking: { type: 'disabled' } } : { thinking: { type: 'enabled' }, reasoning_effort: reasoning ?? 'high' }
+  // reasoning_effort 只有 low / high / max（api-docs.deepseek.com），其他写法一律按 high
+  const thinking = reasoning => !deepseek ? {} : reasoning === 'off' || reasoning === 'none' ? { thinking: { type: 'disabled' } } : { thinking: { type: 'enabled' }, reasoning_effort: ['low', 'high', 'max'].includes(reasoning) ? reasoning : 'high' }
   // 限流 / 服务繁忙 / 网络错误在开始输出前最多重试 2 次；配置类错误立即返回
   async function post(body, signal) {
     for (let attempt = 0; ; attempt++) {
