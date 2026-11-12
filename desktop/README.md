@@ -14,12 +14,14 @@
 ## 开发与打包
 
 ```bash
-pnpm install          # 依赖安装在本目录（node-linker=hoisted）
-pnpm start            # 开发运行
-pnpm run dist         # 产出 dist/ 下的 Mac（arm64、x64 dmg）与 Windows（x64 NSIS exe）安装包
+npm install           # 打包工具装在本目录
+npm start             # 开发运行
+npm run dist          # 产出 dist/ 下的 Mac（arm64、x64 dmg）与 Windows（x64 NSIS exe）安装包
 ```
 
-在 Mac 上即可同时打包两个平台，不需要 Wine。`pnpm run dist:mac` / `dist:win` 只打一个平台。
+在 Mac 上即可同时打包两个平台，不需要 Wine。`npm run dist:mac` / `dist:win` 只打一个平台。
+
+本目录用 npm，不要放 `pnpm-lock.yaml`：electron-builder 见到它会去调 pnpm，没装 pnpm 的机器（包括 CI）打包会失败。应用自身的依赖由 `scripts/prepare.mjs` 装进 `app-src/node_modules`。
 
 ## 签名
 

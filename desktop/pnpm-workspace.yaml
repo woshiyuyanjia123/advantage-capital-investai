@@ -1,6 +1,0 @@
-# pnpm 11：哪些依赖允许运行安装脚本
-allowBuilds:
-  electron: true            # 下载 Electron 运行时
-  electron-winstaller: false # 只用于 Squirrel 安装包；本项目用 NSIS，不需要
-# electron-builder 的依赖 @electron/node-gyp 来自 git 仓库（Electron 官方组织）
-blockExoticSubdeps: false
