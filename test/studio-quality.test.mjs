@@ -1,14 +1,15 @@
 // 成果编制的质量约束：内容来自底稿、数字可核对、模型失败时如实退回摘编。
+import './helpers.mjs' // 先把密钥文件指到临时目录，再加载后端
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createCore } from '../core/index.mjs'
-import { prepareSources, checkNumbers, numbersIn } from '../core/nb-ground.mjs'
-import { normalizeDeck, buildOfflineDeck, renderDeck, deckText } from '../core/nb-deck.mjs'
-import { unzipAll } from '../core/office.mjs'
+const { createCore } = await import('../core/index.mjs')
+const { prepareSources, checkNumbers, numbersIn } = await import('../core/nb-ground.mjs')
+const { normalizeDeck, buildOfflineDeck, renderDeck, deckText } = await import('../core/nb-deck.mjs')
+const { unzipAll } = await import('../core/office.mjs')
 
 const req = (op, body, method = body ? 'POST' : 'GET') => new Request(
   `http://127.0.0.1/api/investai?${new URLSearchParams(method === 'GET' ? { op, ...(body || {}) } : { op })}`,
@@ -73,9 +74,7 @@ test('Q4 模型给的页面会被清洗：坏块和空页去掉，图表数值�
   assert.equal(deck.slides[0].blocks[0].items[0].text, '内容')
 })
 
-test('Q5 分步撰稿模块与 Agent×Agent 生产管线协同：authorDeck 先定提纲再分批撰写（坏 JSON 自动重试），Studio 9 大类成品均含 checkNumbers 原文数字核对且 PPT >= 3MB', async () => {
-  const { authorDeck } = await import('../core/nb-author.mjs')
-  const { openaiLlm } = await import('../core/llm.mjs')
+test('Q5 接上模型：先定提纲再分批撰写，坏 JSON 重试；模型不可用时退回摘编并写明原因', async () => {
   const calls = []
   let bad = true
   const server = createServer(async (rq, rs) => {
@@ -87,8 +86,8 @@ test('Q5 分步撰稿模块与 Agent×Agent 生产管线协同：authorDeck 先�
     let out = '正常'
     if (user.includes('安排一份')) out = JSON.stringify({ subtitle: '测试结论', stats: [], slides: [{ no: 1, kicker: '判断', title: '第一页的判断', purpose: 'p', evidence: 'e', form: 'f' }, { no: 2, kicker: '数据', title: '第二页的判断', purpose: 'p', evidence: 'e', form: 'f' }], gaps: ['缺订单台账'] })
     else if (user.includes('现在写第')) out = bad ? (bad = false, '这不是 JSON') : JSON.stringify({ slides: [
-      { no: 1, title: '第一页的判断', blocks: [{ type: 'points', items: [{ head: '要点', text: '毛利率降至 17% [3]，同行平均 35%。' }] }], takeaway: '判断一', cites: [3], notes: '讲稿' },
-      { no: 2, title: '第二页的判断', blocks: [{ type: 'stats', items: [{ value: '45 亿元', label: '投前估值' }, { value: '1.2 亿元', label: '本轮融资' }] }], takeaway: '判断二', cites: [1], notes: '讲稿' },
+      { no: 1, title: '第一页的判断', blocks: [{ type: 'points', items: [{ head: '要点', text: '海外收入占比 22% [1]，同行平均 35%。' }] }], takeaway: '判断一', cites: [1], notes: '讲稿' },
+      { no: 2, title: '第二页的判断', blocks: [{ type: 'stats', items: [{ value: '45 亿元', label: '投前估值' }, { value: '5 亿元', label: '本轮融资' }] }], takeaway: '判断二', cites: [1], notes: '讲稿' },
     ] })
     rs.writeHead(200, { 'content-type': 'text/event-stream' })
     rs.end(`data: ${JSON.stringify({ choices: [{ delta: { content: out } }] })}\n\ndata: [DONE]\n\n`)
@@ -97,28 +96,41 @@ test('Q5 分步撰稿模块与 Agent×Agent 生产管线协同：authorDeck 先�
   const dir = await mkdtemp(join(tmpdir(), 'nb-q-'))
   const core = await createCore({ dir, mode: 'dsh' })
   try {
-    // 1. 直接验证 authorDeck 分步撰稿模块：给足输出额度、传入底稿原文、坏 JSON 自动重试
-    const G = prepareSources(P, DOCS)
-    const fakeAdapter = openaiLlm({ baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'k', model: 'fake' })
-    const deckRes = await authorDeck(fakeAdapter, P, DOCS, { pageCount: 4 })
-    assert.ok(deckRes.deck, 'authorDeck 分步撰稿成功')
+    const st = await call(core, 'state')
+    const p = st.projects.find(x => x.name.includes('衡远')) ?? st.projects[0]
+    // 未配置模型：摘编，并说明原因
+    const off = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ppt' })
+    assert.equal(off.engine, '底稿摘编')
+    assert.ok(off.engineNote && off.summary.includes('底稿摘编'))
+    assert.equal(off.check.unmatched.length, 0)
+    assert.ok(off.bytes < 1024 * 1024)
+
+    await call(core, 'nb.api.connect', { mode: 'local', localBaseURL: `http://127.0.0.1:${server.address().port}/v1`, localModel: 'fake' })
+    const art = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ppt', pageCount: 4 })
+    assert.match(art.engine, /fake/)
+    assert.equal(art.pages, 4)
     const plan = calls.find(c => c.user.includes('安排一份'))
     assert.ok(plan.max >= 16000, '给足输出额度')
     assert.ok(plan.user.includes('【底稿 [1]') && plan.user.includes('2,700'), '提纲阶段拿到底稿原文')
     assert.equal(calls.filter(c => c.user.includes('现在写第')).length, 2, '坏 JSON 重试一次')
-    assert.equal(checkNumbers(deckText(deckRes.deck), G.corpus).unmatched[0]?.value, '35', '模型写出的底稿外数字被 checkNumbers 准确捕获')
+    assert.deepEqual(art.check.unmatched.map(u => u.value), ['35'], '模型写出的底稿外数字被列出来')
+    const xml = await slidesText(await readFile(art.fullPath))
+    assert.ok(xml.includes('第一页的判断') && xml.includes('判断二') && xml.includes('缺订单台账'))
 
-    // 2. 验证 Studio 生产管线：PPT >= 3MB，含 checkNumbers 数字核对与 Agent×Agent 签章
-    const st = await call(core, 'state')
-    const p = st.projects.find(x => x.name.includes('衡远')) ?? st.projects[0]
-    const ppt = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ppt', pageCount: 6, targetMB: 4 })
-    assert.ok(ppt.bytes >= 3 * 1024 * 1024, `生产级 PPT 必须 >= 3MB，实测 ${(ppt.bytes / 1048576).toFixed(2)}MB`)
-    assert.ok(ppt.check && typeof ppt.check.matched === 'number', '返回原文数字核对结果')
-    assert.equal(ppt.pages, 6)
-
-    for (const kind of ['word', 'ic_memo', 'table', 'mindmap', 'flashcards', 'quiz', 'audio', 'video']) {
+    // 模型挂掉：退回摘编，不报错，不冒充模型
+    await new Promise(r => server.close(r))
+    const down = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'word' })
+    assert.equal(down.engine, '底稿摘编')
+    assert.ok(down.engineNote)
+    const memo = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ic_memo' })
+    assert.ok(memo.name.endsWith('.docx'))
+    for (const kind of ['table', 'mindmap', 'flashcards', 'quiz', 'audio', 'video', 'infographic']) {
       const a = await call(core, 'nb.studio.make', { projectId: p.id, kind })
       assert.ok(a.bytes > 500 && a.summary, kind)
+      if (a.name.endsWith('.html')) {
+        const html = await readFile(a.fullPath, 'utf8')
+        for (const junk of ['国产替代', '订单饱满', '高复购']) assert.ok(!html.includes(junk), `${kind} 不应出现编造的「${junk}」`)
+      }
     }
   } finally {
     server.close()

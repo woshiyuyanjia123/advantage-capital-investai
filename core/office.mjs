@@ -2,11 +2,11 @@
 // 依赖均为宽松许可：docx(MIT)、pptxgenjs(MIT)、exceljs(MIT)、pdfjs-dist(Apache-2.0)。
 import { deflateRawSync, inflateRawSync, crc32 } from 'node:zlib'
 import { officeText } from './zip.mjs'
-import { renderProPptx } from './nb-ppt-pro.mjs'
+import { renderDeck, deckFromOutline } from './nb-deck.mjs'
 import { fileURLToPath } from 'node:url'
 import { join, sep } from 'node:path'
 
-const FONT = 'Microsoft YaHei'
+const FONT = process.platform === 'darwin' ? 'Songti SC' : 'SimSun'
 
 // ───────── Markdown → 结构块 ─────────
 export function blocks(md) {
@@ -49,11 +49,11 @@ export async function renderDocx({ title, subtitle, markdown, footer }) {
     ...(subtitle ? [new Paragraph({ children: run(subtitle, { size: 20, color: '666666' }), alignment: AlignmentType.CENTER, spacing: { after: 320 } })] : []),
   ]
   for (const b of blocks(markdown)) {
-    if (b.t === 'h') children.push(new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][b.level - 1] ?? HeadingLevel.HEADING_3, children: run(plain(b.text), { bold: true, size: [32, 28, 24, 22][b.level - 1], color: '0F2A56' }), spacing: { before: 280, after: 140 }, ...(b.level <= 2 ? { border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'BFDBFE' } } } : {}) }))
+    if (b.t === 'h') children.push(new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][b.level - 1] ?? HeadingLevel.HEADING_3, children: run(plain(b.text), { bold: true, size: [32, 28, 24, 22][b.level - 1], color: '1B1A17' }), spacing: { before: 320, after: 140 }, ...(b.level <= 2 ? { border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '1B1A17' } } } : {}) }))
     else if (b.t === 'li') children.push(new Paragraph({ bullet: { level: 0 }, children: run(b.text), spacing: { line: 340, after: 80 } }))
-    else if (b.t === 'quote') children.push(new Paragraph({ children: run(b.text, { color: '1E3A8A', size: 20 }), indent: { left: 280, right: 200 }, spacing: { before: 120, after: 140 }, shading: { fill: 'F0F6FF' }, border: { left: { style: BorderStyle.SINGLE, size: 18, color: '2563EB' } } }))
+    else if (b.t === 'quote') children.push(new Paragraph({ children: run(b.text, { color: '5F5B52', size: 20 }), indent: { left: 280, right: 200 }, spacing: { before: 120, after: 140 }, border: { left: { style: BorderStyle.SINGLE, size: 18, color: '2D5A4A' } } }))
     else if (b.t === 'table') {
-      const cell = (t, head, odd) => new TableCell({ children: [new Paragraph({ children: run(plain(t), { bold: head, size: 20, color: head ? 'FFFFFF' : '1E293B' }), spacing: { before: 60, after: 60 } })], shading: head ? { fill: '0F2A56' } : odd ? { fill: 'F8FAFC' } : undefined })
+      const cell = (t, head, odd) => new TableCell({ children: [new Paragraph({ children: run(plain(t), { bold: head, size: 20, color: '1B1A17' }), spacing: { before: 60, after: 60 } })], shading: head ? { fill: 'EFECE4' } : undefined })
       children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ children: b.head.map(h => cell(h, true, false)), tableHeader: true }), ...b.rows.map((r, ri) => new TableRow({ children: b.head.map((_, i) => cell(r[i] ?? '', false, ri % 2 === 1)) }))] }))
       children.push(new Paragraph({ children: [], spacing: { after: 120 } }))
     } else children.push(new Paragraph({ children: run(b.text), spacing: { line: 340, after: 110 }, ...(b.text.length > 40 ? { indent: { firstLine: 420 } } : {}) }))
@@ -164,9 +164,9 @@ export function markdownToSlides(md) {
   return out
 }
 
-export async function renderPptx({ title, subtitle, markdown, slides: given, sources = [], theme = 'mck', pageCount = 8, targetMB = 6, density = 'standard' }) {
-  const list = given ?? markdownToSlides(markdown)
-  return renderProPptx({ title, subtitle, slides: list.map(s => ({ title: s.title, bullets: (s.items ?? s.bullets ?? []).map(x => typeof x === 'string' ? x : x.text).filter(Boolean) })), sources, theme, pageCount, targetMB, density })
+export async function renderPptx({ title, subtitle, markdown, slides: given, sources = [], theme = 'mck' }) {
+  const list = given?.length ? given : markdownToSlides(markdown ?? '')
+  return renderDeck(deckFromOutline({ title, subtitle, slides: list.map(s => ({ title: s.title, bullets: (s.items ?? s.bullets ?? []).map(x => typeof x === 'string' ? x : x.text).filter(Boolean) })), sources }), { theme })
 }
 export async function renderPptxLegacy({ title, subtitle, markdown, slides: given }) {
   const { default: PptxGenJS } = await import('pptxgenjs')

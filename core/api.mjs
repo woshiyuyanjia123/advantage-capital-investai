@@ -27,9 +27,8 @@ import { buildFollowUps, generateStudioArtifact } from './nb-studio-gen.mjs'
 import { buildFlowBoardState, submitArtifactToNode } from './nb-flow-board.mjs'
 import { getOsState, dispatchAgentOs, inlineCoCreateRewrite, toggleAutoTask } from './nb-qwen-os.mjs'
 import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow, getEnterpriseGovState } from './nb-dify-dsl.mjs'
-import { TYC_DIMENSIONS, runTianyanchaDueDiligence } from './nb-tianyancha.mjs'
+import { TYC_DIMENSIONS, runTianyanchaDueDiligence, tianyanchaConfigured } from './nb-tianyancha.mjs'
 import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
-import { readLocalCarbonConfig } from './nb-api.mjs'
 import { planHarnessExecution, runHarnessPipeline, getHarnessStatus } from './nb-harness.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
@@ -249,7 +248,7 @@ export function createApi(ctx) {
     'nb.os.dispatch': (user, b) => dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
     'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
-    'nb.dify.run': (user, b) => runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
+    'nb.dify.run': (user, b) => runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.tyc.query': (user, b) => runTianyanchaDueDiligence({ db, kb, org }, user, project(user, b.projectId), b),
     'nb.folder.open': (user, b) => {
       const p = project(user, b.projectId)
@@ -587,37 +586,44 @@ export function createApi(ctx) {
     'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.harness.status': (user, q) => getHarnessStatus({ db }, q.get('projectId') ? project(user, q.get('projectId')) : null),
-    'nb.tyc.meta': () => ({ dimensions: TYC_DIMENSIONS }),
+    'nb.tyc.meta': async () => ({ dimensions: TYC_DIMENSIONS, configured: await tianyanchaConfigured() }),
     'nb.artifact.preview': async (user, q) => {
       const p = project(user, q.get('projectId'))
+      // 只预览本项目登记过的成品：按登记记录里的路径读，不读请求里给的任意路径
       const fp = String(q.get('fp') || '')
-      if (!fp || !fp.includes(p.id)) throw fail('非法成果路径', 403)
-      const parsed = await previewAnyArtifact(fp)
-      const mesh = db.get('kvstate', `mesh_${p.id}`) ?? null
-      return { ...parsed, mesh }
+      const art = (db.get('kvstate', `artifacts_${p.id}`)?.list ?? []).find(a => a.fullPath === fp || a.name === q.get('name'))
+      if (!art) throw fail('只能预览本项目文件夹里的成品', 403)
+      const parsed = await previewAnyArtifact(art.fullPath)
+      return { ...parsed, artifact: { name: art.name, kind: art.kind, summary: art.summary, engine: art.engine, engineNote: art.engineNote, check: art.check ?? null, workType: art.workType ?? null } }
     },
     'nb.arch.status': async (user, q) => {
       const pid = q.get('projectId')
-      const p = pid ? db.get('projects', pid) : visibleProjects(user)[0]
-      const mStat = await ai.status().catch(() => ({}))
-      const carbon = readLocalCarbonConfig('medium')
-      const gov = getEnterpriseGovState(db, user)
-      const mesh = p ? db.get('kvstate', `mesh_${p.id}`) : null
+      const p = pid ? project(user, pid) : visibleProjects(user)[0]
+      const mStat = await ai.status().catch(e => ({ ok: false, note: e.message }))
+      const s = db.get('settings', 'main')?.models ?? {}
+      const gov = getEnterpriseGovState(db, user, org)
+      const mesh = p ? db.get('kvstate', `mesh_${p.id}`) ?? null : null
+      const runs = p ? db.get('kvstate', `harness_runs_${p.id}`)?.runs ?? [] : []
+      const lastRun = runs.find(r => r.status === 'completed') ?? null
+      const arts = p ? db.get('kvstate', `artifacts_${p.id}`)?.list ?? [] : []
+      const files = p ? kb.list(user, { companyId: p.companyId }).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/.versions/') && !f.rel.includes('/Studio成品/')) : []
+      const mounts = db.all('mounts')
       const recentChanges = db.recent(12)
+      const LV = ['公开', '内部', '机密', '绝密']
+      // 每一层只报能查到的实际状态
       return {
         layers: [
-          { layer: '01 接入层 · 多端融合工作台', tech: 'Electron 桌面端 / Web SaaS / DSH 插件', desc: '三界面贯通：项目总览 · 三栏溯源工作台 · 阶段门禁与投决中心', ok: true },
-          { layer: '02 接口层 · 统一 API 网关', tech: 'HTTP REST + 400ms 实时流式作业同步', desc: '支持建任务、天眼查补料、在线精修、全格式直览、快照回滚', ok: true },
-          { layer: '03 编排层 · Agent×Agent Runtime', tech: '情报×撰写×蓝军质检 网状互校 + 7套机构DSL', desc: 'A/B/C 底稿证据效力分级 · 跨源矛盾对质 · 企业级月度配额门禁', ok: true },
-          { layer: '04 执行层 · 异步作业与持久化池', tech: '非阻塞 Worker 队列 · 版本链 · 审计快照', desc: '9 类成果异步落盘项目档案室，每次变更自动生成可回滚快照', ok: true },
-          { layer: '05 模型层 · 密级感知混合路由', tech: carbon ? `Carbon (${carbon.model}) + DeepSeek + 离线引擎` : `${mStat.label || 'DeepSeek'} + 本地离线引擎`, desc: '机密底稿可锁死本机推理；云端与本地网关无感热切换', ok: true },
+          { layer: '界面', tech: ({ desktop: '桌面版', saas: '网页版（多人登录）', dsh: 'DSH 插件' })[mode] ?? mode, desc: `当前登录：${user.name}（${user.title ?? ''}）`, ok: true },
+          { layer: '底稿与文件', tech: `${mounts.length} 个存储位置`, desc: p ? `「${p.name}」有 ${files.length} 份底稿、${arts.length} 份成品` : '还没有项目', ok: mounts.length > 0 },
+          { layer: '成果编制', tech: '底稿整理、模型撰稿、数字核对', desc: lastRun ? `最近一次成套制作：${new Date(lastRun.completedAt).toLocaleString('zh-CN')}，${lastRun.qualityGate?.filter(x => x.passed).length ?? 0}/${lastRun.qualityGate?.length ?? 0} 份通过质检` : '这个项目还没有做过成套制作', ok: true },
+          { layer: '流程与留痕', tech: '阶段门禁、版本、变更记录', desc: recentChanges.length ? `最近一条变更：${recentChanges[0]?.reason ?? recentChanges[0]?.action ?? ''}` : '还没有变更记录', ok: true },
+          { layer: '模型', tech: mStat.ok ? mStat.label : '未连接', desc: mStat.ok ? `${({ local: '只用本机模型', hybrid: '混合：按密级决定', external: '外部模型' })[s.mode] ?? s.mode ?? ''}；${LV[s.sensitiveLevel ?? 2] ?? '机密'}及以上的底稿只在本机处理` : (mStat.note || '没有可用模型，成品按底稿原文摘编'), ok: !!mStat.ok },
         ],
-        carbonOnline: !!carbon,
-        carbonModel: carbon?.model || null,
         modelStatus: mStat,
         quota: gov.quota,
         caps: org.capabilities(user),
         mesh,
+        lastRun: lastRun ? { id: lastRun.id, at: lastRun.completedAt, goal: lastRun.goal, engine: lastRun.engine, anchorRate: lastRun.anchorRate, qualityGate: lastRun.qualityGate } : null,
         recentChanges,
       }
     },

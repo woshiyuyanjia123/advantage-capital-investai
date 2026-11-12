@@ -34,8 +34,8 @@ export async function dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai
   st.messages.push({ id: `m_${Date.now()}_u`, sender: `${user.name}（${user.title || '项目组'}）`, role: 'human', badge: '钉钉/项目群', at: Date.now(), text })
   const actions = ['💬 IM 群聊上下文已同步']
   const wantKind = /ppt|演示|幻灯片/i.test(text) ? 'ppt' : /表|excel|xlsx|台账/i.test(text) ? 'table' : 'word'
-  const art = await generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, { kind: wantKind, fileIds: b.fileIds, prompt: text, pageCount: b.pageCount || 8, targetMB: b.targetMB || 6 })
-  actions.push(`📄 Office 已更新：《${art.name}》(${(art.bytes / 1048576).toFixed(2)} MB)`)
+  const art = await generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, { kind: wantKind, fileIds: b.fileIds, prompt: text, pageCount: b.pageCount || 8 })
+  actions.push(`已生成《${art.name}》：${art.summary}`)
 
   const coeditOn = st.autoTasks.find(x => x.id === 'at_dws_coedit')?.enabled
   let flowRes = null

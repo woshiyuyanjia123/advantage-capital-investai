@@ -459,7 +459,7 @@ ACT['top-settings-menu'] = el => {
   const dir = d.mounts.find(m => m.kind === 'nas') ?? d.mounts.find(m => m.kind === 'local')
   menuAt(el, [
     mi('nb-api', '模型连接', {}, { ic: 'spark' }),
-    mi('nb-arch-open', '五层架构与互校监控', {}, { ic: 'shield' }),
+    mi('nb-arch-open', '运行状态', {}, { ic: 'shield' }),
     mi('persona', d.mode === 'saas' ? '账户' : '切换岗位', {}, { ic: 'user' }),
     '<hr>',
     mi('go', '机构治理与模型配置', { view: 'settings' }, { ic: 'set' }),

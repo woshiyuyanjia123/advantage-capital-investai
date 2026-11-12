@@ -43,7 +43,7 @@ test('NotebookLM × FDE: flow %, plugin submit, local PPT/Word/Audio studio, not
     assert.equal(det0.followUps.length, 3)
     const pickedIds = det0.files.slice(0, 2).map(f => f.id)
     const pptArt = await call(core, 'nb.studio.make', { projectId: p.id, kind: 'ppt', fileIds: pickedIds })
-    assert.ok(pptArt.bytes >= 3 * 1024 * 1024, `Expected PPT >= 3MB, got ${pptArt.bytes}`)
+    assert.ok(pptArt.bytes > 20000 && pptArt.check.unmatched.length === 0, '成品里的数字都能在底稿里找到')
     assert.equal(pptArt.sourceCount, pickedIds.length)
     const det1 = await call(core, 'project', { id: p.id }, 'GET')
     assert.ok(det1.artifacts.items.some(a => a.name === pptArt.name))

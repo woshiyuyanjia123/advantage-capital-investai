@@ -1,82 +1,106 @@
-import test from 'node:test'
+// 全流程：天眼查工商核查 → 九类成品生成并能打开 → 按模板执行并计次 → 报送到阶段工作项 → 预览和状态接口。
+import './helpers.mjs' // 先把密钥文件指到临时目录，再加载后端
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createCore } from '../core/index.mjs'
-import { generateStudioArtifact } from '../core/nb-studio-gen.mjs'
-import { previewAnyArtifact, gradeDocCredibility } from '../core/nb-agent-mesh.mjs'
-import { runTianyanchaDueDiligence } from '../core/nb-tianyancha.mjs'
-import { runDifyWorkflow } from '../core/nb-dify-dsl.mjs'
-import { submitArtifactToNode, buildFlowBoardState } from '../core/nb-flow-board.mjs'
+const { createCore } = await import('../core/index.mjs')
+const { previewAnyArtifact, gradeDocCredibility } = await import('../core/nb-agent-mesh.mjs')
 
-test('一级市场机构 SaaS 全链路验收：天眼查穿透 · Agent×Agent 网状互校 · 9大类成品解压检阅 · 配额工作流 · 阶段门禁闭环', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'nb-saas-e2e-'))
-  const core = await createCore({ dir, mode: 'desktop', autostart: false })
+const req = (op, body, method = body ? 'POST' : 'GET') => new Request(
+  `http://127.0.0.1/api/investai?${new URLSearchParams(method === 'GET' ? { op, ...(body || {}) } : { op })}`,
+  method === 'POST' ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {},
+)
+const raw = (core, op, body, method) => core.handle(req(op, body, method))
+const call = async (core, op, body, method) => {
+  const r = await raw(core, op, body, method)
+  const j = await r.json()
+  assert.equal(r.status, 200, `${op}: ${JSON.stringify(j).slice(0, 300)}`)
+  return j
+}
+
+test('E1 全流程：没有模型时每一步都能走通，产出的内容只来自底稿', async () => {
+  // 假的天眼查接口：只认约定的 Token，返回一条工商基本信息
+  const tyc = createServer((rq, rs) => {
+    rs.writeHead(200, { 'content-type': 'application/json' })
+    if (rq.headers.authorization !== 'test-token') return rs.end(JSON.stringify({ error_code: 300002, reason: '账号失效' }))
+    rs.end(JSON.stringify({ error_code: 0, reason: 'ok', result: { name: '衡远储能科技股份有限公司', creditCode: '91440300TEST00001X', legalPersonName: '张某', regStatus: '存续', regCapital: '12000万人民币', estiblishTime: 1489939200000, regLocation: '广东省深圳市南山区' } }))
+  })
+  await new Promise(r => tyc.listen(0, '127.0.0.1', r))
+  process.env.TIANYANCHA_BASE_URL = `http://127.0.0.1:${tyc.address().port}`
+  const dir = await mkdtemp(join(tmpdir(), 'nb-e2e-'))
+  const core = await createCore({ dir, mode: 'dsh' })
   try {
-    await core.kb.scanAll()
-    const u = core.db.get('users', 'u_zhang')
-    const p = core.db.all('projects')[1] // 衡远储能 C轮
-    assert.ok(p, '测试项目存在')
+    const st = await call(core, 'state')
+    const p = st.projects.find(x => x.name.includes('衡远')) ?? st.projects[0]
 
-    // 1. 证据信用分级与天眼查七维商事司法穿透入库
+    // 1. 底稿分级只看文件名
     assert.equal(gradeDocCredibility('2025审计报告.pdf').grade, 'A')
     assert.equal(gradeDocCredibility('衡远储能商业计划书BP.pdf').grade, 'C')
-    const tyc = await runTianyanchaDueDiligence({ db: core.db, kb: core.kb }, u, p, { companyName: '衡远储能科技有限公司' })
-    assert.ok(tyc.file?.id, '天眼查穿透底稿入库成功')
-    assert.equal(gradeDocCredibility(tyc.file.name).grade, 'A')
+    assert.equal(gradeDocCredibility('访谈纪要.md').grade, 'B')
 
-    // 2. 9 大类投研成果全量实机生成 + 应用内全格式解压直览核验
+    // 2. 天眼查：没有 Token 报 400 且不生成底稿；Token 无效时把接口的原因报出来；有效时只存接口返回的字段
+    const none = await raw(core, 'nb.tyc.query', { projectId: p.id })
+    assert.equal(none.status, 400)
+    const bad = await raw(core, 'nb.tyc.query', { projectId: p.id, apiToken: 'wrong' })
+    assert.equal(bad.status, 502)
+    assert.match((await bad.json()).error, /账号失效/)
+    const ok = await call(core, 'nb.tyc.query', { projectId: p.id, apiToken: 'test-token' })
+    assert.ok(ok.file?.id && ok.fields === 7)
+    assert.ok(ok.markdown.includes('91440300TEST00001X') && ok.markdown.includes('2017-03-19') && ok.markdown.includes('司法风险：未查询'))
+    for (const junk of ['权属清晰', '零严重违法', '无拒付记录', '信用记录良好']) assert.ok(!ok.markdown.includes(junk), `不应出现没查过的结论「${junk}」`)
+
+    // 3. 九类成品都能生成、能打开，数字都能在底稿里找到
     const kinds = ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz']
+    const made = {}
     for (const k of kinds) {
-      const t0 = Date.now()
-      const art = await generateStudioArtifact(
-        { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, ai: core.ai },
-        u, p, { kind: k, pageCount: 6, targetMB: 4 }
-      )
-      console.log(`  ✔ [${k}] 生成成功: ${art.name} (${(art.bytes / 1048576).toFixed(2)}MB, ${Date.now() - t0}ms)`)
-      assert.ok(art.bytes > 1000, `${k} 成品字节有效`)
+      const art = made[k] = await call(core, 'nb.studio.make', { projectId: p.id, kind: k, pageCount: 6 })
+      assert.equal(art.engine, '底稿摘编', k)
+      if (art.check) assert.deepEqual(art.check.unmatched, [], `${k}：${JSON.stringify(art.check.unmatched)}`)
       const prev = await previewAnyArtifact(art.fullPath)
-      if (k === 'ppt') {
-        assert.ok(art.bytes >= 3 * 1024 * 1024, `PPT 体积达标 ≥3MB (实际 ${(art.bytes / 1048576).toFixed(2)}MB)`)
-        assert.equal(prev.kind, 'pptx')
-        assert.equal(prev.slides.length, 6, 'PPT 页数严格等于滑块设定的 6 页')
-        console.log('  [PPT 实机解压主标题抽检]:', prev.slides.map(s => `P${s.page}:${s.title}`).join(' | '))
-      }
-      if (k === 'word') {
-        assert.equal(prev.kind, 'docx')
-        assert.ok(prev.paras.length >= 25, `Word 报告内容充实 (${prev.paras.length} 段)`)
-      }
-      if (k === 'table') {
-        assert.equal(prev.kind, 'xlsx')
-        assert.ok(prev.sheets.some(s => s.name.includes('跨源矛盾对质台账')), 'Excel 包含第 5 张 Agent 跨源矛盾对质工作表')
-      }
-      if (k === 'ic_memo') {
-        assert.equal(prev.kind, 'html')
-        assert.ok(prev.content.includes('Agent × Agent 网状实时互校签章'), 'IC Memo 包含网状互校签章')
-        assert.ok(prev.content.includes('投决现场压力测试沙盘'), 'IC Memo 包含动态估值敏感性滑块沙盘')
-      }
+      if (k === 'ppt') { assert.equal(prev.kind, 'pptx'); assert.ok(prev.slides.length >= 3); assert.ok(art.bytes < 1024 * 1024) }
+      if (k === 'word' || k === 'ic_memo') { assert.equal(prev.kind, 'docx'); assert.ok(prev.paras.length >= 8, `${k} 有 ${prev.paras.length} 段`) }
+      if (k === 'table') { assert.equal(prev.kind, 'xlsx'); assert.ok(prev.sheets.some(s => s.name === '数据摘录')) }
+      if (prev.kind === 'html') assert.ok(prev.content.includes('未调用模型'))
     }
+    const pptText = (await previewAnyArtifact(made.ppt.fullPath)).slides.flatMap(s => s.texts).join(' ')
+    assert.ok(pptText.includes('91440300TEST00001X') || pptText.includes('天眼查工商基本信息'), '刚存进来的天眼查底稿进入了成品')
 
-    // 3. 机构标准工作流（Dify DSL）与企业级月度配额扣减校验
-    const wf = await runDifyWorkflow(
-      { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, ai: core.ai },
-      u, p, { workflowId: 'ac_ic_memo', pageCount: 6, targetMB: 4 }
-    )
-    assert.ok(wf.artifact?.name, '机构标准工作流产出成果')
-    assert.ok(wf.gov.quota.usedCalls >= 1, '企业级调用配额账本准确扣减')
+    // 4. 预览接口只认本项目登记过的成品
+    const pv = await call(core, 'nb.artifact.preview', { projectId: p.id, fp: made.word.fullPath }, 'GET')
+    assert.equal(pv.kind, 'docx')
+    assert.equal(pv.artifact.engine, '底稿摘编')
+    assert.equal((await raw(core, 'nb.artifact.preview', { projectId: p.id, fp: join(dir, `${p.id}`, 'investai.db') }, 'GET')).status, 403)
 
-    // 4. 阶段门禁报送与定稿闭环校验
-    const pptArt = core.db.get('kvstate', `artifacts_${p.id}`).list.find(x => x.kind === 'ppt')
-    const sub = await submitArtifactToNode(
-      { db: core.db, kb: core.kb, org: core.org, deliverables: core.deliverables, lifecycle: core.lifecycle, dir },
-      u, p, { artifactPath: pptArt.fullPath, artifactName: pptArt.name, targetWorkType: '尽调报告', autoSubmitReview: true }
-    )
-    assert.ok(sub.version >= 1, '右下角成品成功报送至阶段工作项并生成版本号')
-    const board = await buildFlowBoardState({ db: core.db, org: core.org, engine: core.engine, lifecycle: core.lifecycle, dir }, u, p)
-    assert.ok(board.stages.length >= 5, '多阶段门禁看板状态完整')
-    assert.ok(core.db.recent(10).length > 0, '工程化底座审计快照留痕完整')
+    // 5. 模板：编制要求可以改，次数从 0 开始按实际执行累计
+    const t0 = await call(core, 'nb.dify.templates', { projectId: p.id }, 'GET')
+    assert.equal(t0.quota.usedCalls, 0)
+    assert.ok(t0.templates.every(t => t.usageCount === 0))
+    assert.ok(t0.sampleYaml.includes('反方意见'))
+    const wf = await call(core, 'nb.dify.run', { projectId: p.id, workflowId: 'ac_ic_ppt', brief: '只讲诉讼风险', pageCount: 6, autoSubmit: true })
+    assert.ok(wf.artifact.name.endsWith('.pptx'))
+    assert.equal(wf.gov.quota.usedCalls, 1)
+    assert.equal(wf.gov.templates.find(t => t.id === 'ac_ic_ppt').usageCount, 1)
+    assert.deepEqual(wf.trace.map(t => t.node), ['读取底稿', '撰写', '数字核对', '报送'])
+    assert.equal(wf.submission.workType, '立项报告')
+
+    // 6. 报送：可以指定报送到哪个工作项
+    const sub = await call(core, 'nb.flow.submit', { projectId: p.id, artifactPath: made.word.fullPath, artifactName: made.word.name, autoSubmitReview: true })
+    assert.equal(sub.workType, '尽调报告')
+    const board = await call(core, 'nb.flow.board', { projectId: p.id }, 'GET')
+    assert.ok(board.stages.length >= 5)
+
+    // 7. 状态接口报的是实际情况：没有模型就是没有
+    const arch = await call(core, 'nb.arch.status', { projectId: p.id }, 'GET')
+    assert.equal(arch.layers.length, 5)
+    assert.equal(arch.layers.find(l => l.layer === '模型').ok, false)
+    assert.match(arch.layers.find(l => l.layer === '底稿与文件').desc, /份底稿/)
   } finally {
+    delete process.env.TIANYANCHA_BASE_URL
+    tyc.close()
     await core.close()
+    await rm(dir, { recursive: true, force: true })
   }
 })

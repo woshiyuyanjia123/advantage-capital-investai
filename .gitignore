@@ -12,3 +12,7 @@ secrets.json
 *.sqlite-wal
 .env
 .DS_Store
+# 桌面版打包的中间文件和产物
+desktop/app-src/
+desktop/dist/
+desktop/package-lock.json

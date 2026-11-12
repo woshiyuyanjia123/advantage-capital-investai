@@ -26,34 +26,6 @@ export function readLocalCarbonConfig(tier = 'medium') {
   } catch { return null }
 }
 
-export async function carbonComplete({ ai, tier = 'low', system = '', user = '', maxTokens = 4096, timeoutMs = 45000 }) {
-  const c = readLocalCarbonConfig(tier)
-  if (c?.apiKey) {
-    try {
-      const r = await fetch(`${c.baseURL.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${c.apiKey}` },
-        body: JSON.stringify({ model: c.model, stream: false, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
-        signal: AbortSignal.timeout(timeoutMs),
-      })
-      if (r.ok) {
-        const j = await r.json()
-        const txt = String(j?.choices?.[0]?.message?.content || '').trim()
-        if (txt && txt.toLowerCase() !== 'task ready') return { text: txt, engine: `Carbon · ${c.model}` }
-      }
-    } catch { /* 本机 8046 未就绪时无感回退 DeepSeek */ }
-  }
-  const route = await ai?.route?.(0).catch(() => ({ adapter: null }))
-  let adapter = route?.adapter
-  if (!adapter) {
-    const key = process.env.DEEPSEEK_API_KEY || readDshLocalDeepSeekKey()
-    if (key) adapter = openaiLlm({ baseURL: 'https://api.deepseek.com', apiKey: key, model: DEFAULT_MODEL })
-  }
-  if (!adapter) return { text: '', engine: '本地规则核验引擎' }
-  const text = await complete(adapter, { system, user, maxTokens, reasoning: 'off', signal: AbortSignal.timeout(timeoutMs) }).catch(() => '')
-  return { text: String(text || '').trim(), engine: `DeepSeek · ${DEFAULT_MODEL}` }
-}
-
 const LOOPBACK = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i
 const PRESETS = [
   { name: 'Carbon 高阶推理网关 (本机 8046)', baseURL: 'http://127.0.0.1:8046/v1' },

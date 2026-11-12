@@ -1,74 +1,64 @@
-// Agent × Agent 网状自主协商引擎（对标一级市场机构级底座：情报侧 × 撰写侧 × 蓝军质检侧 三方实时并发互校与反幻觉签章）
-import { parseJson } from './llm.mjs'
-import { carbonComplete } from './nb-api.mjs'
+// 交叉核对：让模型分别站在“撰写”和“反方”两个立场通读底稿，找出不同底稿对同一件事说法不一致的地方。
+// 走和成果编制相同的密级路由；没有可用模型时不产出任何结论，只返回底稿分级和原因。
+// 模型给出的每条结论都把里面的数字和底稿核对一遍，对不上的列出来。
+import { prepareSources, checkNumbers, sourceDigest, projectFacts } from './nb-ground.mjs'
+import { askJson } from './nb-author.mjs'
 
+/** 按文件名推定底稿的证据效力。只看文件名，结果仅供排序和提示，不代表内容已经核实。 */
 export function gradeDocCredibility(name = '') {
-  if (/审计|财务|财报|利润|合同|天眼查|工商/.test(name)) return { grade: 'A', label: 'A级·强公信底稿（审计/合同/工商）' }
-  if (/商业计划|BP|路演/i.test(name)) return { grade: 'C', label: 'C级·管理层自述（BP/路演材料）' }
-  return { grade: 'B', label: 'B级·尽调访谈与内部核查纪要' }
+  if (/审计|财务|财报|利润|合同|天眼查|工商/.test(name)) return { grade: 'A', label: 'A级·审计、合同、工商类' }
+  if (/商业计划|BP|路演/i.test(name)) return { grade: 'C', label: 'C级·公司自述材料' }
+  return { grade: 'B', label: 'B级·访谈与内部纪要' }
 }
 
-export function verifyNumbersAgainstDocs(text = '', docs = []) {
-  const corpus = docs.map(d => String(d.text || '').replace(/,/g, '')).join('\n')
-  const nums = [...new Set((String(text).replace(/,/g, '').match(/\d+(?:\.\d+)?(?=\s*(?:亿元|万元|%|GWh|MW|倍|家|项))/g) || []))]
-  if (!nums.length) return { total: 0, verified: 0, rate: 100, unverified: [] }
-  const unverified = nums.filter(n => !corpus.includes(n))
-  const verified = nums.length - unverified.length
-  return { total: nums.length, verified, rate: Math.round((verified / nums.length) * 100), unverified }
-}
+const clean = (v, max = 400) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
+const list = (v, max = 8) => (Array.isArray(v) ? v : []).map(x => clean(x)).filter(Boolean).slice(0, max)
 
-export async function runAgentMeshCrossCheck(ai, p, docs = []) {
+/**
+ * 返回 { engine, note, thesis, highlights, valuationNote, conflicts, redFlags, patchAdvice, numCheck, dialogs, credibilityDist, sources, elapsedMs }。
+ * engine 为空表示没有调用模型，此时 conflicts 等字段都是空的，note 写明原因。
+ */
+export async function runAgentMeshCrossCheck(ai, p, docs = [], { level } = {}) {
   const t0 = Date.now()
-  const graded = docs.map((d, i) => ({ idx: i + 1, name: d.name, ...gradeDocCredibility(d.name), snippet: String(d.text || '').slice(0, 1800) }))
-  const dist = { A: graded.filter(x => x.grade === 'A').length, B: graded.filter(x => x.grade === 'B').length, C: graded.filter(x => x.grade === 'C').length }
-  const ctxBlock = graded.map(g => `【[${g.idx}] ${g.label}：《${g.name}》】\n${g.snippet}`).join('\n\n')
+  const levelMax = level ?? docs.reduce((a, d) => Math.max(a, d.level ?? 2), 0)
+  const sources = docs.map((d, i) => ({ n: i + 1, name: d.name, ...gradeDocCredibility(d.name) }))
+  const dist = { A: sources.filter(x => x.grade === 'A').length, B: sources.filter(x => x.grade === 'B').length, C: sources.filter(x => x.grade === 'C').length }
+  const base = { at: new Date().toISOString(), engine: '', note: '', credibilityDist: dist, sources, thesis: '', highlights: [], valuationNote: '', conflicts: [], redFlags: [], patchAdvice: '', numCheck: null, dialogs: [] }
+  const done = extra => ({ ...base, ...extra, elapsedMs: Date.now() - t0 })
+  if (!docs.length) return done({ note: '没有读到底稿正文' })
+  const route = await ai?.route?.(levelMax).catch(e => ({ adapter: null, reason: e.message })) ?? { adapter: null, reason: '未配置模型' }
+  if (!route.adapter) return done({ note: `没有调用模型（${route.reason}），不同底稿之间的口径需要人工比对` })
 
-  let writerOut = null, qaOut = null, engine = '本地规则核验引擎'
-  if (graded.length) {
-    const [wRes, qRes] = await Promise.all([
-      carbonComplete({
-        ai, tier: 'low', maxTokens: 2800, timeoutMs: 38000,
-        system: '你是优势资本【撰写规划 Agent】。严格基于底稿提炼核心投资逻辑与估值锚点，只输出合法 JSON，不输出 task ready。',
-        user: `项目：${p.name}（轮次：${p.fields?.round || '未披露'}，估值：${p.fields?.valuation || '未披露'}）\n${ctxBlock}\n请输出 JSON：{"thesis":"80字核心投资主线（带[n]角标）","highlights":["亮点1 [n]","亮点2 [n]","亮点3 [n]"],"valuationNote":"估值与交易保护建议 [n]"}`,
-      }),
-      carbonComplete({
-        ai, tier: 'low', maxTokens: 2800, timeoutMs: 38000,
-        system: '你是优势资本【蓝军质检 Agent】。专门交叉比对 C级BP自述 与 A级审计/合同/工商底稿 及 B级访谈，揪出口径差额、毛利恶化与潜在 Deal-breaker，只输出合法 JSON，不输出 task ready。',
-        user: `项目：${p.name}\n${ctxBlock}\n请输出 JSON：{"conflicts":[{"topic":"冲突维度","bpClaim":"C级BP宣称 [n]","auditFact":"A/B级底稿实证 [n]","impact":"对估值或交割条款的影响"}],"redFlags":["致命风险与交割先决条件CP建议1 [n]","建议2 [n]"],"patchAdvice":"要求撰写侧修正的口径指令"}`,
-      }),
-    ])
-    engine = wRes.engine || qRes.engine || engine
-    writerOut = parseJson(wRes.text)
-    qaOut = parseJson(qRes.text)
-  }
+  const G = prepareSources(p, docs)
+  const ctx = [
+    `项目登记信息：\n${projectFacts(p).map(([k, v]) => `${k}：${v}`).join('\n') || p.name}`,
+    `底稿（共 ${docs.length} 份，括号里是按文件名推定的证据效力）：\n${sources.map(s => `[${s.n}]《${s.name}》（${s.label}）`).join('\n')}`,
+    sourceDigest(docs),
+  ].join('\n\n')
+  const rules = '只用给出的底稿。底稿里没有的事实和数字不写。引用数字保持原样并在句末标来源编号，如 [2]。没有发现就返回空数组，不要凑数。只输出 JSON。'
+  const errors = []
+  const ask = (system, user) => askJson(route.adapter, { system, user: `${ctx}\n\n${user}`, maxTokens: 12000, timeoutMs: 240000 }).catch(e => { errors.push(e.message); return null })
+  const [w, q] = await Promise.all([
+    ask(`你是优势资本的投资经理，负责把底稿里支持投资的理由讲清楚。${rules}`,
+      '通读全部底稿，输出 {"thesis":"这个项目值得上会讨论的核心理由，一两句话，带来源编号","highlights":["底稿里支持这个理由的事实，带来源编号"],"valuationNote":"底稿里和估值、交易条款有关的事实，没有就留空"}'),
+    ask(`你是优势资本投委会里专门挑毛病的委员。你的工作是找出不同底稿对同一指标、同一事实说法不一致的地方，尤其是公司自述材料和审计、合同、访谈之间的差异。${rules}`,
+      '逐项比对后输出 {"conflicts":[{"topic":"哪个指标或事实","bpClaim":"公司自述材料的说法，带来源编号","auditFact":"审计、合同或访谈的说法，带来源编号","impact":"这个差异对估值或交易条款意味着什么"}],"redFlags":["底稿里已经出现、需要在交割前解决的风险事项，带来源编号"],"patchAdvice":"撰写材料时应该统一采用哪个口径，为什么"}'),
+  ])
+  if (!w && !q) return done({ note: `模型调用失败：${errors[0] ?? '没有返回内容'}` })
 
-  const conflicts = Array.isArray(qaOut?.conflicts) && qaOut.conflicts.length ? qaOut.conflicts : [{
-    topic: '跨底稿口径交叉复核',
-    bpClaim: graded.find(g => g.grade === 'C') ? `见《${graded.find(g => g.grade === 'C').name}》预测口径` : '管理层业务预测口径',
-    auditFact: graded.find(g => g.grade === 'A') ? `已与《${graded.find(g => g.grade === 'A').name}》审定口径逐项勾稽` : '待补充审计报告原件穿行核实',
-    impact: '差额事项全部纳入投资协议交割先决条件（CP）与估值调整条款',
-  }]
-  const thesis = writerOut?.thesis || `围绕「${p.name}」已勾选 ${docs.length} 份底稿完成情报、撰写、蓝军质检三侧网状互校，核心数据均已锚定原始凭证 [1]。`
-  const numCheck = verifyNumbersAgainstDocs(`${thesis} ${JSON.stringify(conflicts)}`, docs)
+  const conflicts = (Array.isArray(q?.conflicts) ? q.conflicts : []).map(c => ({ topic: clean(c?.topic, 60), bpClaim: clean(c?.bpClaim), auditFact: clean(c?.auditFact), impact: clean(c?.impact) })).filter(c => c.topic && (c.bpClaim || c.auditFact)).slice(0, 10)
+  const out = { thesis: clean(w?.thesis, 600), highlights: list(w?.highlights), valuationNote: clean(w?.valuationNote, 600), conflicts, redFlags: list(q?.redFlags), patchAdvice: clean(q?.patchAdvice, 600) }
+  const text = [out.thesis, ...out.highlights, out.valuationNote, ...conflicts.flatMap(c => [c.bpClaim, c.auditFact, c.impact]), ...out.redFlags].join('\n')
+  const c = checkNumbers(text, G.corpus)
+  const numCheck = { ...c, rate: c.total ? Math.round((c.matched + c.derived) / c.total * 100) : null }
+  // 过程记录：只记实际发生的事
   const dialogs = [
-    { from: '01 情报侧 Agent', to: '03 撰写侧 Agent', action: '证据分级投喂', msg: `已完成 ${docs.length} 份底稿信用评级（A级强公信 ${dist.A} 份 / B级访谈 ${dist.B} 份 / C级BP ${dist.C} 份）并提取量化锚点。` },
-    { from: '04 蓝军质检 Agent', to: '01 情报侧 Agent', action: '反向补料核查', msg: `针对 C级BP 与 A级审计底稿发起交叉比对，识别出 ${conflicts.length} 处关键口径张力（${conflicts[0]?.topic || '财务与订单口径'}）。` },
-    { from: '04 蓝军质检 Agent', to: '03 撰写侧 Agent', action: '质检打回改写', msg: qaOut?.patchAdvice || `已强制要求正文按 A 级审定口径披露，并将风险项转化为交割先决条件（CP）。` },
-    { from: '02 反幻觉网关', to: '全编队合流', action: '数字溯源签章', msg: `正文量化指标原文匹配率 ${numCheck.rate}%（核验 ${numCheck.verified}/${numCheck.total} 项数字），准予签发正式成果。` },
+    { from: '底稿整理', to: '撰写', action: '分级', msg: `${docs.length} 份底稿：A 级 ${dist.A} 份，B 级 ${dist.B} 份，C 级 ${dist.C} 份（按文件名推定）；整理出表格 ${G.tables.length} 张、条目 ${G.passages.length} 条。` },
+    w ? { from: '撰写', to: '反方', action: '提出主线', msg: out.thesis || '模型没有给出主线。' } : { from: '撰写', to: '反方', action: '失败', msg: '这一步模型没有返回可用内容。' },
+    q ? { from: '反方', to: '撰写', action: '指出差异', msg: conflicts.length ? `找到 ${conflicts.length} 处说法不一致：${conflicts.map(x => x.topic).join('、')}。${out.patchAdvice}` : '没有发现不同底稿之间说法不一致的地方。' } : { from: '反方', to: '撰写', action: '失败', msg: '这一步模型没有返回可用内容。' },
+    { from: '数字核对', to: '全部', action: '核对', msg: c.total ? `以上结论里出现 ${c.total} 处数字，${c.matched} 处与底稿原文一致${c.derived ? `，${c.derived} 处写明为测算` : ''}${c.unmatched.length ? `，${c.unmatched.length} 处在底稿里没找到：${c.unmatched.map(u => u.value).join('、')}` : ''}。` : '以上结论里没有出现数字。' },
   ]
-  return {
-    at: new Date().toISOString(),
-    elapsedMs: Date.now() - t0,
-    engine,
-    credibilityDist: dist,
-    thesis,
-    highlights: Array.isArray(writerOut?.highlights) ? writerOut.highlights : [],
-    valuationNote: writerOut?.valuationNote || '',
-    conflicts,
-    redFlags: Array.isArray(qaOut?.redFlags) ? qaOut.redFlags : [],
-    numCheck,
-    dialogs,
-  }
+  return done({ engine: route.label, note: errors.length ? `有一步没有成功：${errors[0]}` : '', ...out, numCheck, dialogs })
 }
 
 export async function previewAnyArtifact(fullPath) {
@@ -93,12 +83,12 @@ export async function previewAnyArtifact(fullPath) {
   const buf = await readFile(fullPath)
   const entries = readZipXmlEntries(buf, inflateRawSync)
   if (ext === '.pptx') {
-    const NOISE = /^(ADVANTAGE CAPITAL.*|AC \/ 优势资本|PAGE \d+\/\d+|SECTION.*|0\d\s+.*|\d+)$/i
+    const NOISE = /^(\d+\s*\/\s*\d+|\d+)$/ // 页码
     const slides = Object.keys(entries).filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k))
       .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
       .map((k, idx) => {
         const rawTexts = [...entries[k].matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => decodeXml(m[1]).trim()).filter(Boolean)
-        const clean = rawTexts.filter(t => !NOISE.test(t) && !t.startsWith('底稿溯源：'))
+        const clean = rawTexts.filter(t => !NOISE.test(t) && !t.startsWith('来源：'))
         const title = clean.find(t => t.length >= 6) || rawTexts[0] || `第 ${idx + 1} 页`
         const bullets = clean.filter(t => t !== title && t.length >= 4)
         return { page: idx + 1, title, bullets, texts: rawTexts }

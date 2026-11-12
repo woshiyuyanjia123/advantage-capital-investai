@@ -22,7 +22,7 @@ const brief = (p, docs) => [
 ].join('\n\n')
 
 /** 调一次模型并取 JSON；空输出或解析失败重试一次。onUsage 累计输出字数。 */
-async function askJson(adapter, { system, user, maxTokens, timeoutMs = 360000, signal, onUsage }) {
+export async function askJson(adapter, { system, user, maxTokens, timeoutMs = 360000, signal, onUsage }) {
   let last = ''
   for (let i = 0; i < 2; i++) {
     const raw = await complete(adapter, { system, user: i ? `${user}\n\n上一次的输出不是合法 JSON。这次只输出 JSON 本身，不要任何解释。` : user, maxTokens, reasoning: 'high', signal: signal ?? AbortSignal.timeout(timeoutMs) })
@@ -94,7 +94,7 @@ stats 给 2-4 个最能说明这个项目的数字，必须出自底稿或登记
 整份汇报的安排：
 ${outlineText}
 
-现在写第 ${batch.map(s => s.no).join('、')} 页，其他页由同事在写，不要重复它们的内容。
+${prompt ? `使用者的额外要求：${prompt}\n\n` : ''}现在写第 ${batch.map(s => s.no).join('、')} 页，其他页由同事在写，不要重复它们的内容。
 ${BLOCK_GUIDE}
 篇幅：${D.point}；表格和图表里不写句子。
 每页还要有：lede（标题下的一句话，交代背景或口径，可以为空）；takeaway（这一页给投委会的判断，一句话）；cites（用到的底稿编号）；notes（${D.note}，口语，把这页的来龙去脉讲清楚，讲稿里的数字同样要有出处）。
@@ -143,7 +143,7 @@ export async function authorReport(adapter, p, docs, { type = '尽职调查报�
 报告《${p.name} ${type}》的章节安排：
 ${outlineText}
 
-现在写第 ${c.no} 章「${c.title}」。要回答：${(c.questions || []).join('；') || '见章节标题'}。可用底稿：${c.evidence || '全部'}。${c.table ? `本章需要一张表：${c.table}。` : ''}
+${prompt ? `使用者的额外要求：${prompt}\n\n` : ''}现在写第 ${c.no} 章「${c.title}」。要回答：${(c.questions || []).join('；') || '见章节标题'}。可用底稿：${c.evidence || '全部'}。${c.table ? `本章需要一张表：${c.table}。` : ''}
 写法：${D.para}。先写结论，再写依据和推理；段落为主，确有并列项时才用列表；需要表格就用 Markdown 表格，表里只放底稿里的数据。可以用三级标题（###）分小节，不要写本章标题，不要写“本章小结”。
 只输出这一章的 Markdown 正文。`,
   }))
