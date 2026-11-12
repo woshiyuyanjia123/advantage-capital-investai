@@ -1,130 +1,81 @@
-// 优势资本 · 企业级智能体治理与投研模板中心（吸收 YFGaia/dify-plus 1.17.1-plus.1 核心企业级架构）：
-// 1. 个人与部门 AI 额度管控、实时余额与消费归因（USD/RMB 双币种计量）
-// 2. 应用 API 密钥日/月限额与超额熔断（非管理员完全隐藏密钥明文、禁止普通成员关闭/篡改模型供应商）
-// 3. 机构投研应用与工作流模板中心（按全机构使用频次排序 + 管理员一键同步为机构标准模板）
-// 4. Windows CSV 编码自适应检测（UTF-8 / GB18030 / GBK 自动识别，解决 Windows Excel 保存上传乱码）
+// 机构模板：一个模板 = 一种成品 + 一段编制要求。执行时把编制要求（可以在界面上改）交给成果编制，生成的成品可以直接报送。
+// 每人每月的调用次数记在账本里，从 0 开始按实际执行累计；模板的使用次数同样只记实际执行。
 import { generateStudioArtifact } from './nb-studio-gen.mjs'
 import { submitArtifactToNode } from './nb-flow-board.mjs'
+import { checkLine } from './nb-ground.mjs'
 
 export const DIFY_WORKFLOW_TEMPLATES = [
-  {
-    id: 'ac_equity_memo',
-    name: '投委会(IC)九章深度研报备忘录流 (I–IX)',
-    category: '投委会决策汇报',
-    targetKind: 'ic_memo',
-    usageCount: 165,
-    nodes: ['底稿事实/推理/判断三段式抽取', '技术与产品三立柱定量核验', '竞争对标矩阵构建', '蓝军反驳视角(Red-Flag)质询', 'Verdict Box明确决策裁定'],
-    desc: '遵循专业券商深度研报范式（深海蓝 #1a1a4e + 米白纸面 + 罗马章节 I–IX + 5-KPI横条 + 蓝军反驳矩阵 + 首席分析师签名），拒绝主观星级打分。',
-  },
-  {
-    id: 'ac_dd_word',
-    name: '尽调报告多维穿行核验流',
-    category: '股权与Pre-IPO尽调',
-    targetKind: 'word',
-    usageCount: 148,
-    nodes: ['底稿准入抽取', '行业与阶段分流', '财务与BP交叉核验', '风险矩阵生成', '正式文书排版归档'],
-    desc: '严格依据已勾选底稿交叉核对财务、客户与历史沿革，产出深海蓝表头斑马纹正式 .docx 尽调报告。',
-  },
-  {
-    id: 'ac_ic_ppt',
-    name: '投委会(IC)立项与投决路演编排流',
-    category: '投委会决策汇报',
-    targetKind: 'ppt',
-    usageCount: 132,
-    nodes: ['底稿与规格参数注入', '核心量化指标提取', '结论先行标题规划', '双栏与Bento矩阵渲染', '高清画布路演Deck产出'],
-    desc: '按设定页数与目标体积滑块，生成封面KPI卡+三支柱金字塔+奇偶页双版式交替的可编辑 .pptx。',
-  },
-  {
-    id: 'ac_fin_xlsx',
-    name: '财务三表勾稽与大客户合同台账流',
-    category: '财务与审计穿行',
-    targetKind: 'table',
-    usageCount: 119,
-    nodes: ['财报与合同底稿读取', '原始表格无损解析', 'BP与审计口径差异计算', '四工作表XLSX台账生成'],
-    desc: '100% 原文转译利润表与大客户合同清单，自动计算口径差异并输出 4-Sheet 标准核验台账。',
-  },
-  {
-    id: 'ac_gov_ind',
-    name: '政府产业投行 · 123456资本招商研判流',
-    category: '产业基金与资本招商',
-    targetKind: 'mindmap',
-    usageCount: 96,
-    nodes: ['区域产业政策解析', '一链两基两中心匹配', '返投比例与落地条款核验', '三层可折叠证据树生成'],
-    desc: '围绕优势资本“存量盘活+增量招引”方法论，构建带底稿出处标签的可折叠产业招商证据树。',
-  },
-  {
-    id: 'ac_team_check',
-    name: '核心团队背景、锁定期与竞业核查流',
-    category: '法务与合规尽调',
-    targetKind: 'flashcards',
-    usageCount: 84,
-    nodes: ['工商与访谈底稿读取', '实控人持股与服务期核查', '竞业与知识产权诉讼排查', '主动回忆核验卡产出'],
-    desc: '针对创始人团队履历、持股锁定期、核心专利权属及前员工诉讼生成翻转式核验卡。',
-  },
-  {
-    id: 'ac_ic_defense',
-    name: '投委会(IC)上会答辩与压力测试流',
-    category: '投委会决策汇报',
-    targetKind: 'quiz',
-    usageCount: 79,
-    nodes: ['项目风险与待核实项汇总', '投委质询问题生成', '底稿实证标准答案锚定', '交互式答辩测验产出'],
-    desc: '模拟投委会合伙人针对估值、毛利率下滑、应收周转与回购条款的质询，生成带原文出处的压力测试。',
-  },
+  { id: 'ac_equity_memo', name: '投委会备忘录', category: '投委会', targetKind: 'ic_memo',
+    brief: '先给结论和交易概要，再写公司与团队、行业、产品与客户、竞争、财务口径核对、估值与条款。\n单列一章反方意见，站在否决这个项目的立场写。\n最后列出交割前必须完成的事项。' },
+  { id: 'ac_dd_word', name: '尽调报告', category: '尽职调查', targetKind: 'word',
+    brief: '逐项核对财务、客户、历史沿革。\n公司自述材料和审计、合同口径不一致的地方单独成节，两个口径都写出来。\n每章结尾列出还没核实的事项。' },
+  { id: 'ac_ic_ppt', name: '投委会汇报', category: '投委会', targetKind: 'ppt',
+    brief: '每页一个判断，标题直接写结论。\n先讲这个项目能不能投，再讲依据，最后讲还差什么。\n有可比数字的地方用图表或表格。' },
+  { id: 'ac_fin_xlsx', name: '财务与合同数据表', category: '财务核查', targetKind: 'table',
+    brief: '' },
+  { id: 'ac_gov_ind', name: '产业招商梳理', category: '产业基金', targetKind: 'mindmap',
+    brief: '按产业招商的视角梳理：区域产业政策、落地条件、返投要求、已有的产业基础。\n每个节点标出处。' },
+  { id: 'ac_team_check', name: '团队核查卡片', category: '法务合规', targetKind: 'flashcards',
+    brief: '围绕创始团队履历、持股与服务期、竞业限制、知识产权和诉讼出卡片。\n底稿里没有的不要出。' },
+  { id: 'ac_ic_defense', name: '上会答辩演练', category: '投委会', targetKind: 'quiz',
+    brief: '模拟投委会委员的质询：估值依据、毛利率变化、应收和回款、回购与对赌条款。\n每题给出底稿里的依据。' },
 ]
+const KIND_NAME = { ic_memo: '投委会备忘录（Word）', word: '尽调报告（Word）', ppt: '演示文稿（PPT）', table: '数据表（Excel）', mindmap: '思维导图', flashcards: '闪卡', quiz: '测验' }
+const DESC = t => `生成${KIND_NAME[t.targetKind] ?? '成品'}${t.targetKind === 'table' ? '：底稿原表、带数字的原文摘录、风险与待核实事项三类工作表，不经过模型' : ''}`
+
+const QKEY = 'enterprise_quota_ledger'
+const month = () => new Date().toISOString().slice(0, 7)
+function ledgerOf(db) {
+  const l = db.get('kvstate', QKEY)
+  // 换月清零；旧版本账本没有月份字段，里面是写死的初始值，一并丢弃
+  return l?.month === month() ? l : { id: QKEY, month: month(), users: {}, tplUsage: l?.month ? l.tplUsage ?? {} : {} }
+}
 
 export function getEnterpriseGovState(db, user, org) {
   const isAdmin = org?.can?.(user, 'settings.manage') || org?.can?.(user, 'ai.policy') || user?.roles?.includes('r_admin')
-  const qKey = 'enterprise_quota_ledger'
-  const ledger = db.get('kvstate', qKey) ?? { id: qKey, users: {}, tplUsage: {} }
-  const uStat = ledger.users[user.id] ?? { usedCalls: 12, limitCalls: 500, usedRMB: 3.85, monthlyLimitRMB: 200 }
-  const templates = DIFY_WORKFLOW_TEMPLATES.map(t => ({ ...t, usageCount: t.usageCount + (ledger.tplUsage[t.id] || 0) })).sort((a, b) => b.usageCount - a.usageCount)
+  const ledger = ledgerOf(db)
+  const limitCalls = db.get('settings', 'main')?.quota?.monthlyCalls ?? 500
+  const usedCalls = ledger.users[user.id]?.usedCalls ?? 0
+  const templates = DIFY_WORKFLOW_TEMPLATES.map(t => ({ ...t, desc: DESC(t), usageCount: ledger.tplUsage[t.id] || 0 }))
   return {
     isAdmin: !!isAdmin,
-    quota: { ...uStat, remainCalls: Math.max(0, uStat.limitCalls - uStat.usedCalls), remainRMB: +(uStat.monthlyLimitRMB - uStat.usedRMB).toFixed(2) },
+    quota: { month: ledger.month, usedCalls, limitCalls, remainCalls: Math.max(0, limitCalls - usedCalls) },
     permissions: { canToggleModel: !!isAdmin, canViewApiKey: !!isAdmin, canSyncTemplate: !!isAdmin },
     templates,
   }
 }
 
-export function exportDifyDslYaml(tplId = 'ac_dd_word', p = {}) {
-  const tpl = DIFY_WORKFLOW_TEMPLATES.find(t => t.id === tplId) ?? DIFY_WORKFLOW_TEMPLATES[0]
-  return [
-    'version: "0.2.0"',
-    'kind: app',
-    'app:',
-    `  name: "${tpl.name} (${p.name || '优势资本'})"`,
-    `  description: "${tpl.desc}"`,
-    '  mode: workflow',
-    'workflow:',
-    '  graph:',
-    '    nodes:',
-    ...tpl.nodes.map((n, i) => `      - id: "step_${i + 1}"\n        type: custom\n        data:\n          title: "${n}"`),
-  ].join('\n')
+/** 模板的编制要求原文，界面上可以改了再执行。（函数名沿用旧接口。） */
+export function exportDifyDslYaml(tplId = 'ac_dd_word') {
+  return (DIFY_WORKFLOW_TEMPLATES.find(t => t.id === tplId) ?? DIFY_WORKFLOW_TEMPLATES[0]).brief
 }
 
-export async function runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai }, user, p, b) {
+export async function runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai, dir }, user, p, b) {
   const gov = getEnterpriseGovState(db, user, org)
-  if (gov.quota.remainCalls <= 0) throw Object.assign(new Error('当前账号本月 AI 调用额度已用尽，请联系管理员调整配额'), { status: 403 })
+  if (gov.quota.remainCalls <= 0) throw Object.assign(new Error('本月的调用次数已经用完，请联系管理员调整额度'), { status: 403 })
   const tpl = DIFY_WORKFLOW_TEMPLATES.find(t => t.id === b.workflowId) ?? DIFY_WORKFLOW_TEMPLATES[0]
+  const brief = String(b.brief ?? b.dslYaml ?? tpl.brief ?? '').trim().slice(0, 2000)
   const t0 = Date.now()
   const art = await generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, {
-    kind: b.targetKind || tpl.targetKind || 'word',
-    fileIds: b.fileIds,
-    prompt: b.prompt || `按机构标准工作流「${tpl.name}」节点拓扑执行深度核验与成果编制`,
-    pageCount: b.pageCount || 8,
-    targetMB: b.targetMB || 6,
-    theme: b.theme || 'mck',
-    density: b.density || 'standard',
+    kind: tpl.targetKind, fileIds: b.fileIds, prompt: [brief, b.prompt].filter(Boolean).join('\n'),
+    pageCount: b.pageCount || 8, theme: b.theme || 'mck', density: b.density || 'standard',
   })
-  const qKey = 'enterprise_quota_ledger'
-  const ledger = db.get('kvstate', qKey) ?? { id: qKey, users: {}, tplUsage: {} }
-  const prev = ledger.users[user.id] ?? { usedCalls: 12, limitCalls: 500, usedRMB: 3.85, monthlyLimitRMB: 200 }
-  ledger.users[user.id] = { ...prev, usedCalls: prev.usedCalls + 1, usedRMB: +(prev.usedRMB + 0.32).toFixed(2) }
+  const ledger = ledgerOf(db)
+  ledger.users[user.id] = { usedCalls: (ledger.users[user.id]?.usedCalls ?? 0) + 1 }
   ledger.tplUsage[tpl.id] = (ledger.tplUsage[tpl.id] || 0) + 1
   db.putQuiet('kvstate', ledger)
-  const trace = (tpl.nodes || []).map((n, i) => ({ step: i + 1, node: n, status: 'succeeded', ms: 110 + i * 85 }))
+  // 执行记录：只写实际发生的步骤
+  const trace = [
+    { step: 1, node: '读取底稿', status: 'succeeded', detail: `${art.sourceCount} 份` },
+    { step: 2, node: '撰写', status: 'succeeded', detail: art.engine && art.engine !== '底稿摘编' ? `${art.engine} 撰写` : `底稿摘编${art.engineNote ? `（${art.engineNote}）` : ''}` },
+    { step: 3, node: '数字核对', status: art.check?.unmatched?.length ? 'warn' : 'succeeded', detail: art.check ? checkLine(art.check) : '这类成品直接取自底稿，不需要核对' },
+  ]
+  let submission = null
   if (b.autoSubmit) {
-    await submitArtifactToNode({ db, deliverables, lifecycle }, user, p, { artifactPath: art.fullPath, artifactName: art.name, note: `标准工作流「${tpl.name}」自动报送`, autoSubmitReview: true }).catch(() => null)
+    try {
+      submission = await submitArtifactToNode({ db, kb, org, deliverables, lifecycle, dir }, user, p, { artifactPath: art.fullPath, artifactName: art.name, note: `按模板「${tpl.name}」生成后报送`, autoSubmitReview: true })
+      trace.push({ step: 4, node: '报送', status: 'succeeded', detail: `${submission.workType} v${submission.version}` })
+    } catch (e) { trace.push({ step: 4, node: '报送', status: 'skipped', detail: e.message }) }
   }
-  return { ok: true, workflowName: tpl.name, elapsedMs: Date.now() - t0, trace, artifact: art, gov: getEnterpriseGovState(db, user, org) }
+  return { ok: true, workflowName: tpl.name, elapsedMs: Date.now() - t0, trace, artifact: art, submission, gov: getEnterpriseGovState(db, user, org) }
 }

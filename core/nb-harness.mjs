@@ -1,426 +1,280 @@
-// Agentic Harness（受控思考与成套材料操作执行器）
-// 设计原则：
-// 1. 可控思考（Controllable Thinking）：支持 fast（直出）/ balanced（两阶段校验）/ deep（五步深度反思+红蓝军互校+自愈修复）；
-//    支持人类在环审批断点（planOnly: true 先产出透明计划供合伙人/项目经理审阅修改，再执行 approveRun）。
-// 2. 操作能力调用制作能力（Action -> Production Orchestration）：
-//    把天眼查七维商事穿透、底稿 A/B/C 分级采信、Agent×Agent 跨源对质、9 大类成果编译器（PPT/Word/XLSX/IC Memo/导图/闪卡/测验/音视频）
-//    与阶段门禁工作项报送（submitArtifactToNode）编排为统一可观测、可审计、可自检重试的受控流水线。
-import { carbonComplete } from './nb-api.mjs'
-import { parseJson } from './llm.mjs'
+// 受控制作：把“想清楚要做什么”和“动手做”分成两步，成套生成一个项目需要的材料。
+// 第一步出制作方案（planHarnessExecution）：读底稿，说明底稿能回答什么、缺什么、每份材料侧重什么，存下来给人看、给人改。
+// 第二步按方案执行（runHarnessPipeline）：可选的天眼查工商核查、交叉核对、逐份制作、逐份质检、把合格的成品报送到对应工作项。
+// 思考深度三档：fast 不调用模型做规划；balanced 由模型出方案；deep 再加一轮交叉核对，成品里有对不上底稿的数字时让模型重写一次。
+// 没有可用模型（没配置、底稿密级不允许外发、调用失败）时每一步都如实写明，成品按底稿原文摘编，不冒充模型的结论。
 import { gradeDocCredibility, runAgentMeshCrossCheck, previewAnyArtifact } from './nb-agent-mesh.mjs'
-import { prepareSources } from './nb-ground.mjs'
+import { prepareSources, checkNumbers, checkLine, sourceDigest, projectFacts } from './nb-ground.mjs'
+import { askJson } from './nb-author.mjs'
 import { runTianyanchaDueDiligence } from './nb-tianyancha.mjs'
-import { generateStudioArtifact } from './nb-studio-gen.mjs'
+import { generateStudioArtifact, gatherDocs, withStage } from './nb-studio-gen.mjs'
 import { submitArtifactToNode } from './nb-flow-board.mjs'
 
 const ALL_KINDS = ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz']
 
 const KIND_LABELS = {
-  ic_memo: '九章投决备忘录 (IC Memo)',
-  ppt: '演示文稿 (PPTX)',
-  word: '深度尽调报告 (DOCX)',
-  table: '五维对质数据台账 (XLSX)',
-  mindmap: '逻辑思维导图 (HTML)',
-  audio: '双人投研播客概览 (HTML)',
-  video: '路演视频分镜脚本 (HTML)',
-  flashcards: '投委会答辩核验闪卡 (HTML)',
-  quiz: '尽调盲点压力测验 (HTML)',
+  ic_memo: '投委会备忘录',
+  ppt: '演示文稿',
+  word: '尽调报告',
+  table: '数据表',
+  mindmap: '思维导图',
+  audio: '对谈稿',
+  video: '讲解分镜',
+  flashcards: '闪卡',
+  quiz: '测验',
 }
 
 const PACK_PRESETS = {
-  ic_full_pack: {
-    name: '投委会全套上会标准材料包',
-    desc: '一键穿透底稿并制作：九章 IC 备忘录 + 演示文稿 PPT + 深度尽调 Word + 五维对质数据表 XLSX',
-    kinds: ['ic_memo', 'ppt', 'word', 'table'],
-    thinkingDepth: 'deep',
-  },
-  init_pack: {
-    name: '立项会快速研判材料包',
-    desc: '立项准备阶段核心三件套：立项演示文稿 PPT + 尽调清单数据表 XLSX + 逻辑思维导图',
-    kinds: ['ppt', 'table', 'mindmap'],
-    thinkingDepth: 'balanced',
-  },
-  dd_defense_pack: {
-    name: '尽调深水区与上会答辩演练包',
-    desc: '聚焦红蓝军矛盾对质：深度尽调报告 Word + 九章 IC 备忘录 + 答辩闪卡 + 盲点压力测验',
-    kinds: ['word', 'ic_memo', 'flashcards', 'quiz'],
-    thinkingDepth: 'deep',
-  },
+  ic_full_pack: { name: '上会材料', desc: '投委会备忘录、演示文稿、尽调报告、数据表', kinds: ['ic_memo', 'ppt', 'word', 'table'], thinkingDepth: 'deep' },
+  init_pack: { name: '立项材料', desc: '演示文稿、数据表、思维导图', kinds: ['ppt', 'table', 'mindmap'], thinkingDepth: 'balanced' },
+  dd_defense_pack: { name: '答辩准备', desc: '尽调报告、投委会备忘录、闪卡、测验', kinds: ['word', 'ic_memo', 'flashcards', 'quiz'], thinkingDepth: 'deep' },
 }
+
+export const DEPTHS = [
+  { id: 'fast', label: '快速', desc: '不做模型规划，直接制作' },
+  { id: 'balanced', label: '标准', desc: '模型先出制作方案，再制作' },
+  { id: 'deep', label: '深入', desc: '出方案、交叉核对底稿口径，数字对不上时重写一次' },
+]
 
 export function listHarnessPresets() {
   return Object.entries(PACK_PRESETS).map(([id, v]) => ({ id, ...v }))
 }
 
-/** 从自然语言指令智能推断需要调用的操作动作与制作套件 */
+/** 从一句话的要求里判断要做哪几种材料；没提到具体材料时按阶段给默认组合。 */
 export function inferKindsFromGoal(goal = '', stage = '') {
   const g = String(goal || '').toLowerCase()
   const picked = new Set()
-  if (/全套|上会包|所有核心|整套|一套完整|全部核心/.test(g)) {
-    ;['ic_memo', 'ppt', 'word', 'table'].forEach(k => picked.add(k))
-  }
-  if (/全部9|九大|所有材料|全部成果/.test(g)) {
-    ALL_KINDS.forEach(k => picked.add(k))
-  }
+  if (/全套|上会包|所有核心|整套|一套完整|全部核心/.test(g)) ['ic_memo', 'ppt', 'word', 'table'].forEach(k => picked.add(k))
+  if (/全部9|九大|所有材料|全部成果/.test(g)) ALL_KINDS.forEach(k => picked.add(k))
   if (/ppt|演示|幻灯片|路演|deck|立项报告/.test(g)) picked.add('ppt')
   if (/word|docx|尽调报告|深度报告|文书/.test(g)) picked.add('word')
-  if (/ic|备忘录|memo|投决|投资建议/.test(g)) picked.add('ic_memo')
+  if (/\bic\b|备忘录|memo|投决|投资建议/.test(g)) picked.add('ic_memo')
   if (/excel|xlsx|表格|台账|数据表|清单/.test(g)) picked.add('table')
   if (/导图|脑图|mindmap/.test(g)) picked.add('mindmap')
   if (/音频|播客|对谈|audio/.test(g)) picked.add('audio')
   if (/视频|分镜|video/.test(g)) picked.add('video')
   if (/闪卡|问答卡|flash/.test(g)) picked.add('flashcards')
   if (/测验|考题|压力测试题|quiz/.test(g)) picked.add('quiz')
-  if (!picked.size) {
-    if (stage.includes('立项')) ['ppt', 'word', 'table'].forEach(k => picked.add(k))
-    else ['ic_memo', 'ppt', 'word', 'table'].forEach(k => picked.add(k))
-  }
+  if (!picked.size) (String(stage).includes('立项') ? ['ppt', 'word', 'table'] : ['ic_memo', 'ppt', 'word', 'table']).forEach(k => picked.add(k))
   return [...picked]
 }
 
-async function collectRawDocs({ kb, org }, user, p, fileIds) {
-  let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
-  if (!allFiles.some(f => f.mountId !== 'm_ws')) {
-    await kb.scanAll().catch(() => {})
-    allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
-  }
-  const rawSources = allFiles.filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('Studio成品'))
-  const pool = rawSources.length ? rawSources : allFiles
-  const matched = fileIds?.length ? allFiles.filter(f => fileIds.includes(f.id)) : []
-  const picked = (matched.length ? matched : pool).slice(0, 12)
-  const docs = []
-  for (const f of picked) {
-    const r = await kb.read(f.id, user).catch(() => null)
-    if (r?.text) {
-      const cred = gradeDocCredibility(f.name)
-      docs.push({ id: f.id, name: f.name, grade: cred.grade, gradeLabel: cred.label, text: org.redact(user, r.text).slice(0, 6000) })
-    }
-  }
-  return docs
-}
+const clean = (v, max = 500) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
+const runsOf = (db, p) => db.get('kvstate', `harness_runs_${p.id}`)?.runs || []
+const saveRuns = (db, user, p, runs, reason, action) => db.put('kvstate', { id: `harness_runs_${p.id}`, runs: runs.slice(0, 20) }, { actor: user, reason, action })
 
-/**
- * 第一阶段：Harness 受控思考与制作蓝图规划（Controllable Thinking & Action Plan）
- * 输出完全结构化、透明可编辑的思考链（thoughtChain）、证据缺口（gaps）、动作序列（steps）与制作规格（specs）。
- */
+/** 第一步：制作方案。返回的对象存进项目记录，执行时按 id 取回。 */
 export async function planHarnessExecution(deps, user, p, opts = {}) {
   const { db, kb, org, ai } = deps
-  const preset = opts.presetId && PACK_PRESETS[opts.presetId] ? PACK_PRESETS[opts.presetId] : null
-  const goal = String(opts.goal || preset?.desc || `围绕「${p.name}」（${p.stage}）可控思考并制作完整投研材料`).trim()
-  const thinkingDepth = ['fast', 'balanced', 'deep'].includes(opts.thinkingDepth)
-    ? opts.thinkingDepth
-    : (preset?.thinkingDepth || 'deep')
-  const requestedKinds = (Array.isArray(opts.kinds) && opts.kinds.length
-    ? opts.kinds.filter(k => ALL_KINDS.includes(k))
-    : (preset?.kinds || inferKindsFromGoal(goal, p.stage)))
+  p = withStage(db, p)
+  const preset = PACK_PRESETS[opts.presetId] ?? null
+  const userGoal = clean(opts.goal && opts.goal !== preset?.desc ? opts.goal : '', 800)
+  const thinkingDepth = DEPTHS.some(d => d.id === opts.thinkingDepth) ? opts.thinkingDepth : (preset?.thinkingDepth || 'balanced')
+  const asked = Array.isArray(opts.kinds) ? opts.kinds.filter(k => ALL_KINDS.includes(k)) : []
+  const kinds = asked.length ? asked : (preset?.kinds || inferKindsFromGoal(userGoal, p.stage))
   const pageCount = Math.max(4, Math.min(24, Number(opts.pageCount) || 8))
-  const targetMB = Math.max(3, Math.min(35, Number(opts.targetMB) || 6))
   const density = ['concise', 'standard', 'dense'].includes(opts.density) ? opts.density : 'standard'
   const theme = String(opts.theme || 'mck')
-  const needTianyancha = Boolean(opts.withTianyancha || /天眼查|工商|司法|穿透/.test(goal))
-  const autoSubmitStage = Boolean(opts.autoSubmitStage || /报送|提交审核|推进门禁|上会提交/.test(goal))
+  const withTianyancha = Boolean(opts.withTianyancha || /天眼查|工商核查/.test(userGoal))
+  const autoSubmitStage = Boolean(opts.autoSubmitStage || /报送|提交审核|上会提交/.test(userGoal))
 
-  const docs = await collectRawDocs({ kb, org }, user, p, opts.fileIds)
-  const grounded = prepareSources(p, docs)
-  const hasAGrade = docs.some(d => d.grade === 'A')
+  const { docs, levelMax } = await gatherDocs({ kb, org }, user, p, opts.fileIds)
+  if (!docs.length) throw Object.assign(new Error('所选底稿里没有读到文字，无法制作。请确认底稿已上传并解析完成。'), { status: 400 })
+  const G = prepareSources(p, docs)
+  const graded = docs.map((d, i) => ({ n: i + 1, id: d.id, name: d.name, ...gradeDocCredibility(d.name) }))
+  const count = g => graded.filter(d => d.grade === g).length
+  const todo = G.passages.filter(x => x.topics.includes('todo'))
 
-  let aiPlan = null
-  let engine = 'Harness 规则受控规划器'
-  if (thinkingDepth !== 'fast') {
-    const tier = thinkingDepth === 'deep' ? 'medium' : 'low'
-    const docDigest = docs.map((d, i) => `[${i + 1}] (${d.grade}级·${d.gradeLabel}) 《${d.name}》：${d.text.slice(0, 900)}`).join('\n---\n')
-    const r = await carbonComplete({
-      ai,
-      tier,
-      maxTokens: 3200,
-      timeoutMs: thinkingDepth === 'deep' ? 42000 : 25000,
-      system: `你是优势资本（Advantage Capital）首席投研 Harness 受控编排官。
-你的职责是在真正动手制作材料前，先进行严谨、透明、可控的结构化思考：
-1. 审视当前底稿的证据信用结构（A级审计/合同/工商 vs B级访谈 vs C级BP自述）；
-2. 结合用户的制作目标，制定清晰的「思考判断 -> 工具动作 -> 每份材料的定制叙事重点 -> 质量验收门禁」；
-3. 严禁编造底稿外的任何数字，缺失数据列入 gaps。
-只输出严格合法的 JSON，格式：
+  let ai1 = null, engine = '', note = ''
+  if (thinkingDepth === 'fast') note = '快速档不做模型规划'
+  else {
+    const route = await ai?.route?.(levelMax).catch(e => ({ adapter: null, reason: e.message })) ?? { adapter: null, reason: '未配置模型' }
+    if (!route.adapter) note = route.reason
+    else {
+      try {
+        ai1 = await askJson(route.adapter, {
+          maxTokens: 12000, timeoutMs: 240000,
+          system: '你是优势资本的投资经理，要为一个项目成套准备材料。动手之前先把事情想清楚，把想法写给合伙人看，合伙人同意后才开始制作。只用给出的底稿和项目登记信息，底稿里没有的事实和数字不写；引用数字保持原样并标来源编号，如 [2]。用平实的中文，不写套话。只输出 JSON。',
+          user: `项目登记信息：\n${projectFacts(p).map(([k, v]) => `${k}：${v}`).join('\n') || p.name}
+
+底稿（共 ${docs.length} 份，括号里是按文件名推定的证据效力）：
+${graded.map(s => `[${s.n}]《${s.name}》（${s.label}）`).join('\n')}
+
+${sourceDigest(docs)}
+
+要制作的材料：${kinds.map(k => `${k}（${KIND_LABELS[k]}）`).join('、')}${userGoal ? `\n使用者的要求：${userGoal}` : ''}
+
+通读底稿后输出：
 {
-  "coreThesis": "一句话核心投研立论（含底稿关键量化锚点）",
-  "thoughtSteps": [
-    {"phase": "底稿采信审视", "thought": "具体分析...", "decision": "采取动作..."},
-    {"phase": "跨源风险锁定", "thought": "具体分析...", "decision": "采取动作..."},
-    {"phase": "成套材料叙事分工", "thought": "具体分析...", "decision": "采取动作..."}
-  ],
-  "artifactDirectives": {
-    "ppt": "针对本项目的演示文稿专属叙事指令...",
-    "word": "针对本项目的深度尽调报告核查重点...",
-    "ic_memo": "针对本项目的投委会表决核心焦点...",
-    "table": "针对本项目的数据台账核验重点..."
-  },
-  "gaps": ["待补充核实的证据缺口1", "缺口2"]
-}`,
-      user: `项目：${p.name}（阶段：${p.stage}，轮次：${p.fields?.round || '未披露'}，估值：${p.fields?.valuation || '未披露'}）
-用户任务目标：${goal}
-计划制作成果清单：${requestedKinds.map(k => `${k}(${KIND_LABELS[k] || k})`).join('、')}
-已勾选原始底稿（共 ${docs.length} 份，提取表格 ${grounded.tables.length} 张、关键条目 ${grounded.passages.length} 条）：
-${docDigest || '（暂无底稿）'}`,
-    })
-    const parsed = parseJson(r.text)
-    if (parsed && Array.isArray(parsed.thoughtSteps)) {
-      aiPlan = parsed
-      engine = r.engine
+  "coreThesis": "这个项目最值得投委会讨论的问题和你目前的判断，一两句话，带来源编号",
+  "thoughtSteps": [{"phase": "这一步在想什么，不超过 12 个字", "thought": "看到了什么、怎么判断，带来源编号", "decision": "因此怎么做"}],
+  "artifactDirectives": {${kinds.map(k => `"${k}": "这份${KIND_LABELS[k]}应该侧重回答什么、重点用哪几份底稿"`).join(', ')}},
+  "gaps": ["底稿里没有、但做判断需要的信息"]
+}
+thoughtSteps 写 3 到 5 步，依次覆盖：底稿能回答什么和不能回答什么；不同底稿对同一指标的说法是否一致；几份材料怎么分工、各自给谁看。`,
+        })
+        engine = route.label
+      } catch (e) { note = `模型规划失败：${e.message}` }
     }
   }
 
-  const shouldEnrichTyc = needTianyancha || (!hasAGrade && thinkingDepth === 'deep')
-  const thoughtSteps = aiPlan?.thoughtSteps?.length ? aiPlan.thoughtSteps : [
-    {
-      phase: '1. 底稿证据等级盘点',
-      thought: `已挂载 ${docs.length} 份原始底稿（A级 ${docs.filter(d => d.grade === 'A').length} 份 / B级 ${docs.filter(d => d.grade === 'B').length} 份 / C级 ${docs.filter(d => d.grade === 'C').length} 份），提取结构化表格 ${grounded.tables.length} 张。`,
-      decision: shouldEnrichTyc ? '触发天眼查七维商事司法穿透补齐 A 级外部强公信底稿' : '现有底稿已覆盖核心维度，直接进入跨源对质',
-    },
-    {
-      phase: '2. 红蓝军跨源矛盾锁定',
-      thought: 'C 级 BP 预测口径与 A/B 级审计合同口径易出现确认时点与毛利偏差，须在制作前统一数字口径。',
-      decision: '调用 Agent×Agent 三侧网状互校引擎生成统一事实账本与 CP 先决条件清单',
-    },
-    {
-      phase: '3. 成套材料协同编排与质检门禁',
-      thought: `围绕「${p.stage}」门禁要求，按序编译 ${requestedKinds.length} 份异构成果，每份产物必须通过 ZIP/XML 解压体检与底稿数字核对。`,
-      decision: `规格锁定：${pageCount}页/章 · 目标体积 ~${targetMB}MB · 密度 ${density}${autoSubmitStage ? ' · 质检通过后自动报送阶段工作项' : ''}`,
-    },
+  const steps = (Array.isArray(ai1?.thoughtSteps) ? ai1.thoughtSteps : []).map(s => ({ phase: clean(s?.phase, 40), thought: clean(s?.thought, 800), decision: clean(s?.decision, 400) })).filter(s => s.phase && s.thought).slice(0, 6)
+  const thoughtSteps = steps.length ? steps : [
+    { phase: '底稿盘点', thought: `读到 ${docs.length} 份底稿：A 级 ${count('A')} 份、B 级 ${count('B')} 份、C 级 ${count('C')} 份（按文件名推定）。整理出表格 ${G.tables.length} 张、条目 ${G.passages.length} 条，其中标为待核实的 ${todo.length} 条。`, decision: '全部纳入本次制作' },
+    { phase: '口径核对', thought: `这一步没有调用模型（${note}）。`, decision: thinkingDepth === 'deep' ? '执行时再尝试交叉核对；仍没有可用模型就跳过，不同底稿之间的口径差异需要人工比对' : '不同底稿之间的口径差异需要人工比对' },
+    { phase: '制作安排', thought: `依次制作 ${kinds.length} 份材料：${kinds.map(k => KIND_LABELS[k]).join('、')}。`, decision: `每份成品生成后把里面的数字和底稿逐个核对，对不上的列在质检结果里${autoSubmitStage ? '；数字全部对上的成品报送到对应工作项' : ''}` },
   ]
+  const directives = Object.fromEntries(kinds.map(k => [k, clean(ai1?.artifactDirectives?.[k], 600)]))
+  const gaps = (Array.isArray(ai1?.gaps) ? ai1.gaps.map(x => clean(x, 200)).filter(Boolean) : todo.map(x => clean(x.text, 200))).slice(0, 8)
+  const coreThesis = clean(ai1?.coreThesis, 600)
+  const check = engine ? checkNumbers([coreThesis, ...thoughtSteps.flatMap(s => [s.thought, s.decision]), ...Object.values(directives), ...gaps].join('\n'), G.corpus) : null
 
   const actionSteps = []
-  if (shouldEnrichTyc) {
-    actionSteps.push({ id: 'act_tyc', type: 'tool', tool: 'tianyancha_enrich', label: '调用天眼查七维商事与司法穿透补齐 A 级底稿', status: 'pending' })
-  }
-  actionSteps.push({ id: 'act_mesh', type: 'tool', tool: 'agent_mesh_crosscheck', label: '执行 Agent×Agent 情报/撰写/蓝军三侧并发互校', status: 'pending' })
-  for (const k of requestedKinds) {
-    actionSteps.push({
-      id: `make_${k}`,
-      type: 'produce',
-      kind: k,
-      label: `受控编译制作：${KIND_LABELS[k] || k}`,
-      directive: aiPlan?.artifactDirectives?.[k] || goal,
-      status: 'pending',
-    })
-  }
-  actionSteps.push({ id: 'act_verify', type: 'verify', tool: 'artifact_quality_gate', label: '执行全格式解压体检、体积页数校验与底稿数字锚定审计', status: 'pending' })
-  if (autoSubmitStage) {
-    actionSteps.push({ id: 'act_submit', type: 'submit', tool: 'stage_gate_submit', label: `将合格成果自动挂接报送至「${p.stage}」对应工作项`, status: 'pending' })
-  }
+  if (withTianyancha) actionSteps.push({ id: 'act_tyc', type: 'tool', tool: 'tianyancha_enrich', label: '天眼查工商核查，结果存为底稿', status: 'pending' })
+  if (thinkingDepth === 'deep') actionSteps.push({ id: 'act_mesh', type: 'tool', tool: 'agent_mesh_crosscheck', label: '交叉核对不同底稿的口径', status: 'pending' })
+  for (const k of kinds) actionSteps.push({ id: `make_${k}`, type: 'produce', kind: k, label: `制作${KIND_LABELS[k]}`, directive: directives[k], status: 'pending' })
+  actionSteps.push({ id: 'act_verify', type: 'verify', tool: 'artifact_quality_gate', label: '逐份质检：文件能打开，数字和底稿对得上', status: 'pending' })
+  if (autoSubmitStage) actionSteps.push({ id: 'act_submit', type: 'submit', tool: 'stage_gate_submit', label: `把合格的成品报送到「${p.stage}」的对应工作项`, status: 'pending' })
 
-  const planId = `hplan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-  const planObj = {
-    id: planId,
-    projectId: p.id,
-    projectName: p.name,
-    stage: p.stage,
-    goal,
-    thinkingDepth,
-    engine,
-    coreThesis: aiPlan?.coreThesis || `围绕「${p.name}」${docs.length} 份底稿开展证据分级采信与成套投研材料受控制作`,
-    thoughtSteps,
-    gaps: aiPlan?.gaps || (hasAGrade ? ['建议持续跟踪期后订单回款流水'] : ['当前缺少外部审计或天眼查 A 级底稿，已自动排入穿透补齐动作']),
-    kinds: requestedKinds,
-    specs: { pageCount, targetMB, density, theme, shouldEnrichTyc, autoSubmitStage, fileIds: opts.fileIds || docs.map(d => d.id) },
+  const plan = {
+    id: `hplan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    projectId: p.id, projectName: p.name, stage: p.stage,
+    goal: userGoal || preset?.desc || kinds.map(k => KIND_LABELS[k]).join('、'),
+    userGoal, thinkingDepth, engine, engineNote: note, coreThesis, thoughtSteps, gaps, check, kinds,
+    specs: { pageCount, density, theme, withTianyancha, autoSubmitStage, fileIds: opts.fileIds?.length ? opts.fileIds : docs.map(d => d.id) },
     steps: actionSteps,
-    sourceSummary: {
-      totalDocs: docs.length,
-      gradeA: docs.filter(d => d.grade === 'A').length,
-      gradeB: docs.filter(d => d.grade === 'B').length,
-      gradeC: docs.filter(d => d.grade === 'C').length,
-      tables: grounded.tables.length,
-      passages: grounded.passages.length,
-    },
-    createdAt: Date.now(),
-    createdBy: user.name,
-    status: 'planned',
+    sourceSummary: { totalDocs: docs.length, gradeA: count('A'), gradeB: count('B'), gradeC: count('C'), tables: G.tables.length, passages: G.passages.length },
+    createdAt: Date.now(), createdBy: user.name, status: 'planned',
   }
-
-  const prevPlans = db.get('kvstate', `harness_runs_${p.id}`)?.runs || []
-  db.put('kvstate', { id: `harness_runs_${p.id}`, runs: [planObj, ...prevPlans].slice(0, 20) }, { actor: user, reason: `Harness 受控思考规划: ${goal.slice(0, 36)}`, action: 'harness.plan' })
-  return planObj
+  saveRuns(db, user, p, [plan, ...runsOf(db, p)], `制作方案：${plan.goal.slice(0, 36)}`, 'harness.plan')
+  return plan
 }
 
-/**
- * 第二阶段：Harness 受控执行、质量门禁自检与自愈重做（Action -> Production -> Self-Verification）
- * 可直接传入已审批的 planId，或一站式完成「可控思考规划 + 全套材料编译 + 解压质检 + 阶段报送」。
- */
+function opened(kind, preview) {
+  if (!preview) return false
+  if (preview.kind === 'pptx') return preview.slides.length > 0
+  if (preview.kind === 'docx') return preview.paras.length > 0
+  if (preview.kind === 'xlsx') return preview.sheets.length > 0
+  return String(preview.content ?? '').length > 200
+}
+
+/** 第二步：按方案执行。传 planId 用已有方案；不传就现场出一份再执行。planOnly 只出方案。 */
 export async function runHarnessPipeline(deps, user, p, opts = {}) {
   const { db, kb, org, deliverables, lifecycle, ai, dir } = deps
   const t0 = Date.now()
-
-  // 1. 获取已审批蓝图或现场生成受控思考蓝图
-  let plan = null
-  if (opts.planId) {
-    const saved = db.get('kvstate', `harness_runs_${p.id}`)?.runs || []
-    plan = saved.find(r => r.id === opts.planId) || null
-  }
-  if (!plan) {
-    plan = await planHarnessExecution(deps, user, p, opts)
-  }
+  p = withStage(db, p)
+  let plan = opts.planId ? runsOf(db, p).find(r => r.id === opts.planId) ?? null : null
+  if (!plan) plan = await planHarnessExecution(deps, user, p, opts)
   if (opts.planOnly) return plan
+  plan = structuredClone(plan)
 
-  // 允许用户在审批后微调 kinds / specs / customDirectives
-  const kinds = Array.isArray(opts.kinds) && opts.kinds.length ? opts.kinds.filter(k => ALL_KINDS.includes(k)) : plan.kinds
+  const asked = Array.isArray(opts.kinds) ? opts.kinds.filter(k => ALL_KINDS.includes(k)) : []
+  const kinds = asked.length ? asked : plan.kinds
   const specs = { ...plan.specs, ...(opts.specs || {}) }
   if (opts.pageCount) specs.pageCount = Math.max(4, Math.min(24, Number(opts.pageCount)))
-  if (opts.targetMB) specs.targetMB = Math.max(3, Math.min(35, Number(opts.targetMB)))
   if (opts.density) specs.density = opts.density
   if (opts.theme) specs.theme = opts.theme
   if (opts.autoSubmitStage !== undefined) specs.autoSubmitStage = Boolean(opts.autoSubmitStage)
+  for (const k of kinds) if (!plan.steps.some(s => s.id === `make_${k}`)) plan.steps.splice(Math.max(0, plan.steps.findIndex(s => s.id === 'act_verify')), 0, { id: `make_${k}`, type: 'produce', kind: k, label: `制作${KIND_LABELS[k]}`, directive: '', status: 'pending' })
+  plan.steps = plan.steps.filter(s => s.type !== 'produce' || kinds.includes(s.kind))
+  if (specs.autoSubmitStage && !plan.steps.some(s => s.id === 'act_submit')) plan.steps.push({ id: 'act_submit', type: 'submit', tool: 'stage_gate_submit', label: `把合格的成品报送到「${p.stage}」的对应工作项`, status: 'pending' })
 
   const trace = []
-  const markStep = (id, status, detail = '') => {
+  const has = id => plan.steps.some(s => s.id === id)
+  const mark = (id, status, detail = '') => {
     const st = plan.steps.find(s => s.id === id)
-    if (st) { st.status = status; st.detail = detail; st.at = Date.now() }
+    if (st) Object.assign(st, { status, detail, at: Date.now() })
     trace.push({ step: id, status, detail, elapsedMs: Date.now() - t0 })
   }
+  let fileIds = [...(specs.fileIds ?? [])]
 
-  let activeFileIds = specs.fileIds ? [...specs.fileIds] : []
-
-  // 2. 操作能力调用 1：天眼查七维商事司法穿透（若蓝图判定需补强 A 级证据）
-  if (specs.shouldEnrichTyc) {
-    const companyName = db.get('companies', p.companyId)?.name || p.name.replace(/\s+[A-Z+]+轮.*$/, '')
-    const tyc = await runTianyanchaDueDiligence({ db, kb }, user, p, { companyName })
-    if (tyc?.file?.id && !activeFileIds.includes(tyc.file.id)) activeFileIds.unshift(tyc.file.id)
-    markStep('act_tyc', 'done', `已穿透入库《${tyc?.file?.name || companyName}》（A级强公信底稿）`)
+  if (has('act_tyc')) {
+    try {
+      const c = p.companyId ? db.get('companies', p.companyId) : null
+      const tyc = await runTianyanchaDueDiligence({ db, kb }, user, p, { companyName: c?.name })
+      if (tyc.file?.id && fileIds.length && !fileIds.includes(tyc.file.id)) fileIds.unshift(tyc.file.id)
+      mark('act_tyc', 'done', `已把「${tyc.companyName}」的 ${tyc.fields} 项工商登记信息存为底稿《${tyc.file?.name}》`)
+    } catch (e) { mark('act_tyc', 'skipped', e.message) }
   }
 
-  // 3. 操作能力调用 2：Agent×Agent 情报/撰写/蓝军三侧并发互校
-  const docs = await collectRawDocs({ kb, org }, user, p, activeFileIds)
-  const docSig = docs.map(d => d.id).join(',')
-  const mesh = await runAgentMeshCrossCheck(ai, p, docs)
-  db.put('kvstate', { id: `mesh_${p.id}`, docSig, savedAt: Date.now(), ...mesh }, { actor: user, reason: 'Harness 受控三侧网状互校', action: 'harness.mesh' })
-  markStep('act_mesh', 'done', `${mesh.engine} 完成互校：识别跨源冲突 ${mesh.conflicts?.length || 0} 项，原文数字锚定率 ${mesh.numCheck?.rate ?? 100}%`)
+  const { docs, levelMax } = await gatherDocs({ kb, org }, user, p, fileIds)
+  if (!docs.length) throw Object.assign(new Error('所选底稿里没有读到文字，无法制作。'), { status: 400 })
 
-  // 4. 操作能力调用制作能力：按蓝图专属指令逐份制作并执行自检自愈（Self-Verification & Auto-Repair）
-  const artifacts = []
-  const qualityGate = []
+  let mesh = null
+  if (has('act_mesh')) {
+    mesh = await runAgentMeshCrossCheck(ai, p, docs, { level: levelMax })
+    db.put('kvstate', { id: `mesh_${p.id}`, docSig: docs.map(d => d.id).join(','), savedAt: Date.now(), ...mesh }, { actor: user, reason: '交叉核对底稿口径', action: 'harness.mesh' })
+    mark('act_mesh', mesh.engine ? 'done' : 'skipped', mesh.engine
+      ? `${mesh.engine}：${mesh.conflicts.length ? `找到 ${mesh.conflicts.length} 处说法不一致（${mesh.conflicts.map(c => c.topic).join('、')}）` : '没有发现说法不一致的地方'}${mesh.numCheck?.unmatched?.length ? `；核对结论里有 ${mesh.numCheck.unmatched.length} 处数字在底稿里没找到` : ''}`
+      : mesh.note)
+  }
+  const meshHint = mesh?.conflicts?.length
+    ? `交叉核对时发现下面几处说法不一致。写到相关内容时回到底稿原文核实，把两个口径都写出来（下面只是转述，以底稿为准）：\n${mesh.conflicts.map(c => `- ${c.topic}：${c.bpClaim} ／ ${c.auditFact}`).join('\n')}`
+    : ''
+
+  const artifacts = [], qualityGate = []
   for (const kind of kinds) {
-    const stepObj = plan.steps.find(s => s.id === `make_${kind}`)
-    const directive = [plan.goal, stepObj?.directive, opts.prompt].filter(Boolean).join('；')
-    let art = await generateStudioArtifact(
-      { db, kb, org, deliverables, ai },
-      user,
-      p,
-      {
-        kind,
-        pageCount: specs.pageCount,
-        targetMB: specs.targetMB,
-        density: specs.density,
-        theme: specs.theme,
-        fileIds: activeFileIds,
-        prompt: directive,
-      },
-    )
-
-    // 质量门禁体检：真实解压检验结构完整性、页数达标度与 PPT 体积要求
-    let preview = await previewAnyArtifact(art.fullPath).catch(() => null)
-    let passed = Boolean(art?.bytes > 500 && preview)
-    let repairNote = ''
-
-    if (kind === 'ppt' && (art.bytes < 3 * 1024 * 1024 || (preview?.slides?.length || 0) < specs.pageCount)) {
-      // 自愈机制：若体积或页数未达标，自动调高纹理目标重新编译一次
-      art = await generateStudioArtifact(
-        { db, kb, org, deliverables, ai },
-        user,
-        p,
-        {
-          kind: 'ppt',
-          pageCount: specs.pageCount,
-          targetMB: Math.max(5, specs.targetMB + 2),
-          density: 'dense',
-          theme: specs.theme,
-          fileIds: activeFileIds,
-          prompt: `${directive}（自愈重编译：确保满页与高分辨率视觉资产）`,
-        },
-      )
-      preview = await previewAnyArtifact(art.fullPath).catch(() => null)
-      passed = Boolean(art.bytes >= 3 * 1024 * 1024 && (preview?.slides?.length || 0) >= specs.pageCount)
-      repairNote = '（已触发 Harness 自愈重编译并达标）'
+    const step = plan.steps.find(s => s.id === `make_${kind}`)
+    const directive = [plan.userGoal && `本次制作的要求：${plan.userGoal}`, step?.directive && `这份材料的侧重：${step.directive}`, meshHint, clean(opts.prompt, 800)].filter(Boolean).join('\n')
+    const make = extra => generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, { kind, pageCount: specs.pageCount, density: specs.density, theme: specs.theme, fileIds, prompt: [directive, extra].filter(Boolean).join('\n') })
+    let art
+    try { art = await make() } catch (e) {
+      qualityGate.push({ kind, label: KIND_LABELS[kind], name: '', bytes: 0, sizeMB: 0, passed: false, engine: '', unmatched: [], detail: `没有生成：${e.message}` })
+      mark(`make_${kind}`, 'warn', `没有生成：${e.message}`)
+      continue
     }
-
-    const qItem = {
-      kind,
-      name: art.name,
-      bytes: art.bytes,
-      sizeMB: +(art.bytes / 1048576).toFixed(2),
-      passed,
-      detail: kind === 'ppt'
-        ? `${preview?.slides?.length || specs.pageCount} 页幻灯片 · ${(art.bytes / 1048576).toFixed(2)} MB${repairNote}`
-        : kind === 'word'
-          ? `${preview?.paras?.length || 0} 段结构化正文 · 锚定率 ${art.meshCert?.rate ?? 100}%`
-          : kind === 'table'
-            ? `${preview?.sheets?.length || 5} 张核验与对质工作表`
-            : `${(art.bytes / 1024).toFixed(1)} KB 交互式研判视图`,
+    let unmatched = art.check?.unmatched ?? []
+    let repair = ''
+    const byModel = Boolean(art.engine) && art.engine !== '底稿摘编'
+    if (unmatched.length && byModel && plan.thinkingDepth === 'deep') {
+      const again = await make(`上一稿里下面这些数字在底稿中找不到：${unmatched.slice(0, 12).map(u => `${u.value}（出现在“${u.context}”）`).join('；')}。重写时改用底稿里的数字；确实需要自己算的，写明“测算”和算式；底稿里没有依据的直接删掉。`).catch(() => null)
+      const left = again?.check?.unmatched ?? null
+      if (again && left && left.length < unmatched.length && again.engine !== '底稿摘编') { art = again; repair = `第一稿有 ${unmatched.length} 处数字对不上，重写后剩 ${left.length} 处`; unmatched = left }
+      else repair = `有 ${unmatched.length} 处数字对不上，重写一次后没有改善，保留第一稿`
     }
-    qualityGate.push(qItem)
+    const preview = await previewAnyArtifact(art.fullPath).catch(() => null)
+    const ok = opened(kind, preview)
+    const passed = ok && unmatched.length === 0
+    const detail = [art.summary, repair, !ok ? '文件打不开或没有内容' : '', unmatched.length ? `待人工复核的数字：${unmatched.slice(0, 8).map(u => u.value).join('、')}` : ''].filter(Boolean).join('；')
+    qualityGate.push({ kind, label: KIND_LABELS[kind], name: art.name, bytes: art.bytes, sizeMB: +(art.bytes / 1048576).toFixed(2), passed, engine: art.engine || '底稿摘编', unmatched: unmatched.map(u => u.value), detail })
     artifacts.push(art)
-    markStep(`make_${kind}`, passed ? 'done' : 'warn', `${art.name} — ${qItem.detail}`)
+    mark(`make_${kind}`, passed ? 'done' : 'warn', `${art.name}：${detail}`)
   }
+  const okCount = qualityGate.filter(x => x.passed).length
+  mark('act_verify', okCount === qualityGate.length ? 'done' : 'warn', `${qualityGate.length} 份材料里 ${okCount} 份通过${okCount < qualityGate.length ? `，${qualityGate.length - okCount} 份需要人工复核` : ''}`)
 
-  markStep('act_verify', 'done', `全部 ${artifacts.length} 份成品通过 ZIP/XML 结构解压与数字溯源审计（通过率 ${qualityGate.filter(x => x.passed).length}/${qualityGate.length}）`)
-
-  // 5. 可选闭环动作：自动报送至当前阶段匹配的工作项门禁
   const submissions = []
-  if (specs.autoSubmitStage && dir) {
+  if (has('act_submit')) {
+    const held = []
     for (const art of artifacts) {
+      const q = qualityGate.find(x => x.name === art.name)
+      if (!q?.passed) { held.push(`${KIND_LABELS[art.kind] ?? art.name}（质检没通过）`); continue }
       if (!art.workType) continue
-      try {
-        const sub = await submitArtifactToNode(
-          { db, kb, org, deliverables, lifecycle, dir },
-          user,
-          p,
-          { artifactPath: art.fullPath, artifactName: art.name, autoSubmitReview: true },
-        )
-        submissions.push(sub)
-      } catch {
-        // 当前阶段若无同名工作项则保持在项目成果区待选，不强行塞错工作项
-      }
+      try { submissions.push(await submitArtifactToNode({ db, kb, org, deliverables, lifecycle, dir }, user, p, { artifactPath: art.fullPath, artifactName: art.name, autoSubmitReview: true })) }
+      catch (e) { held.push(`${KIND_LABELS[art.kind] ?? art.name}（${e.message}）`) }
     }
-    markStep('act_submit', 'done', submissions.length
-      ? `已精准挂接报送 ${submissions.length} 份成果：${submissions.map(s => `${s.workType}(v${s.version})`).join('、')}`
-      : `当前阶段「${p.stage}」无同名工作项，成果已存入右下角成果舱供指定报送`)
+    mark('act_submit', submissions.length ? 'done' : 'skipped', [submissions.length ? `已报送 ${submissions.length} 份：${submissions.map(s => `${s.workType} v${s.version}`).join('、')}` : '没有报送', held.length ? `没有报送的：${held.join('、')}` : ''].filter(Boolean).join('；'))
   }
 
-  const finishedRun = {
-    ...plan,
-    kinds,
-    specs,
-    status: 'completed',
-    completedAt: Date.now(),
-    elapsedMs: Date.now() - t0,
-    meshSummary: {
-      engine: mesh.engine,
-      thesis: mesh.thesis,
-      conflicts: mesh.conflicts || [],
-      redFlags: mesh.redFlags || [],
-      anchorRate: mesh.numCheck?.rate ?? 100,
-    },
-    artifacts: artifacts.map(a => ({
-      id: a.id,
-      kind: a.kind,
-      name: a.name,
-      fullPath: a.fullPath,
-      bytes: a.bytes,
-      workType: a.workType,
-      version: a.version,
-      summary: a.summary,
-    })),
-    qualityGate,
-    submissions,
-    trace,
+  // 全部成品的数字核对汇总；没有出现数字时 anchorRate 为 null
+  const sum = artifacts.reduce((a, x) => x.check ? { total: a.total + x.check.total, ok: a.ok + x.check.matched + x.check.derived } : a, { total: 0, ok: 0 })
+  const run = {
+    ...plan, kinds, specs, status: 'completed', completedAt: Date.now(), elapsedMs: Date.now() - t0,
+    meshSummary: mesh ? { engine: mesh.engine, note: mesh.note, thesis: mesh.thesis, conflicts: mesh.conflicts, redFlags: mesh.redFlags } : null,
+    numberSummary: { total: sum.total, ok: sum.ok, line: sum.total ? `成品里共 ${sum.total} 处数字，${sum.ok} 处与底稿一致或写明为测算` : '成品里没有出现数字' },
+    anchorRate: sum.total ? Math.round(sum.ok / sum.total * 100) : null,
+    artifacts: artifacts.map(a => ({ id: a.id, kind: a.kind, name: a.name, fullPath: a.fullPath, bytes: a.bytes, workType: a.workType, version: a.version, summary: a.summary, engine: a.engine || '底稿摘编', check: a.check ? { total: a.check.total, matched: a.check.matched, derived: a.check.derived, unmatched: a.check.unmatched, line: checkLine(a.check) } : null })),
+    qualityGate, submissions, trace,
   }
-
-  const existing = (db.get('kvstate', `harness_runs_${p.id}`)?.runs || []).filter(r => r.id !== finishedRun.id)
-  db.put('kvstate', { id: `harness_runs_${p.id}`, runs: [finishedRun, ...existing].slice(0, 20) }, { actor: user, reason: `Harness 完成成套材料制作 (${artifacts.length}份)`, action: 'harness.run' })
-  return finishedRun
+  saveRuns(db, user, p, [run, ...runsOf(db, p).filter(r => r.id !== run.id)], `成套制作完成（${artifacts.length} 份）`, 'harness.run')
+  return run
 }
 
 export function getHarnessStatus({ db }, p) {
-  const runs = p ? (db.get('kvstate', `harness_runs_${p.id}`)?.runs || []) : []
   return {
     presets: listHarnessPresets(),
+    depths: DEPTHS,
     kinds: Object.entries(KIND_LABELS).map(([id, label]) => ({ id, label })),
-    runs,
+    runs: p ? runsOf(db, p) : [],
   }
 }

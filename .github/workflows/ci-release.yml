@@ -1,9 +1,10 @@
-name: CI & Cross-Platform Release (macOS & Windows)
+name: CI and installers (macOS / Windows)
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -36,13 +37,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund && npm pack
+      - run: npm install --no-audit --no-fund
       - working-directory: desktop
-        run: npm install --no-audit --no-fund && ${{ matrix.cmd }}
+        run: npm install --no-audit --no-fund
+      - working-directory: desktop
+        run: ${{ matrix.cmd }}
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}
+          if-no-files-found: error
           path: |
-            *.tgz
             desktop/dist/*.dmg
             desktop/dist/*.exe
+
+  # 推 v 开头的标签时，把两个平台的安装包挂到同名的 Release 上
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package-desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "macOS: Apple 芯片选 mac-arm64.dmg，Intel 选 mac-x64.dmg。Windows: 选 win-x64.exe。安装包没有代码签名，首次打开的做法见仓库 README。"
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" dist/*.dmg dist/*.exe --clobber

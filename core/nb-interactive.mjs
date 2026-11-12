@@ -8,7 +8,7 @@ const str = (v, max = 400) => String(v ?? '').replace(/\p{Extended_Pictographic}
 const arr = v => Array.isArray(v) ? v : []
 export const INTERACTIVE = { mindmap: '思维导图', infographic: '一页速览', flashcards: '闪卡', quiz: '测验', audio: '对谈稿', video: '讲解分镜' }
 
-const CSS = `*{box-sizing:border-box}body{margin:0;background:#F4F2EC;color:#1B1A17;font:15px/1.7 "Segoe UI Variable","Source Han Sans SC","Noto Sans SC","PingFang SC",DengXian,sans-serif}
+const CSS = `*{box-sizing:border-box}i.no{font-style:normal}body{margin:0;background:#F4F2EC;color:#1B1A17;font:15px/1.7 "Segoe UI Variable","Source Han Sans SC","Noto Sans SC","PingFang SC",DengXian,sans-serif}
 main{max-width:920px;margin:0 auto;padding:44px 28px 72px}h1{font:700 30px/1.25 "Source Han Serif SC","Noto Serif SC","Songti SC",SimSun,serif;margin:6px 0 8px}
 h2{font:700 19px/1.3 "Source Han Serif SC","Noto Serif SC","Songti SC",SimSun,serif;margin:34px 0 10px;padding-top:14px;border-top:1px solid #1B1A17}
 .k{font-size:12px;letter-spacing:.14em;color:#2D5A4A;font-weight:700}.sub{color:#5F5B52;font-size:13.5px}.c{color:#2D5A4A;font-size:12px;font-family:Georgia,serif;white-space:nowrap}
@@ -99,11 +99,11 @@ function node(n) {
 }
 function body(kind, o) {
   if (kind === 'mindmap') return `<h2>${esc(str(o.root, 80))}</h2>` + arr(o.branches).filter(b => b?.name).map(b => `<details open><summary>${esc(str(b.name, 60))}</summary>${arr(b.children).filter(c => c?.text).map(node).join('')}</details>`).join('')
-  if (kind === 'flashcards') return arr(o.cards).filter(c => c?.q && c?.a).slice(0, 24).map((c, i) => `<details><summary>${String(i + 1).padStart(2, '0')}　${esc(str(c.q, 200))}</summary><p>${esc(str(c.a, 400))}${cite(c.cite)}</p></details>`).join('')
-  if (kind === 'quiz') return arr(o.questions).filter(q => q?.q).slice(0, 14).map((q, i) => `<h2>${i + 1}. ${esc(str(q.q, 240))}</h2>${arr(q.options).slice(0, 5).map((x, k) => `<span class="opt">${'ABCDE'[k]}. ${esc(str(x, 200))}</span>`).join('')}<details><summary>看答案</summary><p><span class="ok">${'ABCDE'[q.answer] ?? ''}</span>　${esc(str(q.why, 400))}${cite(q.cite)}</p></details>`).join('')
+  if (kind === 'flashcards') return arr(o.cards).filter(c => c?.q && c?.a).slice(0, 24).map((c, i) => `<details><summary><i class="no">${String(i + 1).padStart(2, '0')}</i>　${esc(str(c.q, 200))}</summary><p>${esc(str(c.a, 400))}${cite(c.cite)}</p></details>`).join('')
+  if (kind === 'quiz') return arr(o.questions).filter(q => q?.q).slice(0, 14).map((q, i) => `<h2><i class="no">${i + 1}.</i> ${esc(str(q.q, 240))}</h2>${arr(q.options).slice(0, 5).map((x, k) => `<span class="opt">${'ABCDE'[k]}. ${esc(str(x, 200))}</span>`).join('')}<details><summary>看答案</summary><p><span class="ok">${'ABCDE'[q.answer] ?? ''}</span>　${esc(str(q.why, 400))}${cite(q.cite)}</p></details>`).join('')
   if (kind === 'audio') return `<p><button id="play">朗读</button><button id="stop" class="g">停止</button></p>` + arr(o.turns).filter(t => t?.text).slice(0, 40).map(t => `<div class="turn"><span class="who${/乙|B/.test(t.speaker) ? ' b' : ''}">${esc(str(t.speaker, 8) || '甲')}</span><span class="say">${esc(str(t.text, 600))}</span></div>`).join('')
     + `<script>(()=>{const s=window.speechSynthesis;if(!s)return;document.getElementById('play').onclick=()=>{s.cancel();document.querySelectorAll('.turn').forEach(el=>{const u=new SpeechSynthesisUtterance(el.querySelector('.say').textContent.replace(/\\[\\d+\\]/g,''));u.lang='zh-CN';u.pitch=el.querySelector('.who.b')?1.15:0.92;s.speak(u)})};document.getElementById('stop').onclick=()=>s.cancel()})()</script>`
-  if (kind === 'video') return arr(o.scenes).filter(s => s?.narration).slice(0, 12).map((s, i) => `<h2>分镜 ${i + 1}　${esc(str(s.title, 60))}</h2><table><tr><th style="width:7em">画面</th><td>${esc(str(s.visual, 300))}</td></tr><tr><th>旁白</th><td>${esc(str(s.narration, 500))}${cite(s.cite)}</td></tr></table>`).join('')
+  if (kind === 'video') return arr(o.scenes).filter(s => s?.narration).slice(0, 12).map((s, i) => `<h2><i class="no">分镜 ${i + 1}</i>　${esc(str(s.title, 60))}</h2><table><tr><th style="width:7em">画面</th><td>${esc(str(s.visual, 300))}</td></tr><tr><th>旁白</th><td>${esc(str(s.narration, 500))}${cite(s.cite)}</td></tr></table>`).join('')
   const stats = arr(o.stats).filter(s => s?.value && s?.label).slice(0, 5)
   return (o.headline ? `<p style="font-size:18px;margin:14px 0 22px">${esc(str(o.headline, 200))}</p>` : '')
     + (stats.length ? `<div class="grid">${stats.map(s => `<div><div class="v">${esc(str(s.value, 20))}</div><div class="l">${esc(str(s.label, 40))}${cite(s.cite)}</div></div>`).join('')}</div>` : '')
@@ -111,11 +111,13 @@ function body(kind, o) {
 }
 
 /** 生成一个互动成品。返回 { html, text, engine, note }；text 是正文纯文字（数字核对用）。 */
-export async function buildInteractive(kind, p, docs, G, route) {
+export async function buildInteractive(kind, p, docs, G, route, { prompt = '' } = {}) {
   let data = null, engine = '', note = route?.adapter ? '' : (route?.reason || '未配置模型')
   if (route?.adapter && TASKS[kind]) {
     try {
-      const { out } = await authorStructured(route.adapter, p, docs, TASKS[kind])
+      const { out } = await authorStructured(route.adapter, p, docs, prompt ? `${TASKS[kind]}
+
+使用者的额外要求：${prompt}` : TASKS[kind])
       if (valid(kind, out)) { data = out; engine = route.label }
       else note = '模型给出的内容不完整'
     } catch (e) { note = `模型撰稿失败：${e.message}` }
@@ -129,5 +131,5 @@ export async function buildInteractive(kind, p, docs, G, route) {
 <div class="sub">${engine ? `由 ${esc(engine)} 依据底稿撰写` : `未调用模型，内容为底稿原文摘编（${esc(note)}）`}</div>
 ${empty ? '<p>所选底稿里没有可用于这类成品的内容。</p>' : inner}
 <footer>依据的底稿：${G.sources.map(s => `[${s.n}]《${esc(s.name)}》`).join('　')}</footer></main></body></html>`
-  return { html, text: inner.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<[^>]+>/g, ' '), engine, note, empty }
+  return { html, text: inner.replace(/<script[\s\S]*?<\/script>|<i class="no">[^<]*<\/i>/g, '').replace(/<[^>]+>/g, ' '), engine, note, empty }
 }

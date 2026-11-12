@@ -112,7 +112,7 @@ export async function seed({ db, dir, engine, renderDeliverable, system }) {
     const realDocs = await loadRealDocs(p)
     if (md) realDocs.unshift({ name: `${p.name}核定纪要`, text: md })
     const richMd = buildComprehensiveMarkdown(p, type, realDocs)
-    const d = await renderDeliverable({ projectId: p.id, type, markdown: richMd, user: U(by), engine: '100%源依据编制', status })
+    const d = await renderDeliverable({ projectId: p.id, type, markdown: richMd, user: U(by), engine: '底稿摘编', status })
     const cur = db.get('projects', p.id)
     db.put('projects', { ...cur, works: cur.works.map(w => w.type === type && !w.deliverableId ? { ...w, deliverableId: d.id, status: status === 'final' ? 'done' : 'doing' } : w) }, m)
     return d

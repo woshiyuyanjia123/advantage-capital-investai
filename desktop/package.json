@@ -1,8 +1,8 @@
 {
-  "name": "dsh-优势资本投研-fde",
-  "productName": "优势资本智能投研工作台",
-  "version": "3.0.0",
-  "description": "优势资本智能投研 项目管理工作台（内置 DSH 插件自动挂载 + 本地离线/云端 API）",
+  "name": "investai-workbench",
+  "productName": "InvestAI",
+  "version": "3.2.0",
+  "description": "优势资本 · 智能投研工作台（桌面版）",
   "author": "InvestAI",
   "license": "UNLICENSED",
   "private": true,
@@ -10,9 +10,9 @@
   "scripts": {
     "prepare-src": "node scripts/prepare.mjs",
     "start": "node scripts/prepare.mjs && electron .",
-    "dist:mac": "node scripts/prepare.mjs && electron-builder --mac",
-    "dist:win": "node scripts/prepare.mjs && electron-builder --win",
-    "dist": "node scripts/prepare.mjs && electron-builder --mac && electron-builder --win"
+    "dist:mac": "node scripts/prepare.mjs && electron-builder --mac --publish never",
+    "dist:win": "node scripts/prepare.mjs && electron-builder --win --publish never",
+    "dist": "node scripts/prepare.mjs && electron-builder --mac --publish never && electron-builder --win --publish never"
   },
   "dependencies": {
     "docx": "9.5.1",
@@ -26,10 +26,10 @@
     "resedit": "2.0.3"
   },
   "build": {
-    "appId": "com.dsh.优势资本投研.fde",
-    "productName": "优势资本智能投研工作台",
-    "copyright": "优势资本投研 FDE",
-    "artifactName": "DSH-优势资本投研-FDE-Setup-${version}-${os}-${arch}.${ext}",
+    "appId": "com.investai.workbench",
+    "productName": "InvestAI",
+    "copyright": "优势资本",
+    "artifactName": "InvestAI-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -80,8 +80,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "优势资本 · 智能投研工作台",
-      "uninstallDisplayName": "优势资本 · 智能投研工作台",
+      "shortcutName": "优势资本 智能投研",
+      "uninstallDisplayName": "优势资本 智能投研（InvestAI）",
       "deleteAppDataOnUninstall": false
     },
     "afterPack": "scripts/after-pack.cjs"

@@ -1,98 +1,128 @@
-// Studio 8 大加工成品定向生成器（严格按勾选 fileIds 提炼 + 自动落盘项目专属文件夹 + 智能追问建议）
-import { renderDocx, renderPptx, renderXlsx } from './office.mjs'
-import { sheetsFromMarkdown } from './deliverables.mjs'
+// 成果编制：按勾选的底稿生成演示文稿、报告、数据表、投委会备忘录和互动成品，存进项目文件夹。
+// 有模型时由模型通读底稿后撰写；没有模型、策略不允许外发或模型失败时，退回底稿原文摘编，并在成品和返回值里写明原因。
+// 每份成品都把出现的数字和底稿核对一遍，结果随成品一起返回（check）。
+import { renderDocx, renderXlsx } from './office.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
-import { buildComprehensiveMarkdown, buildRichPptSlides } from './nb-deep-doc.mjs'
-import { extractGroundedFacts, generateTwoHostScript, renderInteractiveNlmHtml, synthesizeDeepSeekSection } from './nb-nlm-pipeline.mjs'
-import { buildEquityResearchMemoHtml } from './nb-equity-memo.mjs'
-import { planPptDeckWithAi } from './nb-ppt-ai.mjs'
-import { runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
-import { prepareSources, checkNumbers } from './nb-ground.mjs'
+import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
+import { prepareSources, checkNumbers, checkLine } from './nb-ground.mjs'
+import { authorDeck, authorReport } from './nb-author.mjs'
+import { buildOfflineDeck, renderDeck, deckText, deckToMarkdown } from './nb-deck.mjs'
+import { buildInteractive, INTERACTIVE } from './nb-interactive.mjs'
 
 export function buildFollowUps(p, question = '', checkedNames = []) {
-  const srcHint = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选资料'
+  const src = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选的底稿'
   const stage = p?.stage || '当前阶段'
   return [
-    `基于${srcHint}，为「${p?.name || '本项目'}」生成一份 ≥3MB 麦肯锡咨询风演示文稿 PPT？`,
-    `围绕「${stage}」准入要求，${srcHint}中还有哪些待核实风险或数据冲突？`,
-    `将刚才的分析结论一键转化为「${stage}」正式 Word 报告或结构化数据表格并存入项目文件夹？`,
+    `${src}和其他底稿在同一指标上有没有口径不一致的地方？`,
+    `按「${stage}」的准入要求，这个项目还缺哪些材料、哪些事项没核实？`,
+    `把上面的分析整理成一份给投委会的汇报提纲，每页一个判断。`,
   ]
 }
 
-export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, b) {
-  const kind = String(b.kind || 'ppt')
-  const theme = String(b.theme || 'mck')
-  const pageCount = Math.max(4, Math.min(24, Number(b.pageCount) || 8))
-  const targetMB = Math.max(3, Math.min(35, Number(b.targetMB) || 6))
-  const density = ['concise', 'standard', 'dense'].includes(b.density) ? b.density : 'standard'
+const MEMO_PROMPT = '这是提交投委会的投资备忘录。章节按下面的顺序考虑，底稿没有材料的部分并入相邻章节或列入待补充信息：交易概要；公司与团队；行业与需求；产品、技术与客户；竞争与替代；财务表现与口径核对；估值与条款；反方意见（站在否决这个项目的立场，列出最强的三到五条理由，逐条写明底稿里的依据）；结论与交割前必须完成的事项。结论一章必须给出明确态度（建议推进、暂缓或放弃）和理由；不打分、不评星。'
+
+/** 项目记录里只存阶段的 id，这里补上阶段名给成品和提示词用；不写回数据库。 */
+export function withStage(db, p) {
+  if (!p || p.stage) return p
+  const name = db.get('workflows', p.workflowId)?.stages?.find(s => s.id === p.stageId)?.name
+  return name ? Object.defineProperty({ ...p }, 'stage', { value: name, enumerable: false }) : p
+}
+
+/** 读出勾选的底稿（没勾选时用项目的全部底稿），返回正文和其中最高的密级。成品自己不算底稿。 */
+export async function gatherDocs({ kb, org }, user, p, fileIds) {
   let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
   if (!allFiles.some(f => f.mountId !== 'm_ws')) {
     await kb.scanAll().catch(() => {})
     allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
   }
-  const rawSources = allFiles.filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('Studio成品'))
-  const pool = rawSources.length ? rawSources : allFiles
-  const matched = b.fileIds?.length ? allFiles.filter(f => b.fileIds.includes(f.id)) : []
-  const picked = (matched.length ? matched : pool).slice(0, 12)
+  const rawSources = allFiles.filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/'))
+  const matched = fileIds?.length ? allFiles.filter(f => fileIds.includes(f.id)) : []
+  const picked = (matched.length ? matched : rawSources.length ? rawSources : allFiles).slice(0, 20)
   const docs = []
+  let levelMax = 0
   for (const f of picked) {
     const r = await kb.read(f.id, user).catch(() => null)
-    if (r?.text) docs.push({ id: f.id, name: f.name, text: org.redact(user, r.text).slice(0, 6000) })
+    if (!r?.text?.trim()) continue
+    docs.push({ id: f.id, name: f.name, level: f.level ?? 1, text: org.redact(user, r.text).slice(0, 80000) })
+    levelMax = Math.max(levelMax, f.level ?? 1)
   }
-  const srcNames = docs.map(d => d.name)
-  const snippets = docs.flatMap((d, idx) => d.text.split(/\n|。/).map(s => s.trim()).filter(s => s.length > 12 && s.length < 110).slice(0, 5).map(s => `${s} [${idx + 1}]`))
+  return { docs, levelMax }
+}
+
+export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, b) {
+  p = withStage(db, p)
+  const kind = String(b.kind || 'ppt')
+  const theme = String(b.theme || 'mck')
+  const pageCount = Math.max(4, Math.min(24, Number(b.pageCount) || 8))
+  const density = ['concise', 'standard', 'dense'].includes(b.density) ? b.density : 'standard'
+  const { docs, levelMax } = await gatherDocs({ kb, org }, user, p, b.fileIds)
+  if (!docs.length) throw Object.assign(new Error('所选底稿里没有读到文字，无法生成成果。请确认底稿已上传并解析完成。'), { status: 400 })
+  const G = prepareSources(p, docs)
+  const route = await ai?.route?.(levelMax).catch(e => ({ adapter: null, reason: e.message })) ?? { adapter: null, reason: '未配置模型' }
   const ws = db.one('mounts', x => x.kind === 'workspace')
   const stamp = new Date().toISOString().slice(0, 10)
-  const grounded = prepareSources(p, docs)
-  const needMesh = ['ppt', 'word', 'report', 'table', 'xlsx', 'ic_memo'].includes(kind)
-  const docSig = docs.map(d => d.id).join(',')
-  const prevMesh = db.get('kvstate', `mesh_${p.id}`)
-  const mesh = !needMesh ? null : (prevMesh && prevMesh.docSig === docSig && Date.now() - (prevMesh.savedAt || 0) < 180000)
-    ? prevMesh
-    : await runAgentMeshCrossCheck(ai, p, docs)
-  if (mesh && mesh !== prevMesh) db.put('kvstate', { id: `mesh_${p.id}`, docSig, savedAt: Date.now(), ...mesh }, { actor: user, reason: `Agent×Agent 网状互校 (${kind})`, action: 'mesh' })
-  const meshCert = mesh ? { engine: mesh.engine, rate: mesh.numCheck?.rate ?? 100, conflicts: mesh.conflicts?.length ?? 0, dist: mesh.credibilityDist, elapsedMs: mesh.elapsedMs } : null
+  const save = (fileName, buffer, meta) => writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName, buffer, kind, sourceCount: docs.length, ...meta })
+  const describe = (engine, note) => engine ? `${engine} 撰写` : `底稿摘编（${note}）`
+
   if (kind === 'ppt') {
-    const plan = await planPptDeckWithAi(ai, p, docs, { pageCount, density, userPrompt: b.prompt, mesh })
-    const slideCorpus = plan.slides.map(s => `${s.title} ${(s.bullets || []).join(' ')}`).join('\n')
-    const check = checkNumbers(slideCorpus, grounded.corpus)
-    const buf = await renderPptx({ title: `${p.name} · 专项投研演示文稿`, subtitle: `基于已勾选 ${docs.length} 份底稿 Agent×Agent 互校编排 · 规格：${pageCount}页 / 目标~${targetMB}MB`, slides: plan.slides, sources: srcNames, theme, pageCount, targetMB, density })
+    let deck = null, engine = '', note = route.adapter ? '' : route.reason, issues = []
+    if (route.adapter) {
+      try {
+        const r = await authorDeck(route.adapter, p, docs, { pageCount, density, prompt: b.prompt })
+        deck = r.deck; issues = r.issues; engine = route.label
+      } catch (e) { note = `模型撰稿失败：${e.message}` }
+    }
+    if (!deck) deck = buildOfflineDeck(p, G, { pageCount })
+    deck.sources = G.sources
+    deck.kicker ||= [p.stage, p.fields?.round].filter(Boolean).join(' · ')
+    const check = checkNumbers(deckText(deck), G.corpus)
+    deck.check = check
+    deck.engineNote = engine ? `正文由 ${engine} 依据底稿撰写。${issues.join('；')}` : `本稿未调用模型，内容为底稿原文摘编（${note}）。`
+    const buf = await renderDeck(deck, { theme })
+    const pages = deck.slides.length + 2
     const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
-    const ver = await deliverables.addVersion(user, d, { buffer: buf, ext: '.pptx', engine: `${mesh?.engine || 'Carbon'} 多版式PPT架构师 (${pageCount}页)`, sources: docs.length, note: `${pageCount}页 · ${(buf.length / 1048576).toFixed(2)}MB · 互校${meshCert?.rate ?? 100}%` })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_演示文稿_${pageCount}页_${stamp}.pptx`, buffer: buf, kind: 'ppt', workType: '立项报告', deliverableId: d.id, version: ver.version.v, pages: pageCount, engine: mesh?.engine || 'Carbon', check, sourceCount: docs.length, meshCert, summary: `${pageCount}页发布会与麦肯锡多版式 PPT（${(buf.length / 1048576).toFixed(2)}MB · 互校锚定率 ${meshCert?.rate ?? 100}%）`, extra: { workType: '立项报告', deliverableId: d.id, version: ver.version.v, pages: pageCount, engine: mesh?.engine || 'Carbon', check } })
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: deckToMarkdown(deck), ext: '.pptx', engine: engine || '底稿摘编', sources: docs.length, note: `${pages} 页` })
+    return save(`${p.name}_演示文稿_${pages}页_${stamp}.pptx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `${pages} 页 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues, pages })
   }
-  if (kind === 'word' || kind === 'report') {
-    const aiSec = await synthesizeDeepSeekSection(ai, p, docs, b.prompt)
-    const meshMd = mesh ? `\n\n## Agent × Agent 跨源矛盾对质与蓝军复核纪要（${mesh.engine}）\n- **核心投资主线**：${mesh.thesis}\n${(mesh.conflicts || []).map(c => `- **【${c.topic}】** BP自述：${c.bpClaim} ｜ 审计/底稿实证：${c.auditFact} ➔ *条款建议：${c.impact}*`).join('\n')}` : ''
-    const md = buildComprehensiveMarkdown(p, '尽调与投决深度报告', docs, snippets, { chapterCount: pageCount, density }) + meshMd + (aiSec ? `\n\n## Carbon 首席合伙人专项研判与交割保护建议\n${aiSec}` : '')
-    const check = checkNumbers(md, grounded.corpus)
-    const buf = await renderDocx({ title: `${p.name} · 尽调与投决深度报告`, subtitle: `严格基于已勾选 ${docs.length} 份底稿经 Agent×Agent 互校生成 · 规格：${pageCount}章核验版`, markdown: md })
-    const d = deliverables.ensure(p.id, '尽调报告', {}, user)
-    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: mesh?.engine || '深度报告引擎', sources: docs.length, note: `${pageCount}章尽调报告 · 互校${meshCert?.rate ?? 100}%` })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_深度尽调报告_${pageCount}章_${stamp}.docx`, buffer: buf, kind: 'word', workType: '尽调报告', deliverableId: d.id, version: ver.version.v, check, engine: mesh?.engine || '深度报告引擎', sourceCount: docs.length, meshCert, summary: `${pageCount}章深度尽调报告（${docs.length}份底稿互校 · 锚定率 ${meshCert?.rate ?? 100}%）`, extra: { workType: '尽调报告', deliverableId: d.id, version: ver.version.v, engine: mesh?.engine || '深度报告引擎', check } })
+
+  if (kind === 'word' || kind === 'report' || kind === 'ic_memo') {
+    const memo = kind === 'ic_memo'
+    const type = memo ? '投资备忘录' : '尽职调查报告'
+    const chapters = memo ? 9 : Math.max(3, Math.min(12, pageCount))
+    let md = '', engine = '', note = route.adapter ? '' : route.reason, issues = []
+    if (route.adapter) {
+      try {
+        const r = await authorReport(route.adapter, p, docs, { type, chapters, density, prompt: [memo ? MEMO_PROMPT : '', b.prompt].filter(Boolean).join('\n') })
+        md = r.markdown; issues = r.issues; engine = route.label
+      } catch (e) { note = `模型撰稿失败：${e.message}` }
+    }
+    if (!md) md = buildComprehensiveMarkdown(p, memo ? '投资备忘录（底稿摘编，结论待投资经理填写）' : type, docs)
+    const check = checkNumbers(md, G.corpus)
+    const title = md.match(/^#\s+(.+)$/m)?.[1] ?? `${p.name} ${type}`
+    const buf = await renderDocx({ title, subtitle: `${engine ? `${engine} 依据 ${docs.length} 份底稿撰写` : `${docs.length} 份底稿的原文摘编`} · ${stamp}`, markdown: md.replace(/^#\s+.+\n+/, ''), footer: checkLine(check) + (check.unmatched.length ? `：${check.unmatched.slice(0, 8).map(u => u.value).join('、')}` : '') })
+    const d = deliverables.ensure(p.id, memo ? '投资建议书' : '尽调报告', {}, user)
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: engine || '底稿摘编', sources: docs.length, note: type })
+    const chars = md.replace(/\s/g, '').length
+    return save(`${p.name}_${type}_${stamp}.docx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `约 ${chars} 字 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues })
   }
+
   if (kind === 'table' || kind === 'xlsx') {
-    const baseSheets = sheetsFromMarkdown(buildComprehensiveMarkdown(p, '尽调清单', docs, snippets), '核验表')
-    const rows = (snippets.length ? snippets : ['核心指标正常 [1]']).map((s, i) => ({ idx: `E-${i + 1}`, finding: s, src: srcNames[i % Math.max(1, srcNames.length)] || '项目资料', status: '已溯源核对' }))
-    const conflictRows = (mesh?.conflicts || []).map((c, i) => ({ idx: `C-${i + 1}`, topic: c.topic, bp: c.bpClaim, audit: c.auditFact, impact: c.impact }))
-    const sheets = [
-      ...baseSheets,
-      { name: '4-勾选资料逐条溯源台账', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '提取事实与量化指标', key: 'finding', width: 64 }, { header: '对应勾选来源', key: 'src', width: 32 }, { header: '核对状态', key: 'status', width: 14 }], rows },
-      { name: '5-Agent跨源矛盾对质台账', columns: [{ header: '编号', key: 'idx', width: 10 }, { header: '对质维度', key: 'topic', width: 22 }, { header: 'C级BP自述', key: 'bp', width: 42 }, { header: 'A/B级审计与尽调实证', key: 'audit', width: 44 }, { header: '估值与CP条款影响', key: 'impact', width: 36 }], rows: conflictRows },
-    ]
-    const buf = await renderXlsx({ title: `${p.name} · 五维投研核验与跨源对质数据表`, sheets })
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_数据表格_${stamp}.xlsx`, buffer: buf, kind: 'xlsx', sourceCount: docs.length, meshCert, summary: `五工作表核验与跨源对质台账 XLSX（源自 ${docs.length} 份底稿）` })
+    const sheets = G.tables.slice(0, 12).map((t, i) => ({
+      name: `${i + 1}-${t.title}`.slice(0, 28),
+      columns: t.head.map((h, c) => ({ header: h || `列${c + 1}`, key: `c${c}`, width: Math.max(12, Math.min(40, String(h).length * 2 + 8)) })),
+      rows: t.rows.map(r => Object.fromEntries(r.map((v, c) => [`c${c}`, /^-?[\d,]+(\.\d+)?$/.test(v) ? Number(v.replace(/,/g, '')) : v]))),
+      notes: `来源：[${t.n}]《${t.source}》`,
+    }))
+    const numbered = G.passages.filter(x => /\d/.test(x.text))
+    sheets.push({ name: '数据摘录', columns: [{ header: '编号', key: 'i', width: 8 }, { header: '底稿原文', key: 't', width: 80 }, { header: '来源', key: 's', width: 30 }, { header: '主题', key: 'k', width: 16 }], rows: numbered.map((x, i) => ({ i: i + 1, t: x.text, s: `[${x.n}] ${G.sources[x.n - 1].name}`, k: x.topics.map(t => ({ overview: '主体', business: '业务', finance: '财务', risk: '风险', todo: '待核实' })[t]).join('、') })) })
+    const todo = G.passages.filter(x => x.topics.includes('todo') || x.topics.includes('risk'))
+    if (todo.length) sheets.push({ name: '风险与待核实', columns: [{ header: '编号', key: 'i', width: 8 }, { header: '事项（底稿原文）', key: 't', width: 80 }, { header: '来源', key: 's', width: 30 }, { header: '责任人', key: 'o', width: 14 }, { header: '核实结果', key: 'r', width: 30 }], rows: todo.map((x, i) => ({ i: i + 1, t: x.text, s: `[${x.n}] ${G.sources[x.n - 1].name}`, o: '', r: '' })) })
+    const buf = await renderXlsx({ title: `${p.name} 底稿数据表`, sheets })
+    return save(`${p.name}_数据表_${stamp}.xlsx`, buf, { summary: `${sheets.length} 张工作表：底稿原表 ${G.tables.length} 张、数据摘录 ${numbered.length} 条${todo.length ? `、风险与待核实 ${todo.length} 条` : ''}`, engine: '底稿摘编' })
   }
-  if (kind === 'ic_memo') {
-    const html = buildEquityResearchMemoHtml(p, docs, user, mesh)
-    const check = checkNumbers(html.replace(/<[^>]+>/g, ' '), grounded.corpus)
-    return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_投委会备忘录_IC_Memo_${stamp}.html`, buffer: Buffer.from(html, 'utf8'), kind: 'ic_memo', workType: '投资建议书', sourceCount: docs.length, meshCert, summary: `九章券商研报级 IC 备忘录（含动态估值沙盘与 ${meshCert?.conflicts ?? 1} 项蓝军对质）`, extra: { workType: '投资建议书', check } })
-  }
-  const labelMap = { mindmap: '思维导图', infographic: '信息图', flashcards: '闪卡', quiz: '测验', audio: '音频概览与双人对谈', video: '视频概览脚本' }
-  const label = labelMap[kind] || '专项成果'
-  const interactiveFacts = extractGroundedFacts(p, docs)
-  const turns = kind === 'audio' ? await generateTwoHostScript(ai, p, docs, interactiveFacts) : []
-  const html = renderInteractiveNlmHtml(p, kind, docs, { ...interactiveFacts, turns })
-  const check = checkNumbers(html.replace(/<[^>]+>/g, ' '), grounded.corpus)
-  return writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName: `${p.name}_${label}_${stamp}.html`, buffer: Buffer.from(html, 'utf8'), kind, sourceCount: docs.length, meshCert, summary: `${label}（源自 ${docs.length} 份勾选资料）`, extra: { check } })
+
+  const label = INTERACTIVE[kind] ?? '专项成果'
+  const r = await buildInteractive(kind, p, docs, G, route, { prompt: b.prompt })
+  const check = checkNumbers(r.text, G.corpus)
+  return save(`${p.name}_${label}_${stamp}.html`, Buffer.from(r.html, 'utf8'), { summary: `${label} · ${describe(r.engine, r.note)} · ${checkLine(check)}`, engine: r.engine || '底稿摘编', engineNote: r.note, check })
 }

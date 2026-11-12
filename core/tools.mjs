@@ -99,15 +99,14 @@ export function registerTools(ctx, ready) {
 
   tool({
     name: 'investai_harness_plan',
-    description: '【Harness 可控思考规划】在制作材料前，先对项目底稿开展 A/B/C 信用分级盘点、跨源矛盾预判，输出结构化思考步骤、证据缺口与成套材料制作蓝图（供人工审阅或后续执行）。',
+    description: '成套制作的第一步：读项目底稿，输出制作方案（底稿能回答什么、缺什么、每份材料侧重什么），存下来供人审阅，不生成文件。没有可用模型时方案只列底稿盘点结果。',
     parameters: obj({
       projectId: str('项目 ID'),
       goal: str('制作目标与侧重点，例如：为衡远储能制作投委会全套上会材料包，重点核查收入确认时点'),
-      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: '思考深度：fast / balanced / deep（默认 deep）' },
+      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: 'fast 不做模型规划；balanced 模型出方案；deep 再加交叉核对和一次重写（默认 balanced）' },
       kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] }, description: '可选，指定要制作的成果种类列表' },
       pageCount: { type: 'integer', description: '页数或章节数（4-24，默认 8）' },
-      targetMB: { type: 'integer', description: 'PPT 目标体积 MB（3-35，默认 6）' },
-      withTianyancha: { type: 'boolean', description: '是否先调用天眼查七维商事司法穿透补齐 A 级底稿' },
+      withTianyancha: { type: 'boolean', description: '是否先用天眼查查询工商基本信息并存为底稿（需要机构已配置 Token，否则跳过）' },
     }, ['projectId']),
     async run(core, a, u) {
       core.org.assertAi(u, 1)
@@ -122,17 +121,16 @@ export function registerTools(ctx, ready) {
 
   tool({
     name: 'investai_harness_produce',
-    description: '【Harness 操作调用制作执行器】按已审阅的 planId 或直接按目标受控思考并调用完整制作能力（天眼查穿透 -> Agent×Agent 网状互校 -> 编译 PPT/Word/XLSX/九章IC备忘录等 -> 解压体积与数字核对质检 -> 可选自动报送阶段工作项）。',
+    description: '成套制作的第二步：按 planId 对应的方案（或现场出方案）逐份生成演示文稿、尽调报告、投委会备忘录、数据表等文件，每份都把数字和底稿核对，返回每份的质检结果；可选把合格的成品报送到当前阶段的工作项。',
     parameters: obj({
       projectId: str('项目 ID'),
       planId: str('可选，investai_harness_plan 返回的蓝图 ID'),
       goal: str('制作指令与核心诉求'),
-      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: '思考深度，默认 deep' },
+      thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'], description: '思考深度，默认 balanced' },
       kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] }, description: '要编译的成果列表' },
       pageCount: { type: 'integer', description: '页数或章节数（4-24，默认 8）' },
-      targetMB: { type: 'integer', description: 'PPT 目标体积 MB（3-35，默认 6）' },
-      withTianyancha: { type: 'boolean', description: '是否联动天眼查七维穿透' },
-      autoSubmitStage: { type: 'boolean', description: '质检通过后是否自动挂接报送至当前阶段匹配工作项' },
+      withTianyancha: { type: 'boolean', description: '是否先做天眼查工商核查' },
+      autoSubmitStage: { type: 'boolean', description: '是否把质检通过的成品报送到当前阶段对应的工作项' },
     }, ['projectId']),
     async run(core, a, u) {
       core.org.assertAi(u, 2)

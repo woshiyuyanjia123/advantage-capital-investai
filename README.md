@@ -1,68 +1,114 @@
-# 优势资本 · 智能投研工作台（AC Investment SaaS · Agentic Harness & DSH 插件版 v4.0）
+# 优势资本 · 智能投研工作台
 
-本项目是面向一级市场股权投资机构的 **生产级智能投研与全周期流程治理系统**，提供 **Agentic Harness 插件版**、**macOS / Windows 独立桌面安装包** 与 **本地/机构私有模型混合服务**。系统内置 **Harness 受控思考与操作编排引擎（`core/nb-harness.mjs`）**、**Agent × Agent 三侧实时并发互校（`core/nb-agent-mesh.mjs`）** 与 **原文逐数字溯源核验（`core/nb-ground.mjs`）**，通过操作能力可控地调用全套 9 大类投研材料制作管线并闭环报送阶段门禁。
+给一级市场投资机构用的项目管理软件：把一个项目的底稿放进来，就底稿提问，生成演示文稿、尽调报告、投委会备忘录、数据表，再把成品报送到阶段门禁里走审核。可以装成桌面应用（macOS、Windows），也可以作为 DeepSeek Harness（DSH）的插件运行。
 
----
+当前版本 3.2.0。
 
-## 一、核心工程演进与多仓库架构融合（Architecture & Provenance）
+## 安装
 
-1. **全生命周期门禁治理（借鉴 `cheng241105-gif/ai-investment-management`）**
-   - 覆盖“项目线索 → 立项准备 → 立项会 → 尽职调查 → 投资决策（IC）→ 协议交割 → 投后赋能 → 退出归档” 8 大阶段门禁（Stage Gate）与 15 岗位四层权限矩阵；
-   - 基于中英字符视觉宽度的行高估算与长表跨页表头重复算法（`core/office.mjs`）。
-2. **零构建 SQLite 快照共核与宿主协议适配（借鉴 `evanzhu0105-ship-it/InvestAI-Desktop`）**
-   - `core/`（SQLite 全版本快照、四层权限 `org.mjs`、生命周期 `lifecycle.mjs`、会议转写 `meetings.mjs`）与 `lib/`（Cordis 插件宿主与 `@deepseek-ai/dsh-agent-adapter-core` 工具注册）；
-   - 工具调用多轮思维链（`reasoning_content`）保真回传、流式 `finish_reason` 零挂起释放、永久配置错误与瞬时限流精准分流。
-3. **企业级扩展与机构投研规范融合**
-   - **`YFGaia/dify-plus` 企业配额与机构模板治理**（`core/nb-dify-plus.mjs`）：月度调用预算账本、密钥脱敏与高频机构工作流排序；
-   - **`bdim404/tianyancha-dify-plugin` 商事司法穿透**（`core/nb-tianyancha.mjs`）：一键生成工商、股权、实控人、司法涉诉七维穿透底稿并自动评级为 **A级·强公信**；
-   - **`garrettqmd/Multimodal-AI-Work-Assistant` 多模态语音四路路由**（`core/nb-voice-router.mjs`）：本地离线语音转写并自动分流至问答、尽调纪要、风险标记或材料编制；
-   - **`D-kart/investor-skill` 九章券商级 IC 备忘录**（`core/nb-equity-memo.mjs`）：零主观打星、内嵌跨源矛盾对质表与动态估值/MOIC 敏感性滑块沙盘。
+到仓库的 [Releases](https://github.com/woshiyuyanjia123/dsh-notebooklm-fde/releases) 页下载：
 
----
+| 系统 | 文件 |
+|---|---|
+| macOS，Apple 芯片 | `InvestAI-3.2.0-mac-arm64.dmg` |
+| macOS，Intel | `InvestAI-3.2.0-mac-x64.dmg` |
+| Windows 10 / 11 | `InvestAI-3.2.0-win-x64.exe` |
 
-## 二、Agentic Harness：可控思考与操作调用制作引擎（`core/nb-harness.mjs`）
+安装包没有代码签名。macOS 第一次打开要在“应用程序”里右键点“打开”；Windows 弹出 SmartScreen 时点“更多信息”，再点“仍要运行”。
 
-系统将 **Harness 的操作编排能力** 与 **Studio 9 大类投研材料编译能力** 深度贯通，告别黑盒一次性盲写：
+以前装过 InvestAI 的机器直接装新版，会覆盖旧程序，数据保留。数据在 macOS 的 `~/Library/Application Support/InvestAI`、Windows 的 `%APPDATA%\InvestAI`。
 
-1. **三档可控思考深度（Controllable Thinking）**
-   - `fast`（快速直出）：轻量底稿盘点后直接调度编译器；
-   - `balanced`（均衡校验）：两阶段思考规划 + 原文数字核对；
-   - `deep`（五步深度反思 + 红蓝军互校 + 自愈重编）：先盘点 **A/B/C 证据信用等级** → 预判 BP 与审计/合同跨源矛盾 → 定制每件材料的专属指令与规格 → 顺序调度制作 → 二进制/XML 解压质检（不达标自动触发修正重编）。
-2. **先审批蓝图、可微调编辑、再受控执行**
-   - 支持 **「① 生成可控思考蓝图」**：向操作人透明展示思考链（`thinkingTrace`）、证据缺口（`gaps`）与每件材料的制作指令、页数与目标体积，允许人工在线增删调整后再点击执行；
-   - 支持 **「⚡ 一键思考并制作全套材料」**：内置 **投决会全套（IC 备忘录 + 路演 PPT + 深度尽调 Word + 财务对质台账 XLSX）**、**立项会标准包**、**尽调穿透核验包** 三套机构预设，自动携带天眼查穿透并在质检通过后一键报送当前阶段对应工作项。
-3. **三端操作能力全开放**
-   - **宿主会话工具（`core/tools.mjs`）**：向外部 Harness 会话注册 `investai_harness_plan`、`investai_harness_execute`、`investai_studio_make`、`investai_tianyancha_enrich` 等操作工具；
-   - **内置智能体（`core/agent.mjs`）**：在授权级别下可直接调用 `harness_plan`、`harness_execute`、`studio_make` 完成成套材料交付；
-   - **工作台可视化操控舱（`app/views/nb-workspace.js`）**：右栏内置 **「🧠 Harness 可控思考制作舱」**，实时追踪每一步操作状态与质检结果。
+装好后从开始菜单或桌面的“优势资本 智能投研”打开。首次打开带三个示例项目，可以直接点着看。
 
----
+## 连接模型
 
-## 三、三界面一级市场机构产品架构
+右上角“设置与帮助”里点“模型连接”。三种接法：
 
-1. **第一界面：`投研项目总览`（`app/views/nb-shelf.js`）**
-   - 顶部陈列 5 大优势资本方法论智库；下方展示在管项目组合网格，展开全周期总进度（`overallPct%`）、当前阶段完成度、快速报送通道与项目专属档案室。
-2. **第二界面：`尽调与研判工作台`（`app/views/nb-workspace.js`）**
-   - **左栏（纯净底稿池 + A/B/C 证据信用徽章）**：严格隔离原始底稿与生成产物，支持上传底稿、天眼查穿透与访谈纪要；
-   - **中栏（底稿溯源深度研判 + 红蓝军跨源矛盾对质雷达）**：实时流式带 `[n]` 角标问答，附带 3 张阶段化追问建议卡；
-   - **右栏（Harness 可控思考制作舱 + 9 宫格成果中心 + 右下角已编制成果直览）**：支持双轨高审美 PPT（麦肯锡咨询 6 版式 + 深蓝科技网格发布会 5 版式，单份 `≥ 3MB`）、九章 IC 备忘录、深度尽调 Word、5-Sheet 财务对质台账 XLSX 等 9 类成果；所有成果自动落盘项目档案室并陈列于右下角，支持 **0.1s 应用内全格式解压直览**、原文逐数字核对签章与一键报送阶段复核。
-3. **第三界面：`阶段门禁与投决中心`（`app/views/nb-flow-board.js` + `core/nb-flow-board.mjs`）**
-   - 左栏选用已编制成果（精准映射对应 `workType` 工作项，不重复冗余建版）直交或微调报送；中栏管控 8 大阶段门禁与定稿；右栏支持 15 岗位视角切换、四层权限透视与投决表决。
-   - 顶栏支持 **深色 / 浅色双主题一键切换** 与沉浸式 **⚙️ 设置与帮助** 菜单。
+- DeepSeek：填 API Key。
+- 其他兼容 OpenAI 接口的服务：填接口地址、模型名、API Key。
+- 本机模型（Ollama、LM Studio 等）：填本机地址和模型名，底稿不出本机。
 
----
+没有连接模型时软件照常能用：成品只摘编底稿原文，并在成品上标“底稿摘编”。
 
-## 四、macOS 与 Windows 双平台安装与构建指南
+密级规则：底稿默认是机密级。机构设置里可以规定某个密级以上的底稿只能交给本机模型。在桌面版的连接窗口里选了云端模型，等于同意把底稿正文发给这个模型。
 
-| 维度 | macOS (`arm64` / `x64`) | Windows 10 / 11 (`x64`) |
-|---|---|---|
-| **Harness 插件一键挂载** | `sh scripts/install-mac.sh` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-win.ps1` |
-| **源码启动独立桌面端** | `npm install && npm run desktop` | `npm install && npm run desktop` |
-| **打包独立桌面安装程序** | `cd desktop && npm install && npm run dist:mac` | `cd desktop && npm install && npm run dist:win` |
-| **本地离线语音引擎配置** | `sh scripts/setup-asr.sh` | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-asr.ps1` |
+## 三个界面
 
-### 自动化验收测试套件（11 套文件 · 69 项全链路测试）
+- 项目总览：所有项目、各自的阶段和进度。
+- 研判工作台：左边是底稿，中间就勾选的底稿提问（回答带来源编号），右边生成成品。
+- 阶段门禁：每个阶段要交哪些工作成果、谁审、现在卡在哪。成品从工作台报送到这里。
+
+## 成品是怎么写出来的
+
+1. 整理底稿：把勾选的底稿拆成带编号的句子、表格和“名称：数值”条目。
+2. 撰写：连了模型时，模型先通读底稿定提纲，再分批写正文；演示文稿每页用什么形式（表格、图表、要点、对比）由模型按内容决定。没有模型时只摘编底稿原文。
+3. 核对：成品里出现的每个数字都和底稿对一遍。底稿里有的算一致，写明“测算”并给出算式的算测算，其余的列出来，在成品行上标“N 处数字待核对”。
+
+成品上会写明是哪个模型写的，或者为什么没有调用模型。
+
+## 成套制作
+
+工作台右上角的“成套制作”一次生成几份材料。分两步：
+
+1. 出方案。读底稿，说明底稿能回答什么、缺什么、每份材料侧重什么。看过、改过要求之后再执行。
+2. 执行。按顺序生成每份材料，逐份质检（文件能打开、数字和底稿对得上），可以选择把合格的成品报送到当前阶段。
+
+思考深度有三档：快速（不做模型规划）、标准（模型出方案）、深入（再加一轮交叉核对，找出不同底稿对同一指标说法不一致的地方；成品里有对不上的数字时让模型重写一次）。
+
+DSH 会话和内置智能体也能调用这两步，工具名是 `investai_harness_plan` 和 `investai_harness_produce`。
+
+## 其他功能
+
+- 模板：一个模板是一种成品加一段编制要求，要求可以改了再生成。每人每月的调用次数从 0 开始按实际执行累计。
+- 天眼查工商核查：填机构自己的开放平台 Token，查询工商基本信息并存为底稿。目前只接了这一个接口，司法、担保等维度没有接入。没填 Token 不会生成任何内容。
+- 成品预览：点成品行在应用里看文字内容，也可以用本机的 Office 或 WPS 打开修改。
+- 会议录音转写：需要先装本地转写引擎，见 `scripts/setup-asr.sh`、`scripts/setup-asr.ps1`。
+
+## 从源码运行
+
+需要 Node.js 22.13 以上。
+
+```bash
+npm install
+npm run desktop
+```
+
+然后打开 http://127.0.0.1:4310 。多人登录模式用 `node server.mjs --demo-accounts`，演示账号在 `docs/accounts/` 下的 Excel 里。
+
+作为 DSH 插件安装：macOS 运行 `sh scripts/install-mac.sh`，Windows 运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-win.ps1`。
+
+打桌面安装包：
+
+```bash
+cd desktop
+npm install
+npm run dist:win
+```
+
+macOS 用 `npm run dist:mac`。推送 `v` 开头的标签时，GitHub Actions 会跑测试、打两个平台的安装包并挂到同名 Release 上。
+
+## 测试
+
 ```bash
 npm test
-node --test test/accounts.test.mjs test/cloud.test.mjs test/review.test.mjs test/dsh.test.mjs test/lifecycle.test.mjs test/llm.test.mjs test/notebook.test.mjs test/studio-quality.test.mjs test/harness.test.mjs test/saas-e2e.test.mjs
 ```
+
+模型相关的测试用测试文件里起的本机假模型，不需要 API Key，也不会联网。
+
+## 代码结构
+
+| 目录 | 内容 |
+|---|---|
+| `app/` | 界面，原生 ES 模块，不需要构建 |
+| `core/` | 后端：数据、权限、流程、成果编制 |
+| `lib/` | DSH 插件入口 |
+| `desktop/` | Electron 桌面版外壳和打包配置 |
+| `test/` | 测试 |
+
+成果编制相关的文件：`core/nb-ground.mjs`（整理底稿、核对数字）、`core/nb-author.mjs`（模型撰稿）、`core/nb-deck.mjs`（演示文稿）、`core/nb-interactive.mjs`（导图、闪卡等）、`core/nb-studio-gen.mjs`（入口）、`core/nb-harness.mjs`（成套制作）、`core/nb-agent-mesh.mjs`（交叉核对）。
+
+## 已知的限制
+
+- 底稿分级（A、B、C）只按文件名推定，不代表内容已经核实。
+- 生成的 pptx 和 docx 在 WPS、PowerPoint、Keynote 里的字体回退没有逐一核对过。
+- 应用里的成品预览只显示文字，版式要用本机程序打开看。

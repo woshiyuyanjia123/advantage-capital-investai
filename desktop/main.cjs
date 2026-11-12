@@ -96,7 +96,7 @@ const accountsXlsx = () => path.join(__dirname, 'app-src', 'docs', 'accounts', '
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 1100, minHeight: 680, title: TITLE, show: false, backgroundColor: '#0A1120',
+    width: 1440, height: 900, minWidth: 1100, minHeight: 680, title: TITLE, show: false, backgroundColor: '#F4F2EC',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   })

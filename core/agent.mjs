@@ -88,21 +88,20 @@ export function agentTools({ db, kb, org, wisburg, ai, route }, user, job, aiLev
         const t = db.put('tasks', { title: String(title).slice(0, 80), projectId: projectId ?? null, owner: o?.id ?? user.id, due: Date.now() + dueInDays * 864e5, done: false, by: 'AI' }, { actor: { id: 'ai', name: `AI（代 ${user.name}）` }, reason: '智能体新建任务', action: 'create' })
         return { created: t.title, owner: db.get('users', t.owner)?.name }
       } },
-    { name: 'harness_plan', level: 1, label: 'Harness 可控思考规划', description: '在制作完整材料前进行受控思考：盘点 A/B/C 级底稿、预判红蓝军跨源冲突、输出透明分步制作蓝图与证据缺口。',
+    { name: 'harness_plan', level: 1, label: 'Harness 可控思考规划', description: '成套制作的第一步：读底稿，输出制作方案（底稿能回答什么、缺什么、每份材料侧重什么），不生成文件。',
       parameters: obj({
         projectId: str('项目 ID'),
         goal: str('制作目标与分析侧重'),
         thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'] },
         kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] } },
         pageCount: { type: 'integer' },
-        targetMB: { type: 'integer' },
       }, ['projectId', 'goal']),
       run: async args => {
         const p = db.get('projects', String(args.projectId))
         org.assertProject(user, p)
         return planHarnessExecution({ db, kb, org, ai }, user, p, args)
       } },
-    { name: 'harness_produce', level: 2, label: 'Harness 受控制作完整材料', description: '调用 Harness 执行器受控思考并真实编译制作 PPT/Word/XLSX/九章IC备忘录/导图/闪卡等完整材料，自动完成 Agent×Agent 互校、解压体积质检并落盘项目成果舱。',
+    { name: 'harness_produce', level: 2, label: 'Harness 受控制作完整材料', description: '成套制作的第二步：按方案逐份生成演示文稿、尽调报告、投委会备忘录、数据表等文件并存进项目文件夹，返回每份的数字核对结果。',
       parameters: obj({
         projectId: str('项目 ID'),
         planId: str('可选，harness_plan 生成的蓝图 ID'),
@@ -110,7 +109,6 @@ export function agentTools({ db, kb, org, wisburg, ai, route }, user, job, aiLev
         thinkingDepth: { type: 'string', enum: ['fast', 'balanced', 'deep'] },
         kinds: { type: 'array', items: { type: 'string', enum: ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz'] } },
         pageCount: { type: 'integer' },
-        targetMB: { type: 'integer' },
         withTianyancha: { type: 'boolean' },
         autoSubmitStage: { type: 'boolean' },
       }, ['projectId']),
