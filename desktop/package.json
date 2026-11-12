@@ -14,12 +14,6 @@
     "dist:win": "node scripts/prepare.mjs && electron-builder --win --publish never",
     "dist": "node scripts/prepare.mjs && electron-builder --mac --publish never && electron-builder --win --publish never"
   },
-  "dependencies": {
-    "docx": "9.5.1",
-    "exceljs": "4.4.0",
-    "pdfjs-dist": "4.10.38",
-    "pptxgenjs": "3.12.0"
-  },
   "devDependencies": {
     "electron": "44.7.0",
     "electron-builder": "26.0.12",
@@ -39,9 +33,8 @@
       "main.cjs",
       "app-src/**",
       "!app-src/**/*.map",
-      "node_modules/**",
-      "package.json",
-      "!node_modules/@napi-rs/**"
+      "!app-src/node_modules/@napi-rs/**",
+      "package.json"
     ],
     "mac": {
       "target": [
