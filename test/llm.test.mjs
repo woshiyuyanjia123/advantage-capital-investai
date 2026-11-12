@@ -3,7 +3,8 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { boot, probeModel } from './helpers.mjs'
-import { openaiLlm, secretLlm, complete, DEFAULT_MODEL } from '../core/llm.mjs'
+import { openaiLlm, secretLlm, complete, DEFAULT_MODEL, parseApiKeyInput, sanitizeApiKey, normalizeBaseURL } from '../core/llm.mjs'
+import { createHybridCloudLlm, quickConnectApi } from '../core/nb-api.mjs'
 
 // 模拟服务：按 plan 依次回放响应（status + SSE 事件），记录收到的请求体
 let server
@@ -113,4 +114,86 @@ test('L7 智能体把最近对话作为背景文字带上，不以 assistant 消
     assert.match(messages[0].text, /最近的对话[\s\S]*用户：帮我表决[\s\S]*助手：[\s\S]*本轮问题[\s\S]*在哪个阶段/)
     assert.equal(messages[0].text.match(/在哪个阶段/g).length, 1)
   } finally { await t.close() }
+})
+
+test('L8 API Key 与 Base URL 清洗校验：兼容粘贴附带 Bearer/引号/中文备注，拦截非法密钥与填反字段，杜绝 ByteString 请求头崩溃', async () => {
+  assert.equal(parseApiKeyInput('  sk-abc1234567890def  '), 'sk-abc1234567890def')
+  assert.equal(parseApiKeyInput('Bearer "sk-abc1234567890def"\u200B'), 'sk-abc1234567890def')
+  assert.equal(parseApiKeyInput('sk-80fc34b1d7094b72bae8aa8ab758989a 我的key'), 'sk-80fc34b1d7094b72bae8aa8ab758989a')
+  assert.equal(parseApiKeyInput('https://api.deepseek.com'), null)
+  assert.equal(parseApiKeyInput('完全无效中文内容'), null)
+  assert.equal(sanitizeApiKey('完全无效中文内容'), '')
+
+  assert.equal(normalizeBaseURL('https://api.deepseek.com/chat/completions/'), 'https://api.deepseek.com')
+  assert.equal(normalizeBaseURL('api.deepseek.com/v1/'), 'https://api.deepseek.com/v1')
+  assert.equal(normalizeBaseURL('127.0.0.1:11434/v1/'), 'http://127.0.0.1:11434/v1')
+  assert.equal(normalizeBaseURL('sk-80fc34b1d7094b72bae8aa8ab758989a'), null)
+
+  const badKeyLlm = openaiLlm({ baseURL: base, apiKey: '无效中文密钥', model: DEFAULT_MODEL })
+  assert.equal((await badKeyLlm.info()).ok, false)
+  await assert.rejects(complete(badKeyLlm, { system: 's', user: 'u' }), /API Key 格式不正确/)
+
+  reset([])
+  const dirtyKeyLlm = openaiLlm({ baseURL: `${base}/chat/completions`, apiKey: '「Bearer sk-clean1234567890」 备注', model: DEFAULT_MODEL })
+  assert.equal((await dirtyKeyLlm.info()).ok, true)
+  await complete(dirtyKeyLlm, { system: 's', user: 'u', reasoning: 'off' })
+  assert.equal(seen.length, 1)
+})
+
+test('L9 路由与网关隔离：界面保存的密钥优先于兜底网关，不把 deepseek-flash 误发到 Carbon；DSH 模式下填 Key 自动切自定义并修正模型名', async () => {
+  const prevDsKey = process.env.DEEPSEEK_API_KEY
+  const prevLlmKey = process.env.INVESTAI_LLM_API_KEY
+  delete process.env.DEEPSEEK_API_KEY
+  delete process.env.INVESTAI_LLM_API_KEY
+  try {
+    let savedSecrets = {}
+    const readSec = async () => savedSecrets
+    const baseCloud = secretLlm({ readSecrets: readSec, baseURL: base, model: DEFAULT_MODEL, dialect: 'deepseek' })
+    let fallbackCalled = 0
+    const carbonFallback = {
+      kind: 'openai',
+      info: async () => ({ ok: true, provider: '127.0.0.1:8046', model: 'gemini-4-carbon-medium', label: 'Carbon · medium' }),
+      models: async () => [],
+      async *stream() { fallbackCalled++; yield 'carbon-ok' },
+      async turn() { fallbackCalled++; return { text: 'carbon-ok', reasoning: '', toolCalls: [] } },
+    }
+    let settings = { models: { mode: 'hybrid', external: { approved: true, source: 'auto', model: 'deepseek-flash' } } }
+    const hybrid = createHybridCloudLlm({ dshAdapter: baseCloud, fallbackAdapter: carbonFallback, readSecretsFn: readSec, readDshKeyFn: () => '' })(() => settings)
+
+    // 未配置 DeepSeek Key 时才走 Carbon 兜底，且不会把 deepseek-flash 发给 Carbon
+    assert.equal((await hybrid.info()).label, 'Carbon · medium')
+    assert.equal(await complete(hybrid, { system: 's', user: 'u' }), 'carbon-ok')
+    assert.equal(fallbackCalled, 1)
+
+    // 保存 DeepSeek Key 并刷新后，立即切回 DeepSeek 官方接口，不再误走 Carbon
+    savedSecrets = { deepseekApiKey: 'sk-user1234567890', customApiKey: 'sk-user1234567890' }
+    hybrid.refresh()
+    reset([])
+    assert.match((await hybrid.info()).label, /deepseek-flash/)
+    await complete(hybrid, { system: 's', user: 'u', reasoning: 'off' })
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0].model, 'deepseek-flash')
+    assert.equal(fallbackCalled, 1)
+
+    // DSH 模式下粘贴 Key 且下拉框停留在 magpie 路由模型时，自动切 custom 并将 DeepSeek 接口模型修正为 deepseek-flash
+    const t = await boot({ llm: probeModel().adapter })
+    try {
+      await assert.rejects(
+        quickConnectApi({ db: t.core.db, ai: t.core.ai, mode: 'dsh' }, { id: 'admin', name: '管理员' }, { customBaseURL: 'sk-wrongplace123456', test: false }),
+        /请勿在此处填写 API Key/,
+      )
+      await quickConnectApi(
+        { db: t.core.db, ai: t.core.ai, mode: 'dsh' },
+        { id: 'admin', name: '管理员' },
+        { source: 'auto', model: 'group/ds-free-first', customBaseURL: 'https://api.siliconflow.cn/v1', customModel: 'Qwen/Qwen2.5-72B', test: false },
+      )
+      const ext = t.core.db.get('settings', 'main').models.external
+      assert.equal(ext.source, 'custom')
+      assert.equal(ext.customBaseURL, 'https://api.siliconflow.cn/v1')
+      assert.equal(ext.customModel, 'Qwen/Qwen2.5-72B')
+    } finally { await t.close() }
+  } finally {
+    if (prevDsKey === undefined) delete process.env.DEEPSEEK_API_KEY; else process.env.DEEPSEEK_API_KEY = prevDsKey
+    if (prevLlmKey === undefined) delete process.env.INVESTAI_LLM_API_KEY; else process.env.INVESTAI_LLM_API_KEY = prevLlmKey
+  }
 })

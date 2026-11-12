@@ -13,6 +13,7 @@ import { asrRuntime, AUDIO } from './meetings.mjs'
 import { writeSecret, readSecrets, pushWebhook } from './notify.mjs'
 import { renderXlsx, renderDocx, MIME } from './office.mjs'
 import { connectMcp } from './mcp.mjs'
+import { parseApiKeyInput } from './llm.mjs'
 import { RESOURCES } from './wisburg.mjs'
 import { findProject, findType } from './intent.mjs'
 import { createMarket } from './market.mjs'
@@ -394,19 +395,36 @@ export function createApi(ctx) {
         value = { ...DEFAULT_SYNC, ...s.sync, ...value, collections: (value.collections ?? s.sync?.collections ?? SYNC_COLLECTIONS).filter(c => SYNC_COLLECTIONS.includes(c)), intervalMinutes: Math.min(1440, Math.max(5, Number(value.intervalMinutes ?? s.sync?.intervalMinutes ?? 15))), conflict: 'server-wins' }
       }
       if (sec === 'push') value = { channels: (value.channels ?? []).map(c => ({ id: c.id ?? randomBytes(4).toString('hex'), name: String(c.name).slice(0, 30), type: c.type, enabled: !!c.enabled, kinds: c.kinds ?? [] })) }
-      db.put('settings', { ...s, [sec]: sec === 'models' ? { ...s.models, ...value } : value }, meta(user, `修改设置：${sec}`, 'settings'))
+      const nextSec = sec === 'models'
+        ? { ...s.models, ...value, external: value.external ? { ...s.models?.external, ...value.external } : s.models?.external, local: value.local ? { ...s.models?.local, ...value.local } : s.models?.local }
+        : value
+      db.put('settings', { ...s, [sec]: nextSec }, meta(user, `修改设置：${sec}`, 'settings'))
       if (sec === 'models') ai.resetHealth()
       return settingsView(user)
     },
     'secret.set': async (user, b) => {
-      const allowed = { wisburgApiKey: 'integration.manage', deepseekApiKey: 'ai.policy', 'sso.clientSecret': 'integration.manage', 'sync.deviceToken': 'sync.manage' }
+      const allowed = { wisburgApiKey: 'integration.manage', deepseekApiKey: 'ai.policy', customApiKey: 'ai.policy', 'sso.clientSecret': 'integration.manage', 'sync.deviceToken': 'sync.manage' }
       const key = String(b.key)
       const perm = allowed[key] ?? (/^push\.[a-z0-9]+\.(url|secret)$/.test(key) ? 'integration.manage' : null)
       if (!perm) throw fail('不允许的密钥项')
       org.assert(user, perm)
-      if (key === 'wisburgApiKey') await wisburg.setKey(String(b.value ?? '').trim()); else await writeSecret(key, String(b.value ?? '').trim())
+      const rawVal = String(b.value ?? '').trim()
+      let cleanVal = rawVal
+      if (['deepseekApiKey', 'customApiKey', 'wisburgApiKey'].includes(key) && rawVal) {
+        const parsed = parseApiKeyInput(rawVal)
+        if (!parsed) throw fail('API Key 格式不正确：请只粘贴纯英文数字密钥（如 sk-...），勿混入中文说明或网址')
+        cleanVal = parsed
+      }
+      if (key === 'wisburgApiKey') await wisburg.setKey(cleanVal)
+      else {
+        await writeSecret(key, cleanVal)
+        if (key === 'deepseekApiKey') {
+          const customURL = String(S().models?.external?.customBaseURL ?? '').trim()
+          if (!customURL || /deepseek\.com/i.test(customURL)) await writeSecret('customApiKey', cleanVal)
+        }
+      }
       // 换了 Key 后立即生效：清掉旧 Key 的失败记录（否则 5 分钟内仍显示「调用失败」并走离线引擎）
-      if (key === 'deepseekApiKey') ai.resetHealth()
+      if (key === 'deepseekApiKey' || key === 'customApiKey') ai.resetHealth()
       db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: user.name, action: '更新密钥', target: key, detail: '内容不记录' })
       return { ok: true }
     },

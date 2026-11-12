@@ -6,11 +6,59 @@ import { randomUUID } from 'node:crypto'
 // DeepSeek 官方模型 ID（api-docs.deepseek.com，2026-10）：deepseek-flash = V4.1 Flash；deepseek-v4-flash 为兼容旧名；
 // deepseek-chat / deepseek-reasoner 已于 2026-07-24 停用。注意没有「deepseek-v4.1-flash」这个 ID（会返回 400 Model Not Exist）。
 export const DEFAULT_MODEL = 'deepseek-flash'
-export const DEEPSEEK_MODELS = [{ model: 'deepseek-flash', name: 'DeepSeek V4.1 Flash（推荐）' }, { model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }]
+export const DEEPSEEK_MODELS = [{ provider: 'deepseek', model: 'deepseek-flash', name: 'DeepSeek V4.1 Flash（推荐）' }, { provider: 'deepseek', model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }]
 const LEGACY = { 'deepseek-v4.1-flash': 'deepseek-flash', 'deepseek-chat': 'deepseek-flash', 'deepseek-reasoner': 'deepseek-flash' }
 /** 旧版本保存过的错误 / 已停用的模型名，换成当前可用的 ID。 */
 export const normalizeModel = m => LEGACY[m] ?? m
 export const PREFERRED = ['deepseek-flash', 'deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat']
+
+/**
+ * 归一化并校验用户输入的 API Key：
+ *  · 清理零宽字符、全角空格、首尾引号与 Bearer 前缀
+ *  · 支持从带中文备注的粘贴文本（如「sk-xxx 我的key」）中提取唯一有效密钥
+ *  · 空输入返回 ''；含中文/非法字符且无法提取有效密钥（或误填 URL）时返回 null
+ */
+export function parseApiKeyInput(raw) {
+  let s = String(raw ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\u00A0\u3000]/g, ' ').trim()
+  if (!s) return ''
+  s = s.replace(/^["'‘’“”「」『』`]+|["'‘’“”「」『』`]+$/g, '').trim()
+  s = s.replace(/^Bearer\s+/i, '').replace(/^["'‘’“”「」『』`]+|["'‘’“”「」『』`]+$/g, '').trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) return null
+  if (/^[\x21-\x7E]+$/.test(s)) return s
+  const prefixed = s.match(/(?<![A-Za-z0-9._-])((?:sk|rk|pk|ak|ds|nvapi|gsk|xai)-[A-Za-z0-9._-]{8,}|AIza[0-9A-Za-z_-]{20,})(?![A-Za-z0-9._-])/i)
+  if (prefixed) return prefixed[1]
+  const stripped = s.replace(/https?:\/\/\S+/gi, ' ')
+  const tokens = stripped.match(/[A-Za-z0-9._-]{16,}/g) ?? []
+  return tokens.length === 1 ? tokens[0] : null
+}
+
+/** 读取侧安全清洗：可提取则返回干净 ASCII Key，否则返回 ''（避免拼进 HTTP Header 触发 ByteString 异常）。 */
+export const sanitizeApiKey = raw => parseApiKeyInput(raw) || ''
+
+/**
+ * 归一化并校验 OpenAI 兼容接口的 Base URL：
+ *  · 去除多余空白、引号、末尾斜杠及误填的 /chat/completions 后缀
+ *  · 支持自动补齐本机回环 http:// 与域名 https:// 协议头；误填 sk- 密钥或非法地址返回 null
+ */
+export function normalizeBaseURL(raw) {
+  let u = String(raw ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\u00A0\u3000]/g, ' ').trim()
+  if (!u) return ''
+  u = u.replace(/^["'‘’“”「」『』`]+|["'‘’“”「」『』`]+$/g, '').trim()
+  if (!u) return ''
+  if (/^(?:sk|rk|pk|ak|ds|nvapi|gsk|xai)-[A-Za-z0-9._-]{6,}$/i.test(u) || /[^\x21-\x7E]/.test(u)) return null
+  if (!/^https?:\/\//i.test(u)) {
+    if (/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i.test(u)) u = `http://${u}`
+    else if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/|$)/i.test(u)) u = `https://${u}`
+    else return null
+  }
+  u = u.replace(/\/chat\/completions\/?$/i, '').replace(/\/+$/, '')
+  try {
+    const parsed = new URL(u)
+    if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) return null
+    return u
+  } catch { return null }
+}
 const TRUNCATED = '\n\n> 输出达到长度上限，已截断。'
 
 export function dshLlm(getLlm, getChoice) {
@@ -87,7 +135,8 @@ export function dshLlm(getLlm, getChoice) {
 function apiError(status, body) {
   let msg = body
   try { msg = JSON.parse(body).error?.message ?? body } catch { /* 非 JSON 错误页 */ }
-  const hint = { 401: 'API Key 无效', 402: '账户余额不足', 422: '请求参数错误', 429: '请求过于频繁', 503: '服务繁忙' }[status] ?? (/model not exist/i.test(msg) ? '模型名不存在' : '')
+  const hint = { 401: 'API Key 无效', 402: '账户余额不足', 403: 'API Key 无权限或已禁用', 422: '请求参数错误', 429: '请求过于频繁', 503: '服务繁忙' }[status]
+    ?? (/model.{0,24}(not exist|not_found|not found|invalid|unknown)|does not exist|模型不存在/i.test(msg) ? '模型名不存在' : '')
   return Object.assign(new Error(`模型接口返回 ${status}${hint ? `（${hint}）` : ''}：${String(msg).slice(0, 200)}`), { status, permanent: [400, 401, 402, 403, 404, 422].includes(status) })
 }
 
@@ -127,23 +176,35 @@ async function* sse(r) {
  *  · 带 tools 的多轮请求，历史 assistant 消息都要带 reasoning_content，否则返回 400
  */
 export function openaiLlm({ baseURL, apiKey, model, dialect, retryDelay = 1000 }) {
-  const ok = Boolean(baseURL && model)
-  const host = ok ? new URL(baseURL).host : ''
-  const deepseek = (dialect ?? (/(^|\.)deepseek\.com$/.test(ok ? new URL(baseURL).hostname : '') ? 'deepseek' : '')) === 'deepseek'
+  const cleanURL = normalizeBaseURL(baseURL)
+  const invalidURL = Boolean(String(baseURL ?? '').trim()) && !cleanURL
+  const parsedKey = parseApiKeyInput(apiKey)
+  const invalidKey = parsedKey === null
+  const cleanKey = parsedKey || ''
+  const ok = Boolean(cleanURL && model && !invalidKey)
+  const urlObj = cleanURL ? new URL(cleanURL) : null
+  const host = urlObj ? urlObj.host : ''
+  const deepseek = (dialect ?? (/(^|\.)deepseek\.com$/.test(urlObj ? urlObj.hostname : '') ? 'deepseek' : '')) === 'deepseek'
   const label = deepseek && host.endsWith('deepseek.com') ? `DeepSeek · ${model}` : `${host} · ${model}`
   // reasoning_effort 只有 low / high / max（api-docs.deepseek.com），其他写法一律按 high
   const thinking = reasoning => !deepseek ? {} : reasoning === 'off' || reasoning === 'none' ? { thinking: { type: 'disabled' } } : { thinking: { type: 'enabled' }, reasoning_effort: ['low', 'high', 'max'].includes(reasoning) ? reasoning : 'high' }
   // 限流 / 服务繁忙 / 网络错误在开始输出前最多重试 2 次；配置类错误立即返回
   async function post(body, signal) {
+    if (invalidURL) throw Object.assign(new Error('Base URL 格式不正确，请填写 http:// 或 https:// 开头的接口地址'), { status: 400, permanent: true })
+    if (invalidKey) throw Object.assign(new Error('API Key 格式不正确（含非法字符或中文说明），请重新粘贴纯英文数字密钥'), { status: 400, permanent: true })
+    if (!cleanURL || !model) throw Object.assign(new Error('未配置完整的接口地址或模型名称'), { status: 400, permanent: true })
     for (let attempt = 0; ; attempt++) {
       let r
       try {
-        r = await fetch(`${baseURL.replace(/\/$/, '')}/chat/completions`, {
+        r = await fetch(`${cleanURL}/chat/completions`, {
           method: 'POST', signal,
-          headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+          headers: { 'content-type': 'application/json', ...(cleanKey ? { authorization: `Bearer ${cleanKey}` } : {}) },
           body: JSON.stringify({ model, stream: true, ...body }),
         })
       } catch (e) {
+        if (!e?.cause && e instanceof TypeError && /ByteString|header|Invalid URL/i.test(e.message)) {
+          throw Object.assign(new Error('接口地址或 API Key 包含非法字符，请重新检查并填写纯英文数字密钥'), { status: 400, permanent: true })
+        }
         if (signal?.aborted || attempt >= 2) throw Object.assign(e, { permanent: false })
         await sleep(retryDelay * 2 ** attempt, signal)
         continue
@@ -154,9 +215,12 @@ export function openaiLlm({ baseURL, apiKey, model, dialect, retryDelay = 1000 }
       await sleep(retryDelay * 2 ** attempt, signal)
     }
   }
+  const badNote = invalidURL ? 'Base URL 格式不正确，请检查接口地址'
+    : invalidKey ? 'API Key 格式不正确，请重新填写纯英文数字密钥'
+    : '未配置模型：设置 DEEPSEEK_API_KEY 或 INVESTAI_LLM_BASE_URL'
   return {
     kind: 'openai',
-    info: async () => ok ? { ok: true, provider: host, model, label } : { ok: false, note: '未配置模型：设置 DEEPSEEK_API_KEY 或 INVESTAI_LLM_BASE_URL' },
+    info: async () => ok ? { ok: true, provider: host, model, label } : { ok: false, note: badNote },
     models: async () => ok ? [{ provider: host, model, name: model }] : [],
     async turn({ system, messages, tools = [], signal, maxTokens = 3000, reasoning = 'high', onText }) {
       const wire = [{ role: 'system', content: system }, ...messages.map(m => m.role === 'user' ? { role: 'user', content: m.text }
@@ -229,18 +293,21 @@ export const NONE = { kind: 'none', info: async () => ({ ok: false, note: '未�
 
 /**
  * 从本机密钥文件读取 API Key 的 OpenAI 兼容适配器（独立桌面版 / 服务端在界面里填写 DeepSeek Key 后即刻生效）。
- * 环境变量里的 Key 优先；密钥文件每 5 秒最多读取一次（refresh() 立即重读）。getModel 返回界面中选择的模型，未选择时用 model。
+ * 优先级：显式环境变量 envKey > 界面保存的密钥文件 secretKey > 本机兜底密钥 fallbackKey。
+ * 密钥文件每 5 秒最多读取一次（refresh() 立即重读）。getModel 返回界面中选择的模型，未选择时用 model。
  */
-export function secretLlm({ readSecrets, secretKey = 'deepseekApiKey', envKey = '', baseURL = 'https://api.deepseek.com', model = DEFAULT_MODEL, getModel, dialect }) {
-  let cached = { at: 0, key: envKey, id: '', adapter: null }
+export function secretLlm({ readSecrets, secretKey = 'deepseekApiKey', envKey = '', fallbackKey = '', baseURL = 'https://api.deepseek.com', model = DEFAULT_MODEL, getModel, dialect }) {
+  const cleanEnv = sanitizeApiKey(envKey)
+  const cleanFallback = sanitizeApiKey(fallbackKey)
+  let cached = { at: 0, rawSecret: '', id: '', adapter: null }
   async function current() {
-    let key = envKey || cached.key
-    if (!envKey && Date.now() - cached.at > 5000) {
-      key = String((await readSecrets().catch(() => ({})))[secretKey] ?? '')
+    if (!cleanEnv && (cached.at === 0 || Date.now() - cached.at > 5000)) {
+      cached.rawSecret = String((await readSecrets().catch(() => ({})))[secretKey] ?? '').trim()
       cached.at = Date.now()
     }
+    const key = cleanEnv || cached.rawSecret || cleanFallback
     const m = normalizeModel(getModel?.() || model)
-    if (`${key}|${m}` !== cached.id) cached = { ...cached, key, id: `${key}|${m}`, adapter: key ? openaiLlm({ baseURL, apiKey: key, model: m, dialect }) : null }
+    if (`${key}|${m}` !== cached.id) cached = { ...cached, id: `${key}|${m}`, adapter: key ? openaiLlm({ baseURL, apiKey: key, model: m, dialect }) : null }
     return cached.adapter
   }
   const none = { ok: false, note: '未配置 DeepSeek API Key：在「系统配置 → AI 策略与模型」中填写' }
@@ -248,7 +315,7 @@ export function secretLlm({ readSecrets, secretKey = 'deepseekApiKey', envKey = 
     kind: 'openai',
     info: async () => (await current())?.info() ?? none,
     // 界面里可选的 DeepSeek 模型（与是否已填 Key 无关）
-    models: async () => DEEPSEEK_MODELS.map(x => ({ provider: 'deepseek', ...x })),
+    models: async () => DEEPSEEK_MODELS.map(x => ({ ...x })),
     refresh() { cached.at = 0 },
     async turn(opts) { const a = await current(); if (!a) throw new Error(none.note); return a.turn(opts) },
     async *stream(opts) { const a = await current(); if (!a) throw new Error(none.note); yield* a.stream(opts) },

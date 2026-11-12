@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { openaiLlm, complete, normalizeModel, DEFAULT_MODEL } from './llm.mjs'
+import { openaiLlm, complete, normalizeModel, DEFAULT_MODEL, DEEPSEEK_MODELS, parseApiKeyInput, sanitizeApiKey, normalizeBaseURL } from './llm.mjs'
 import { writeSecret, readSecrets } from './notify.mjs'
 
 export function readDshLocalDeepSeekKey() {
@@ -10,7 +10,7 @@ export function readDshLocalDeepSeekKey() {
     const p = join(homedir(), '.dsh', '.credentials.yaml')
     if (!existsSync(p)) return ''
     const m = readFileSync(p, 'utf8').match(/DEEPSEEK_API_KEY:\s*([^\r\n]+)/)
-    return m ? m[1].trim() : ''
+    return m ? sanitizeApiKey(m[1]) : ''
   } catch { return '' }
 }
 
@@ -19,10 +19,10 @@ export function readLocalCarbonConfig(tier = 'medium') {
     const p = join(homedir(), '.jeikcode', 'config.toml')
     if (!existsSync(p)) return null
     const txt = readFileSync(p, 'utf8')
-    const baseURL = txt.match(/base_url\s*=\s*"([^"]+)"/)?.[1] || 'http://127.0.0.1:8046/v1'
-    const apiKey = txt.match(/api_key\s*=\s*"([^"]+)"/)?.[1] || ''
+    const baseURL = normalizeBaseURL(txt.match(/base_url\s*=\s*"([^"]+)"/)?.[1] || 'http://127.0.0.1:8046/v1')
+    const apiKey = sanitizeApiKey(txt.match(/api_key\s*=\s*"([^"]+)"/)?.[1] || '')
     const model = tier === 'low' ? 'gemini-4-carbon-low' : tier === 'high' ? 'gemini-4-carbon-high' : 'gemini-4-carbon-medium'
-    return apiKey ? { baseURL, apiKey, model } : null
+    return baseURL && apiKey ? { baseURL, apiKey, model } : null
   } catch { return null }
 }
 
@@ -52,49 +52,62 @@ export async function probeLocalModels(customUrl = '') {
   return { presets: PRESETS, models: found }
 }
 
-export function createHybridCloudLlm({ dshAdapter, readSecretsFn = readSecrets }) {
+export function createHybridCloudLlm({ dshAdapter, fallbackAdapter = null, readSecretsFn = readSecrets, readDshKeyFn = readDshLocalDeepSeekKey }) {
   let custom = { at: 0, sig: '', adapter: null }
   async function customAdapter(ext) {
-    const sec = Date.now() - custom.at < 4000 ? custom.sec : (custom.at = Date.now(), custom.sec = await readSecretsFn().catch(() => ({})))
-    const key = String(sec?.customApiKey || sec?.deepseekApiKey || process.env.INVESTAI_LLM_API_KEY || process.env.DEEPSEEK_API_KEY || readDshLocalDeepSeekKey() || '').trim()
-    const baseURL = String(ext?.customBaseURL || process.env.INVESTAI_LLM_BASE_URL || 'https://api.deepseek.com').trim()
-    const model = normalizeModel(ext?.customModel || ext?.model || DEFAULT_MODEL)
+    const sec = custom.at > 0 && Date.now() - custom.at < 4000 ? custom.sec : (custom.at = Date.now(), custom.sec = await readSecretsFn().catch(() => ({})))
+    const rawURL = String(ext?.customBaseURL || process.env.INVESTAI_LLM_BASE_URL || 'https://api.deepseek.com').trim()
+    const baseURL = normalizeBaseURL(rawURL) ?? rawURL
+    const isDsHost = (() => { try { return /(^|\.)deepseek\.com$/i.test(new URL(baseURL).hostname) } catch { return baseURL.includes('deepseek.com') } })()
+    const savedRaw = String((isDsHost ? (sec?.customApiKey || sec?.deepseekApiKey) : sec?.customApiKey) || '').trim()
+    const envRaw = sanitizeApiKey(process.env.INVESTAI_LLM_API_KEY || (isDsHost ? process.env.DEEPSEEK_API_KEY : '') || '') || (isDsHost ? readDshKeyFn() : '')
+    const key = savedRaw || envRaw
+    const isDsModel = m => /^deepseek-/i.test(String(m ?? ''))
+    const pickedModel = isDsHost
+      ? (isDsModel(ext?.customModel) ? ext.customModel : isDsModel(ext?.model) ? ext.model : DEFAULT_MODEL)
+      : (ext?.customModel || ext?.model || '')
+    const model = isDsHost ? normalizeModel(pickedModel) : pickedModel
     const isLocalCustom = LOOPBACK.test(baseURL)
     if (!key && !isLocalCustom) return null
     const sig = `${baseURL}|${model}|${key}`
     if (sig !== custom.sig) custom = { ...custom, sig, adapter: openaiLlm({ baseURL, apiKey: key, model }) }
     return custom.adapter
   }
+  async function resolveAdapter(ext) {
+    if (ext.source !== 'custom' && dshAdapter) {
+      const d = await dshAdapter.info().catch(() => ({ ok: false }))
+      if (d?.ok) return dshAdapter
+    }
+    const c = await customAdapter(ext)
+    if (c) return c
+    if (ext.source !== 'custom' && fallbackAdapter) {
+      const f = await fallbackAdapter.info().catch(() => ({ ok: false }))
+      if (f?.ok) return fallbackAdapter
+    }
+    return null
+  }
   return (getSettings) => ({
     kind: 'hybrid-dsh',
-    refresh() { custom.at = 0; custom.sig = '' },
+    refresh() { custom.at = 0; custom.sig = ''; dshAdapter?.refresh?.(); fallbackAdapter?.refresh?.() },
     async info() {
       const ext = getSettings()?.models?.external ?? {}
-      if (ext.source !== 'custom' && dshAdapter) {
-        const d = await dshAdapter.info().catch(() => ({ ok: false }))
-        if (d?.ok) return d
-      }
-      const c = await customAdapter(ext)
-      if (c) return c.info()
+      const a = await resolveAdapter(ext)
+      if (a) return a.info()
       if (dshAdapter) return dshAdapter.info()
       return { ok: false, note: '未连接 API（可在顶部「API 连接」配置本地离线模型或 API Key）' }
     },
     async models() {
       const dsh = dshAdapter ? await dshAdapter.models().catch(() => []) : []
-      return dsh.length ? dsh : [{ provider: 'deepseek', model: 'deepseek-flash', name: 'DeepSeek V4.1 Flash' }, { provider: 'deepseek', model: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' }]
+      return dsh.length ? dsh : DEEPSEEK_MODELS.map(x => ({ ...x }))
     },
     async turn(opts) {
-      const ext = getSettings()?.models?.external ?? {}
-      if (ext.source !== 'custom' && dshAdapter && (await dshAdapter.info().catch(() => null))?.ok) return dshAdapter.turn(opts)
-      const c = await customAdapter(ext)
-      if (c) return c.turn(opts)
+      const a = await resolveAdapter(getSettings()?.models?.external ?? {})
+      if (a) return a.turn(opts)
       throw new Error('未配置可用 API')
     },
     async *stream(opts) {
-      const ext = getSettings()?.models?.external ?? {}
-      if (ext.source !== 'custom' && dshAdapter && (await dshAdapter.info().catch(() => null))?.ok) { yield* dshAdapter.stream(opts); return }
-      const c = await customAdapter(ext)
-      if (c) { yield* c.stream(opts); return }
+      const a = await resolveAdapter(getSettings()?.models?.external ?? {})
+      if (a) { yield* a.stream(opts); return }
       throw new Error('未配置可用 API')
     },
   })
@@ -103,22 +116,44 @@ export function createHybridCloudLlm({ dshAdapter, readSecretsFn = readSecrets }
 export async function quickConnectApi({ db, ai, mode }, user, b) {
   const s = db.get('settings', 'main')
   const routeMode = ['local', 'hybrid', 'external'].includes(b.mode) ? b.mode : s.models.mode
+  const rawLocalURL = b.localBaseURL !== undefined ? String(b.localBaseURL).trim() : String(s.models.local?.baseURL ?? '').trim()
+  const normLocalURL = rawLocalURL ? normalizeBaseURL(rawLocalURL) : ''
   const local = b.localBaseURL !== undefined || b.localModel !== undefined
-    ? { baseURL: String(b.localBaseURL ?? s.models.local?.baseURL ?? '').trim(), model: String(b.localModel ?? s.models.local?.model ?? '').trim() }
+    ? { baseURL: normLocalURL ?? rawLocalURL, model: String(b.localModel ?? s.models.local?.model ?? '').trim() }
     : s.models.local
   if (local?.baseURL && !LOOPBACK.test(local.baseURL)) throw Object.assign(new Error('本地离线 API 仅限本机回环地址（如 http://127.0.0.1:11434/v1）'), { status: 400 })
+  let cleanKey = ''
   if (b.apiKey !== undefined && String(b.apiKey).trim()) {
-    await writeSecret('deepseekApiKey', String(b.apiKey).trim())
-    await writeSecret('customApiKey', String(b.apiKey).trim())
+    const parsed = parseApiKeyInput(b.apiKey)
+    if (!parsed) throw Object.assign(new Error('API Key 格式不正确：请只粘贴纯英文数字密钥（如 sk-...），勿混入中文说明或网址'), { status: 400 })
+    cleanKey = parsed
+    await writeSecret('deepseekApiKey', cleanKey)
+    await writeSecret('customApiKey', cleanKey)
   }
+  let cleanCustomURL = b.customBaseURL !== undefined ? String(b.customBaseURL).trim() : undefined
+  if (cleanCustomURL) {
+    if (/^(?:sk|rk|pk|ak|ds|nvapi|gsk|xai)-/i.test(cleanCustomURL)) {
+      throw Object.assign(new Error('Base URL 应填写接口地址（如 https://api.deepseek.com），请勿在此处填写 API Key'), { status: 400 })
+    }
+    const norm = normalizeBaseURL(cleanCustomURL)
+    if (!norm) throw Object.assign(new Error('Base URL 格式不正确，请填写 http:// 或 https:// 开头的接口地址'), { status: 400 })
+    cleanCustomURL = norm
+  }
+  const requestedSource = b.source ?? s.models.external?.source ?? 'auto'
+  const hasCustomOverride = (cleanCustomURL && !/^https:\/\/api\.deepseek\.com$/i.test(cleanCustomURL)) || Boolean(String(b.customModel ?? '').trim())
+  const effectiveSource = (mode === 'dsh' && cleanKey && b.source !== 'dsh') || (hasCustomOverride && b.source !== 'dsh') ? 'custom' : requestedSource
+  const targetURL = cleanCustomURL ?? s.models.external?.customBaseURL ?? 'https://api.deepseek.com'
+  const isTargetDs = /(^|\.)deepseek\.com(\/|$|:)/i.test(targetURL)
+  const isCustomNonDs = effectiveSource === 'custom' && !isTargetDs
+  const resolveDsModel = m => /^deepseek-/i.test(String(m ?? '')) ? normalizeModel(m) : DEFAULT_MODEL
   const external = {
     ...s.models.external,
     approved: b.approved ?? true,
-    source: b.source ?? s.models.external?.source ?? 'auto',
+    source: effectiveSource,
     ...(b.provider !== undefined ? { provider: b.provider } : {}),
-    ...(b.model !== undefined ? { model: normalizeModel(b.model) } : {}),
-    ...(b.customBaseURL !== undefined ? { customBaseURL: String(b.customBaseURL).trim() } : {}),
-    ...(b.customModel !== undefined ? { customModel: normalizeModel(String(b.customModel).trim()) } : {}),
+    ...(b.model !== undefined ? { model: isCustomNonDs ? b.model : (effectiveSource === 'custom' && isTargetDs ? resolveDsModel(b.model) : normalizeModel(b.model)) } : {}),
+    ...(cleanCustomURL !== undefined ? { customBaseURL: cleanCustomURL } : {}),
+    ...(b.customModel !== undefined ? { customModel: isCustomNonDs ? String(b.customModel).trim() : normalizeModel(String(b.customModel).trim()) } : {}),
   }
   const sensitiveLevel = b.sensitiveLevel !== undefined ? Number(b.sensitiveLevel) : (mode !== 'saas' && routeMode !== 'local' ? 4 : s.models.sensitiveLevel)
   db.put('settings', { ...s, models: { ...s.models, mode: routeMode, sensitiveLevel, local, external } }, { actor: user, reason: '优势资本投研 API 快速配置', action: 'settings' })
@@ -127,8 +162,12 @@ export async function quickConnectApi({ db, ai, mode }, user, b) {
     if (routeMode === 'local' && local?.baseURL && local?.model) {
       const at = Date.now()
       const ad = openaiLlm({ baseURL: local.baseURL, model: local.model, apiKey: '' })
-      const reply = await complete(ad, { system: '回复正常两字', user: '测试', maxTokens: 20, reasoning: 'off', signal: AbortSignal.timeout(15000) })
-      return { ok: true, label: `本地离线 · ${local.model}`, ms: Date.now() - at, reply: reply.slice(0, 40) }
+      try {
+        const reply = await complete(ad, { system: '回复正常两字', user: '测试', maxTokens: 20, reasoning: 'off', signal: AbortSignal.timeout(15000) })
+        return { ok: true, label: `本地离线 · ${local.model}`, ms: Date.now() - at, reply: reply.slice(0, 40) }
+      } catch (e) {
+        return { ok: false, label: `本地离线 · ${local.model}`, error: e.name === 'TimeoutError' ? '15 秒内没有响应（检查本地模型服务是否已启动）' : e.message }
+      }
     }
     return ai.testModel()
   }

@@ -1,6 +1,7 @@
 // 智堡（Wisburg）开放接口客户端。文档：https://open-docs.wisburg.com/
 // 密钥只在宿主进程读取：环境变量 WISBURG_API_KEY > ~/.config/investai/secrets.json，永不下发到前端。
 import { readSecrets, writeSecret, SECRETS } from './notify.mjs'
+import { parseApiKeyInput, sanitizeApiKey } from './llm.mjs'
 
 const BASE = 'https://api-omen.wisburg.com/api'
 export { SECRETS }
@@ -27,9 +28,12 @@ export function createWisburg({ fetchImpl = fetch, base = BASE } = {}) {
   let key = null
 
   async function apiKey() {
-    if (process.env.WISBURG_API_KEY) return process.env.WISBURG_API_KEY
+    if (process.env.WISBURG_API_KEY) return sanitizeApiKey(process.env.WISBURG_API_KEY)
     if (key !== null) return key
-    key = (await readSecrets()).wisburgApiKey ?? ''
+    const raw = String((await readSecrets()).wisburgApiKey ?? '').trim()
+    const parsed = parseApiKeyInput(raw)
+    if (raw && !parsed) throw Object.assign(new Error('智堡 API Key 格式不正确，请重新填写纯英文数字密钥'), { status: 400 })
+    key = parsed || ''
     return key
   }
 
@@ -85,8 +89,9 @@ export function createWisburg({ fetchImpl = fetch, base = BASE } = {}) {
       }
     },
     async setKey(value) {
-      await writeSecret('wisburgApiKey', value)
-      key = value
+      const clean = sanitizeApiKey(value)
+      await writeSecret('wisburgApiKey', clean)
+      key = clean
       cache.clear()
     },
   }

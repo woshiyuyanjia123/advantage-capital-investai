@@ -18,15 +18,19 @@ export const DEMO_ACCOUNTS = join(dirname(fileURLToPath(import.meta.url)), '..',
 
 /** 启动服务，返回 { url, port, core, close }。port 传 0 表示由系统分配空闲端口（桌面版用，避免与其他程序冲突）。 */
 export async function startServer({ dir, desktop = false, demoAccounts = false, host = '127.0.0.1', port = 4310, env = process.env, log = console.log } = {}) {
-  const carbon = !env.INVESTAI_LLM_BASE_URL && !env.INVESTAI_LLM_MODEL ? readLocalCarbonConfig() : null
-  const apiKey = env.INVESTAI_LLM_API_KEY || env.DEEPSEEK_API_KEY || carbon?.apiKey || readDshLocalDeepSeekKey() || ''
-  const baseURL = env.INVESTAI_LLM_BASE_URL ?? carbon?.baseURL ?? 'https://api.deepseek.com'
-  const model = normalizeModel(env.INVESTAI_LLM_MODEL ?? carbon?.model ?? (baseURL.includes('deepseek') ? DEFAULT_MODEL : ''))
-  // 指定了自定义接口地址时按环境变量直连；否则使用 DeepSeek，Key 来自环境变量或界面中保存的密钥，模型可在界面中选择（环境变量指定时以环境变量为准）
+  const explicitURL = env.INVESTAI_LLM_BASE_URL
+  const envKey = env.INVESTAI_LLM_API_KEY || env.DEEPSEEK_API_KEY || ''
+  const dshKey = readDshLocalDeepSeekKey()
+  const baseURL = explicitURL ?? 'https://api.deepseek.com'
+  const isDs = /(^|\.)deepseek\.com(\/|$|:)/i.test(baseURL)
+  const model = isDs ? normalizeModel(env.INVESTAI_LLM_MODEL ?? DEFAULT_MODEL) : (env.INVESTAI_LLM_MODEL ?? '')
+  // 指定了自定义接口地址时按环境变量直连；否则优先使用 DeepSeek 官方 API（环境变量 > 界面保存的密钥 > 本机 DSH 密钥），均未配置时再用本机 Carbon 网关兜底
   let core = null
   const chosen = () => { const m = env.INVESTAI_LLM_MODEL ? '' : core?.db.get('settings', 'main')?.models?.external?.model; return /^deepseek-/.test(m ?? '') ? m : undefined }
-  const baseCloud = env.INVESTAI_LLM_BASE_URL ? openaiLlm({ baseURL, apiKey, model }) : secretLlm({ readSecrets, envKey: apiKey, baseURL, model, getModel: chosen })
-  const llm = createHybridCloudLlm({ dshAdapter: baseCloud, readSecretsFn: readSecrets })(() => core?.db.get('settings', 'main'))
+  const baseCloud = explicitURL ? openaiLlm({ baseURL, apiKey: envKey || dshKey, model }) : secretLlm({ readSecrets, envKey, fallbackKey: dshKey, baseURL, model, getModel: chosen })
+  const carbon = !explicitURL && !env.INVESTAI_LLM_MODEL ? readLocalCarbonConfig() : null
+  const fallbackAdapter = carbon ? openaiLlm({ baseURL: carbon.baseURL, apiKey: carbon.apiKey, model: carbon.model }) : null
+  const llm = createHybridCloudLlm({ dshAdapter: baseCloud, fallbackAdapter, readSecretsFn: readSecrets })(() => core?.db.get('settings', 'main'))
   core = await createCore({ dir, mode: desktop ? 'desktop' : 'saas', llm })
 
   if (!desktop) {

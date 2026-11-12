@@ -1,6 +1,6 @@
 {
   "name": "@local/investai-desktop",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "优势资本智能投研：项目管理、底稿问答、成果编制和阶段门禁（DSH 插件，也可独立运行）",
   "type": "module",
   "private": true,
