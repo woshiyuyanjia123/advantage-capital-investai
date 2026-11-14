@@ -34,7 +34,7 @@ export function registerTools(ctx, ready) {
       const p = db.get('projects', a.projectId)
       org.assertProject(u, p)
       const r = engine.readiness(p)
-      return { ...view(p), works: p.works.map(w => ({ type: w.type, status: w.status, required: w.required })), readiness: r.items, gate: r.stage.gate?.name, files: core.kb.list(u, { companyId: p.companyId }).map(f => ({ id: f.id, name: f.name, rel: f.rel, level: f.level })) }
+      return { ...view(p), works: p.works.map(w => ({ type: w.type, status: w.status, required: w.required })), readiness: r.items, gate: r.stage.gate?.name, files: core.kb.list(u, { projectId: p.id }).map(f => ({ id: f.id, name: f.name, rel: f.rel, level: f.level })) }
     },
   })
 

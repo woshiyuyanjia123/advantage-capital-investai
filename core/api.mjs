@@ -31,6 +31,7 @@ import { DIFY_WORKFLOW_TEMPLATES, exportDifyDslYaml, runDifyWorkflow, getEnterpr
 import { TYC_DIMENSIONS, runTianyanchaDueDiligence, tianyanchaConfigured } from './nb-tianyancha.mjs'
 import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
 import { planHarnessExecution, runHarnessPipeline, getHarnessStatus } from './nb-harness.mjs'
+import { ingestTextSource, ingestUrlSource, quickCreateProjectWithSources, buildOaInbox, nudgeProjectAction, buildProjectHandover, getEnterpriseReadiness, batchImportUsers } from './nb-enterprise.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -104,13 +105,17 @@ export function createApi(ctx) {
     const st = wf?.stages.find(s => s.id === p.stageId)
     const c = p.companyId ? db.get('companies', p.companyId) : null
     const dls = db.find('deliverables', d => d.projectId === p.id)
+    const pendingApp = db.one('approvals', a => a.projectId === p.id && a.status === 'pending')
     return { id: p.id, name: p.name, companyId: p.companyId, company: c?.short, industry: c?.industry, businessType: p.businessType, businessName: BUSINESS_TYPES.find(b => b.id === p.businessType)?.name, workflowId: p.workflowId, workflowVersion: wf?.version,
       stageId: p.stageId, stage: st?.name, stageKind: st?.kind, stageIndex: wf?.stages.findIndex(s => s.id === p.stageId), stageCount: wf?.stages.length, statusLabel: p.statusLabel, status: p.status, progress: p.progress,
       owner: p.owner, ownerName: db.get('users', p.owner)?.name, deptId: p.deptId, members: p.members, grants: p.grants ?? [], tags: p.tags, desc: p.desc, fields: fieldView(user, p), updatedAt: p.updatedAt, createdAt: p.createdAt,
       deliverables: dls.map(d => ({ id: d.id, type: d.type, format: d.format, status: d.status, v: d.versions.length, generating: !!d.generating, checkout: !!d.checkout })),
       flow: computeFlowMetrics(db, engine, p),
-      pendingApproval: !!db.one('approvals', a => a.projectId === p.id && a.status === 'pending') }
+      pendingApproval: !!pendingApp,
+      myPendingVote: !!(pendingApp && pendingApp.voters.includes(user.id) && !pendingApp.votes.some(v => v.userId === user.id) && !pendingApp.recused.includes(user.id)),
+      reviewCount: dls.filter(d => d.status === 'review').length }
   }
+  const projectFiles = (user, p) => kb.list(user, { projectId: p.id }).filter(f => !f.rel.includes('/.versions/'))
   const visibleProjects = user => db.all('projects').filter(p => org.seesProject(user, p))
   const project = (user, id) => { const p = db.get('projects', id); org.assertProject(user, p); return p }
   const deliverable = (user, id) => { const d = db.get('deliverables', id); if (!d) throw fail('成果不存在', 404); project(user, d.projectId); return d }
@@ -194,13 +199,13 @@ export function createApi(ctx) {
       meetings: db.find('meetings', m => m.projectId === p.id).map(m => ({ ...m, asr: m.asr ? { ...m.asr, segments: m.asr.segments?.length } : null })),
       extractions: db.find('extractions', x => x.projectId === p.id).sort((a, b) => b.createdAt - a.createdAt).map(x => ({ id: x.id, name: x.name, schema: x.schema, status: x.status, origin: x.origin, missing: x.missing, conflicts: x.conflicts, createdAt: x.createdAt, by: x.by })),
       fills: db.find('fills', f => f.projectId === p.id).map(({ tokenHash, ...f }) => f),
-      files: kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/')),
+      files: projectFiles(user, p),
       company: p.companyId ? projection.company(viewer.human(user), db.get('companies', p.companyId)) : null,
       comments: db.get('comments', p.id)?.list ?? [],
       tasks: db.find('tasks', t => t.projectId === p.id),
       notes: listNotes(db, p.id),
       artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p),
-      followUps: buildFollowUps(pv, lastUserQ, kb.list(user, { companyId: p.companyId }).slice(0, 3).map(f => f.name), lastAiAns, lackingWorks),
+      followUps: buildFollowUps(pv, lastUserQ, projectFiles(user, p).slice(0, 3).map(f => f.name), lastAiAns, lackingWorks),
       osState: getOsState(db, p),
       history: db.history('projects', p.id, 60),
       canVote: db.find('approvals', a => a.projectId === p.id && a.status === 'pending' && a.voters.includes(user.id)).map(a => a.id),
@@ -258,6 +263,12 @@ export function createApi(ctx) {
     'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
     'nb.dify.run': (user, b) => runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.tyc.query': (user, b) => runTianyanchaDueDiligence({ db, kb, org }, user, project(user, b.projectId), b),
+    'nb.source.paste': (user, b) => ingestTextSource({ db, kb, org, notify }, user, project(user, b.projectId), b),
+    'nb.source.url': (user, b) => ingestUrlSource({ db, kb, org, notify, fetchImpl: ctx.fetchImpl }, user, project(user, b.projectId), b),
+    'nb.project.quick': (user, b) => quickCreateProjectWithSources({ db, kb, org, engine, notify }, user, b),
+    'nb.oa.nudge': (user, b) => nudgeProjectAction({ db, org, lifecycle, notify }, user, project(user, b.projectId), b),
+    'nb.oa.handover': (user, b) => buildProjectHandover({ db, kb, org, engine }, user, project(user, b.projectId), b),
+    'nb.enterprise.importUsers': (user, b) => batchImportUsers({ db, org, sessions, hashPassword, minPassword: SEC().minPassword, forceChange: SEC().forceChangeGenerated, mode }, user, b),
     'nb.folder.open': (user, b) => {
       const p = project(user, b.projectId)
       const ws = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
@@ -626,6 +637,8 @@ export function createApi(ctx) {
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.harness.status': (user, q) => getHarnessStatus({ db }, q.get('projectId') ? project(user, q.get('projectId')) : null),
     'nb.tyc.meta': async () => ({ dimensions: TYC_DIMENSIONS, configured: await tianyanchaConfigured() }),
+    'nb.oa.inbox': user => buildOaInbox({ db, org, engine, guideFn: guide }, user),
+    'nb.enterprise.status': () => getEnterpriseReadiness({ db, kb, ai, mode }),
     'nb.artifact.preview': async (user, q) => {
       const p = project(user, q.get('projectId'))
       // 只预览本项目登记过的成品：按登记记录里的路径读，不读请求里给的任意路径
@@ -645,7 +658,7 @@ export function createApi(ctx) {
       const runs = p ? db.get('kvstate', `harness_runs_${p.id}`)?.runs ?? [] : []
       const lastRun = runs.find(r => r.status === 'completed') ?? null
       const arts = p ? db.get('kvstate', `artifacts_${p.id}`)?.list ?? [] : []
-      const files = p ? kb.list(user, { companyId: p.companyId }).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/.versions/') && !f.rel.includes('/Studio成品/')) : []
+      const files = p ? projectFiles(user, p).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/')) : []
       const mounts = db.all('mounts')
       const recentChanges = db.recent(12)
       const LV = ['公开', '内部', '机密', '绝密']

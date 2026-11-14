@@ -253,7 +253,7 @@ export class AI {
   // ───────── 资料汇集（权限过滤 + 脱敏 + 密级统计） ─────────
   async gather(user, p, type, { fileIds = [], purpose = '' } = {}) {
     const company = p.companyId ? this.db.get('companies', p.companyId) : null
-    const own = this.kb.list(user, { companyId: p.companyId }).filter(f => f.mountId !== 'm_ws' || !f.name.startsWith(type))
+    const own = this.kb.list(user, { projectId: p.id }).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/'))
     const ind = await this.kb.search(`${company?.industry ?? ''} ${(p.tags ?? []).join(' ')} ${type}`, { user, limit: 3, filter: f => ['m_nas', 'm_arch'].includes(f.mountId) && !own.includes(f) && !f.rel.includes('项目资料/') })
     const extra = fileIds.map(id => this.kb.file(id)).filter(f => f && this.kb.visible(user, f))
     const picked = [...new Map([...extra, ...own.filter(f => f.chars > 0).slice(0, 8), ...ind.map(r => r.file)].map(f => [f.id, f])).values()].slice(0, 10)

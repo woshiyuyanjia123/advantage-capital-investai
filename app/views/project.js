@@ -27,7 +27,7 @@ function render(v) {
   const st = wf.stages[cur]
   const keep = $('#view .page')?.scrollTop
   v.innerHTML = `<div class="page scrollable">
-    <div class="phd"><button class="btn ghost sm" data-act="go" data-view="pipeline">${icon('left', 14)}项目管理</button><span class="dim">/ ${esc(p.businessName)}</span></div>
+    <div class="phd"><button class="btn ghost sm" data-act="go" data-view="workbench">${icon('left', 14)}投研项目总览</button><span class="dim">/ ${esc(p.businessName)}</span><span class="grow"></span><button class="btn sm ghost" data-act="go" data-view="notebook" data-sub="${p.id}">${icon('spark', 13)}尽调工作台</button><button class="btn sm ghost" data-act="go" data-view="flowboard" data-sub="${p.id}">${icon('flow', 13)}阶段门禁</button></div>
     <div class="ph"><div class="grow"><h1>${esc(p.name)} <span class="pill ps-${p.status}">${esc(p.statusLabel ?? P_STATUS[p.status])}</span></h1>
       <p>${esc(x.company?.name ?? '')}${p.industry ? ` · ${esc(p.industry)}` : ''} · 负责人 ${esc(p.ownerName ?? '')} · 流程 ${esc(wf.name)} v${wf.version}${p.desc ? ` · ${esc(p.desc)}` : ''}</p></div>
       <button class="btn" data-act="ask-ai" data-q="${esc(`${p.name}当前阶段还缺哪些材料？有哪些风险需要关注？`)}">${icon('bot', 14)}问 AI</button>
@@ -179,6 +179,7 @@ async function workAI(type, workId) {
   const p = x.project
   const wt = D().workTypes[type] ?? {}
   if (wt.kind === 'standard') {
+    closeDrawer()
     const fields = await askText(`模板填充：${type}`, '补充字段（每行「字段：值」，可留空；缺失字段会标注【待补充】）', { required: false, placeholder: '签署日期：2026年10月20日\n保密期限：三年' })
     if (fields === null) return
     const j = await act('ai.generate', { projectId: p.id, type, prompt: fields })
@@ -186,9 +187,16 @@ async function workAI(type, workId) {
     return
   }
   if (wt.kind === 'extract') {
+    closeDrawer()
     // 生成「项目信息表」等成果文件（准入条件需要它定稿），同时产生一条待确认的提取记录
     const j = await act('ai.generate', { projectId: p.id, type, workId })
     if (j) { toast('正在从项目资料中提取…'); hooks.track(j, done => { if (done.extraction) openExtraction(done.extraction) }) }
+    return
+  }
+  if (['notebook', 'flowboard'].includes(S.view)) {
+    closeDrawer()
+    if (wt.format === 'pptx' && ACT['nb-studio-ppt']) ACT['nb-studio-ppt']({ dataset: { p: p.id } })
+    else if (hooks.openLocalWordStudio) hooks.openLocalWordStudio(p.id, type)
     return
   }
   S.draftType = type
@@ -314,11 +322,13 @@ Object.assign(ACT, {
   },
   extract: async el => {
     const x = S.project
-    const r = await dialog(`<h3>提取：${esc(S.meta.schemas[el.dataset.k].name)}</h3><p>${esc(S.meta.schemas[el.dataset.k].desc ?? '')}</p><div class="flist">${x.files.filter(f => f.chars > 0 || f.ext === '.xlsx').map(f => `<label class="row"><input type="checkbox" name="files" value="${f.id}" data-multi checked>${ficon(f.ext, true)}<span class="grow ell">${esc(f.name)}</span>${levelTag(f.level)}</label>`).join('') || '<div class="dim">没有可提取的资料，请先上传</div>'}</div><div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">开始提取</button></div>`)
+    const rawList = (x?.files ?? []).filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('/Studio成品/') && (f.chars > 0 || f.ext === '.xlsx'))
+    const preSet = new Set(S.ctx.fileIds?.length ? S.ctx.fileIds : rawList.map(f => f.id))
+    const r = await dialog(`<h3>提取：${esc(S.meta.schemas[el.dataset.k].name)}</h3><p>${esc(S.meta.schemas[el.dataset.k].desc ?? '')}</p><div class="flist">${rawList.map(f => `<label class="row"><input type="checkbox" name="files" value="${f.id}" data-multi ${preSet.has(f.id) ? 'checked' : ''}>${ficon(f.ext, true)}<span class="grow ell">${esc(f.name)}</span>${levelTag(f.level)}</label>`).join('') || '<div class="dim">没有可提取的原始底稿，请先上传</div>'}</div><div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">开始提取</button></div>`)
     if (!r) return
     toast('提取中…')
     const res = await act('extract.run', { projectId: x.project.id, schema: el.dataset.k, fileIds: r.files })
-    if (res) { await loadProject(); openExtraction(res.id) }
+    if (res) { await loadProject(); if (S.view === 'notebook') hooks.refresh?.(); openExtraction(res.id) }
   },
   extraction: el => openExtraction(el.dataset.id),
   'fill-new': async () => {

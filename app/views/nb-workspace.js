@@ -1,5 +1,5 @@
-// 尽调与研判工作台（三栏）：左栏上方是三个修订工具，下面是底稿；中栏是阶段进度和问答；右栏是成果编制、已编制成果和尽调纪要
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, menuAt, mi, drawer, drawerHead, opts, firstPaint, entered, can } from '/api/investai?asset=ui.js'
+// 尽调与研判工作台（三栏）：左栏上方是三个修订工具，下面是多源底稿（支持本地上传、粘贴纪要、抓取网页与工商核查）；中栏是阶段进度、底稿导读和溯源问答；右栏是成果编制、已编制成果和尽调纪要
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, dialog, ficon, menuAt, mi, drawer, drawerHead, opts, firstPaint, entered, can } from '/api/investai?asset=ui.js'
 
 /** 左栏只列原始底稿：工作区里的成果版本、「Studio成品」文件夹里生成的成品不算底稿 */
 function rawSources(x) {
@@ -68,34 +68,66 @@ const LOCAL_TOOLS = [
   ['nb-studio-audio', 'mic', '访谈录音'],
 ]
 
+function sourceGrade(name = '') {
+  if (/审计|财务|财报|利润|合同|天眼查|工商/.test(name)) return 'A'
+  if (/商业计划|BP|路演/i.test(name)) return 'C'
+  return 'B'
+}
+
 function sourceCredBadge(name = '') {
-  if (/审计|财务|财报|利润|合同|天眼查|工商/.test(name)) return '<span class="tag real sm" title="按文件名推定：审计、合同、工商类">A级</span>'
-  if (/商业计划|BP|路演/i.test(name)) return '<span class="tag amber sm" title="按文件名推定：公司自述材料">C级</span>'
-  return '<span class="tag sm" title="按文件名推定：访谈与内部纪要">B级</span>'
+  const g = sourceGrade(name)
+  if (g === 'A') return '<span class="tag real sm" title="按文件名推定：审计、合同、工商类硬证据">A级</span>'
+  if (g === 'C') return '<span class="tag amber sm" title="按文件名推定：公司自述材料">C级</span>'
+  return '<span class="tag sm" title="按文件名推定：访谈、网页与内部纪要">B级</span>'
 }
 
 function renderLeftPane(raw, p) {
   const checked = new Set(S.ctx.fileIds)
   const n = raw.filter(f => checked.has(f.id)).length
+  const aCount = raw.filter(f => sourceGrade(f.name) === 'A').length
   return `<section class="nb-pane nb-left">
     <div class="nb-tools">${LOCAL_TOOLS.map(([actName, ic, label]) => `<button class="nb-tool" data-act="${actName}" data-p="${p.id}">${icon(ic, 19)}<span>${label}</span></button>`).join('')}</div>
     <header class="nb-pane-hd"><b>底稿</b><span class="n">${raw.length}</span><span class="grow"></span>
       <label class="nb-all"><input type="checkbox" class="ck" data-act="nb-src-all" ${n && n === raw.length ? 'checked' : ''}>全选</label>
-      <button class="btn sm ghost" data-act="nb-tyc-open" data-p="${p.id}">天眼查</button>
-      <button class="btn sm ghost ico" data-act="proj-upload" title="上传底稿">${icon('plus', 14)}</button></header>
+      ${aCount ? `<button class="btn sm ghost" data-act="nb-src-grade-a" title="仅勾选审计、财报、合同、工商等 A 级硬证据">仅A级</button>` : ''}
+      <button class="btn sm ghost" data-act="nb-ingest-menu" data-p="${p.id}" title="上传文件、粘贴沟通纪要、抓取网页或天眼查核查">${icon('plus', 13)}速采</button></header>
     <div class="nb-src-list" data-keep="src">${raw.map(f => `<label class="nb-src ${checked.has(f.id) ? 'on' : ''}">
       <input type="checkbox" class="ck" data-act="nb-src-ck" data-id="${f.id}" ${checked.has(f.id) ? 'checked' : ''}>
       ${ficon(f.ext, true)}<span class="ell grow" title="${esc(f.name)}">${esc(f.name)}</span>${sourceCredBadge(f.name)}
       <button class="nb-src-open" data-act="file" data-id="${f.id}" title="预览">${icon('open', 13)}</button></label>`).join('')
-      || `<button class="nb-empty-add" data-act="proj-upload">${icon('plus', 16)}<span>上传底稿</span></button>`}</div>
+      || `<div class="nb-empty-src"><button class="nb-empty-add" data-act="proj-upload">${icon('upload', 16)}<span>上传本地底稿</span></button><div class="row" style="padding:0 16px 12px;gap:6px"><button class="btn sm grow" data-act="nb-paste-src" data-p="${p.id}">粘贴文本/纪要</button><button class="btn sm grow" data-act="nb-url-src" data-p="${p.id}">抓取网页</button></div></div>`}</div>
   </section>`
+}
+
+function sourceBriefHTML(x, p) {
+  const raw = rawSources(x)
+  const gA = raw.filter(f => sourceGrade(f.name) === 'A').length
+  const gB = raw.filter(f => sourceGrade(f.name) === 'B').length
+  const gC = raw.filter(f => sourceGrade(f.name) === 'C').length
+  const lacking = (x.readiness?.items ?? []).filter(i => !i.ok).map(i => i.work)
+  const quickQs = [
+    ['口径冲突排查', '逐项比对勾选的公司自述材料和审计、合同、访谈底稿，列出同一财务或业务指标说法不一致的地方，每条标出处。'],
+    ['阶段准入核查', `对照当前「${p.stage || '本阶段'}」的准入要求，检查目前已勾选底稿能支撑哪些结论、还缺失哪些核心核验材料？`],
+    ['核心指标提炼', '从已勾选底稿中提炼营收、毛利率、净利润、客户集中度、估值与核心条款等关键数字，全部标注原文出处，未披露的写明未披露。'],
+    ['模拟投决追问', '站在投委会反方委员立场，基于当前底稿列出最尖锐的 5 个风险追问及底稿中的疑点依据。'],
+  ]
+  return `<div class="nb-chat-empty nb-brief">
+    <div class="nb-brief-hd"><h2>${esc(p.name)}</h2><span class="tag blue">${esc(p.stage || '立项')}</span></div>
+    <p>已勾选 <b data-src-n>${S.ctx.fileIds.length}</b> / ${raw.length} 份底稿（A级硬证据 ${gA} · B级纪要 ${gB} · C级自述 ${gC}）${lacking.length ? ` · 本阶段待定稿：${esc(lacking.slice(0, 3).join('、'))}` : ' · 本阶段必做项已齐备'}</p>
+    <div class="nb-brief-grid">${quickQs.map(([t, q]) => `<button class="nb-brief-q" data-act="nb-q" data-q="${esc(q)}"><b>${esc(t)}</b><span class="ell">${esc(q)}</span></button>`).join('')}</div>
+    <div class="nb-empty-acts">
+      <button class="btn sm" data-act="nb-paste-src" data-p="${p.id}">${icon('edit', 13)}粘贴沟通纪要入底稿</button>
+      <button class="btn sm" data-act="nb-url-src" data-p="${p.id}">${icon('globe', 13)}抓取网页入底稿</button>
+      <button class="btn sm pri" data-act="nb-harness-open" data-p="${p.id}">${icon('spark', 13)}成套制作材料</button>
+    </div>
+  </div>`
 }
 
 function chatHTML(x, p) {
   const offset = Math.max(0, S.chat.length - 24)
   const msgs = S.chat.slice(offset)
   const follow = (x.followUps ?? []).length ? `<div class="nb-follows">${x.followUps.map(q => `<button class="nb-follow" data-act="nb-q" data-q="${esc(q)}"><span class="grow">${esc(q)}</span>${icon('right', 13)}</button>`).join('')}</div>` : ''
-  if (!msgs.length) return `<div class="nb-chat-empty"><h2>${esc(p.name)}</h2><p><span data-src-n>${S.ctx.fileIds.length}</span> 份底稿 · ${esc(p.stage || '')}</p><div class="nb-empty-acts"><button class="btn sm" data-act="nb-q" data-q="逐项比对勾选的公司自述材料和审计、合同、访谈底稿，列出同一指标说法不一致的地方，每条标出处。">核对底稿口径</button><button class="btn sm pri" data-act="nb-harness-open" data-p="${p.id}">成套制作</button></div></div>${follow}`
+  if (!msgs.length) return sourceBriefHTML(x, p) + follow
   return msgs.map((m, i) => {
     if (m.role === 'user') return `<div class="nb-msg me"><div class="bub">${esc(m.text)}</div></div>`
     const job = m.job ? (S.live.get(m.job.id) ?? m.job) : m.jobId ? S.live.get(m.jobId) : null
@@ -129,6 +161,7 @@ function renderCenterPane(x, p, f) {
       ${can('project.edit') ? `<button class="btn sm ghost" data-act="edit-fields">项目字段</button>` : ''}
       ${can('fill.manage') ? `<button class="btn sm ghost" data-act="fill-new">外部填报</button>` : ''}
       <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">管控看板</button>
+      <button class="btn sm ghost" data-act="open-project" data-id="${p.id}" title="查看会议纪要、提取台账与快照回滚">全景台账</button>
       <button class="btn sm pri" data-act="nb-submit-menu" data-p="${p.id}">${icon('upload', 13)}报送</button></header>
     <div class="nb-track">
       <div class="nb-track-pct"><b data-count="${f.overallPct}">${f.overallPct}</b><i>%</i></div>
@@ -347,9 +380,71 @@ function renderHarnessDrawer() {
     </div>`, true)
 }
 
+export async function openPasteSource(projectId) {
+  const pid = projectId || S.sel || D()?.projects?.[0]?.id
+  if (!pid) return toast('请先选择或创建一个项目', 'warn')
+  const p = projNameOf(pid)
+  const r = await dialog(`<h3>粘贴文本 / 沟通纪要入底稿</h3><p class="dim">将微信沟通回复、专家访谈速记、邮件正文或尽调摘录直接存为「${esc(p)}」的原始底稿，立即可用于溯源问答与成果编制。</p>
+    <div class="row"><label class="f grow">底稿标题（留空自动提取首行）<input class="input" name="title" placeholder="如：CFO关于2025Q4收入确认口径的说明"></label>
+      <label class="f" style="width:160px">来源类别<select class="select" name="sourceKind">${opts([['沟通纪要', '管理层/微信沟通'], ['访谈速记', '专家/客户访谈'], ['工商与合同摘录', '合同/审计摘录'], ['外部公开资料', '行业/竞品资料']], '沟通纪要')}</select></label></div>
+    <label class="f">底稿正文<textarea class="input area" name="text" style="height:36vh" required placeholder="在此直接粘贴文字内容…"></textarea></label>
+    <div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">存入底稿并勾选</button></div>`, { wide: true })
+  if (!r) return
+  const out = await act('nb.source.paste', { projectId: pid, ...r })
+  if (!out?.file) return
+  S.sel = pid
+  if (!S.ctx.fileIds.includes(out.file.id)) S.ctx.fileIds.push(out.file.id)
+  toast(`已存为底稿《${out.file.name}》并自动勾选`, 'ok')
+  S.project = await get('project', { id: pid }).catch(() => S.project)
+  await hooks.reload()
+}
+
+export async function openUrlSource(projectId) {
+  const pid = projectId || S.sel || D()?.projects?.[0]?.id
+  if (!pid) return toast('请先选择或创建一个项目', 'warn')
+  const p = projNameOf(pid)
+  const r = await dialog(`<h3>抓取公开网页链接入底稿</h3><p class="dim">输入企业官网、行业新闻或公开公告链接，自动提取正文存为「${esc(p)}」的可溯源底稿（自动拦截内网地址）。</p>
+    <label class="f">网页 URL<input class="input mono" name="url" required placeholder="https://..."></label>
+    <label class="f">自定义底稿标题（可选，留空自动读取网页标题）<input class="input" name="title" placeholder="如：某科技发布新一代储能系统公告"></label>
+    <div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">抓取并存入底稿</button></div>`)
+  if (!r) return
+  toast('正在抓取并解析网页正文…')
+  const out = await act('nb.source.url', { projectId: pid, ...r })
+  if (!out?.file) return
+  S.sel = pid
+  if (!S.ctx.fileIds.includes(out.file.id)) S.ctx.fileIds.push(out.file.id)
+  toast(`已抓取《${out.title}》（${out.chars} 字）并勾选`, 'ok')
+  S.project = await get('project', { id: pid }).catch(() => S.project)
+  await hooks.reload()
+}
+function projNameOf(pid) { return D()?.projects?.find(x => x.id === pid)?.name || S.project?.project?.name || '当前项目' }
+hooks.openPasteSource = openPasteSource
+hooks.openUrlSource = openUrlSource
+
 Object.assign(ACT, {
   'nb-src-ck': el => { const s = new Set(S.ctx.fileIds); el.checked ? s.add(el.dataset.id) : s.delete(el.dataset.id); S.ctx.fileIds = [...s]; syncSources() },
   'nb-src-all': el => { S.ctx.fileIds = el?.checked === false ? [] : rawSources(S.project).map(f => f.id); syncSources() },
+  'nb-src-grade-a': () => {
+    const raw = rawSources(S.project)
+    const aIds = raw.filter(f => sourceGrade(f.name) === 'A').map(f => f.id)
+    const cur = new Set(S.ctx.fileIds)
+    const alreadyOnlyA = aIds.length > 0 && cur.size === aIds.length && aIds.every(id => cur.has(id))
+    S.ctx.fileIds = alreadyOnlyA ? raw.map(f => f.id) : aIds
+    syncSources()
+    toast(alreadyOnlyA ? `已恢复全选 ${raw.length} 份底稿` : `已筛选勾选 ${aIds.length} 份 A 级硬证据底稿`, 'ok')
+  },
+  'nb-ingest-menu': el => {
+    const p = el.dataset.p || S.sel
+    menuAt(el, [
+      mi('proj-upload', '上传本地文件（PDF/Office/音频）', { p }, { ic: 'upload' }),
+      mi('nb-paste-src', '粘贴文本 / 微信沟通纪要入底稿', { p }, { ic: 'edit' }),
+      mi('nb-url-src', '抓取公开网页链接入底稿', { p }, { ic: 'globe' }),
+      '<hr>',
+      mi('nb-tyc-open', '天眼查工商穿透核查', { p }, { ic: 'search' }),
+    ], 248)
+  },
+  'nb-paste-src': el => openPasteSource(el?.dataset?.p || S.sel),
+  'nb-url-src': el => openUrlSource(el?.dataset?.p || S.sel),
   'nb-q': el => { const box = $('#nbChatInput'); if (box) { box.value = el.dataset.q; ACT['nb-chat-send']() } },
   'nb-chat-send': async () => {
     const box = $('#nbChatInput')

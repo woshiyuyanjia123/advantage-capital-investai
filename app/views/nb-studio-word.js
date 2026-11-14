@@ -100,3 +100,4 @@ window.addEventListener('investai:reload', () => {
   if (!wordSt || !$('#nbWordArea') || document.activeElement?.id === 'nbWordArea') return
   openLocalWordStudio(wordSt.projectId, wordSt.type)
 })
+hooks.openLocalWordStudio = openLocalWordStudio

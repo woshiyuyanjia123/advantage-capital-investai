@@ -43,10 +43,10 @@ export function withStage(db, p) {
 
 /** 读出勾选的底稿（没勾选时用项目的全部底稿），返回正文和其中最高的密级。成品自己不算底稿。 */
 export async function gatherDocs({ kb, org }, user, p, fileIds) {
-  let allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
+  let allFiles = kb.list(user, { projectId: p.id }).filter(f => !f.rel.includes('/.versions/'))
   if (!allFiles.some(f => f.mountId !== 'm_ws')) {
     await kb.scanAll().catch(() => {})
-    allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
+    allFiles = kb.list(user, { projectId: p.id }).filter(f => !f.rel.includes('/.versions/'))
   }
   const rawSources = allFiles.filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/'))
   if (Array.isArray(fileIds) && fileIds.length === 0) {

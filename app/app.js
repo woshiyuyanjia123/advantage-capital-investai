@@ -54,7 +54,7 @@ function renderHdr() {
   const route = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }[d.model.mode] ?? d.model.mode
   $('#hdr').innerHTML = `
     <div class="logo"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')}</span></div>
-    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或提问" autocomplete="off"><span class="kbd">${/Mac/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</span></div>
+    <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、底稿，或输入快捷指令" autocomplete="off"><span class="kbd">${/Mac/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</span></div>
     <button class="nb-model" data-act="nb-api" title="${esc(d.model?.note || '模型连接')}"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
     <button class="btn ghost ico" data-act="theme-toggle" title="${theme() === 'dark' ? '换成浅色' : '换成深色'}">${icon(theme() === 'dark' ? 'sun' : 'moon', 16)}</button>
     <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span class="hd-lbl">设置与帮助</span></button>
@@ -63,8 +63,36 @@ function renderHdr() {
     ${!S.aiOpen ? `<button class="btn ghost ico" data-act="ai-toggle" title="打开 AI 协作">${icon('bot', 17)}</button>` : ''}`
   const input = $('#gsearch')
   input.value = searchTerm
-  input.addEventListener('input', () => { searchTerm = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 180) })
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && searchTerm.trim() && !$('#popup .it.on')) { closePopup(); fill(searchTerm.trim()); send() } if (e.key === 'Escape') closePopup() })
+  input.addEventListener('focus', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 40) })
+  input.addEventListener('input', () => { searchTerm = input.value; clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 140) })
+  input.addEventListener('keydown', e => {
+    const items = [...document.querySelectorAll('#popup .it:not(.off)')]
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && items.length) {
+      e.preventDefault()
+      const cur = items.findIndex(x => x.classList.contains('on'))
+      items.forEach(x => x.classList.remove('on'))
+      const next = e.key === 'ArrowDown' ? (cur + 1) % items.length : (cur <= 0 ? items.length - 1 : cur - 1)
+      items[next].classList.add('on')
+      items[next].scrollIntoView({ block: 'nearest' })
+      return
+    }
+    if (e.key === 'Enter') {
+      const pickIt = document.querySelector('#popup .it.on')
+      if (pickIt && pickIt.dataset.act) {
+        e.preventDefault()
+        const actFn = ACT[pickIt.dataset.act]
+        closePopup()
+        actFn?.(pickIt, e)
+        return
+      }
+      if (searchTerm.trim()) {
+        closePopup()
+        if (S.view === 'notebook' && $('#nbChatInput')) { $('#nbChatInput').value = searchTerm.trim(); searchTerm = ''; input.value = ''; ACT['nb-chat-send']?.(); return }
+        fill(searchTerm.trim()); send()
+      }
+    }
+    if (e.key === 'Escape') { closePopup(); input.blur() }
+  })
 }
 
 // ───────── 左导航 ─────────
@@ -82,7 +110,7 @@ function renderNav() {
   if (EMBED) return
   const d = D()
   const caps = d.caps
-  $('#nav').innerHTML = `<div class="menu">${NAV().map(([v, ic, label, n]) => `<button class="${S.view === v || (v === 'pipeline' && S.view === 'project') ? 'on' : ''}" data-act="go" data-view="${v}" title="${label}">${icon(ic, 17)}<span class="lbl">${label}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>
+  $('#nav').innerHTML = `<div class="menu">${NAV().map(([v, ic, label, n]) => `<button class="${S.view === v || (v === 'workbench' && ['project', 'pipeline'].includes(S.view)) ? 'on' : ''}" data-act="go" data-view="${v}" title="${label}">${icon(ic, 17)}<span class="lbl">${label}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>
     <div class="store"><h4>我的权限</h4>
       <div class="sr"><span class="dot ok"></span><span>数据范围</span><span class="ell">${esc(caps.scopes.map(s => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[s])).join('、'))}</span></div>
       <div class="sr"><span class="dot ${caps.clearance >= 2 ? 'ok' : 'warn'}"></span><span>资料密级</span><span>≤ ${LEVELS[caps.clearance]}</span></div>
@@ -98,18 +126,43 @@ function renderChrome() {
 
 let searchTerm = ''
 let searchTimer
+const QUICK_CMDS = () => {
+  const pid = S.sel || D()?.projects?.[0]?.id || ''
+  return [
+    can('project.create') && can('material.upload') && { act: 'quick-project', ic: 'upload', label: '带材料快速立项（自动识别公司与轮次）', kw: '立项 新建 上传 快速 bp' },
+    pid && can('material.upload') && { act: 'nb-paste-src', ic: 'edit', label: '粘贴文本 / 微信沟通纪要入当前项目底稿', kw: '粘贴 文本 纪要 微信 底稿', data: { p: pid } },
+    pid && can('material.upload') && { act: 'nb-url-src', ic: 'globe', label: '抓取公开网页链接入当前项目底稿', kw: '网页 链接 url 抓取 新闻 公告', data: { p: pid } },
+    pid && { act: 'nb-harness-open', ic: 'spark', label: '成套制作投研材料（方案审阅 → 质检报送）', kw: '成套 制作 ppt 报告 备忘录 harness', data: { p: pid } },
+    pid && { act: 'nb-flowboard', ic: 'flow', label: '进入阶段门禁与投决中心（报送 / 表决 / 催办）', kw: '门禁 审批 表决 报送 催办 oa', data: { p: pid } },
+    { act: 'enterprise-open', ic: 'shield', label: '企业开箱落地向导与批量导入员工账号', kw: '企业 开箱 部署 批量 导入 账号 员工 部门' },
+    { act: 'nb-api', ic: 'bot', label: '配置或切换 AI 大模型连接', kw: '模型 api key 连接 deepseek 本地' },
+  ].filter(Boolean)
+}
+
 async function runSearch() {
+  const input = $('#gsearch')
+  if (!input) return
   const q = searchTerm.trim()
-  if (!q) return closePopup()
+  const box = input.getBoundingClientRect()
+  const cmds = QUICK_CMDS().filter(c => !q || c.label.toLowerCase().includes(q.toLowerCase()) || c.kw.includes(q.toLowerCase()))
+  const cmdHTML = cmds.length ? `<div class="hd">快捷指令（↑↓ 选择，Enter 执行）</div>${cmds.slice(0, q ? 4 : 6).map((c, idx) => `<div class="it ${!q && idx === 0 ? 'on' : ''}" data-act="${c.act}" ${Object.entries(c.data ?? {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')}>${icon(c.ic, 13)}<span class="grow ell">${esc(c.label)}</span></div>`).join('')}` : ''
+  if (!q) {
+    const recent = (D()?.projects ?? []).filter(p => p.status === 'active').slice(0, 5)
+    popup([
+      cmdHTML,
+      recent.length ? `<div class="hd">活跃项目直达</div>${recent.map(p => `<div class="it" data-act="nb-enter" data-id="${p.id}">${icon('grid', 13)}<span class="grow ell">${esc(p.name)}</span><span class="dim">${esc(p.stage || '')} · ${p.progress ?? 0}%</span></div>`).join('')}` : '',
+    ].join(''), box.left, box.bottom + 4, Math.max(box.width, 420))
+    return
+  }
   const r = await get('search', { q }).catch(() => null)
   if (!r || searchTerm.trim() !== q) return
-  const box = $('#gsearch').getBoundingClientRect()
   popup([
-    r.projects.length ? `<div class="hd">项目</div>${r.projects.map(p => `<div class="it" data-act="open-project" data-id="${p.id}">${icon('grid', 13)}<span class="grow ell">${esc(p.name)}</span><span class="dim">${esc(p.stage)}</span></div>`).join('')}` : '',
-    r.companies.length ? `<div class="hd">公司</div>${r.companies.map(c => `<div class="it" data-act="open-company" data-id="${c.id}">${icon('building', 13)}<span class="grow ell">${esc(c.name)}</span></div>`).join('')}` : '',
-    r.files.length ? `<div class="hd">资料</div>${r.files.map(f => `<div class="it" data-act="file" data-id="${f.id}">${icon('file', 13)}<div class="grow" style="min-width:0"><div class="ell">${esc(f.name)}</div><div class="dim ell" style="font-size:11px">${esc(f.snippet)}</div></div></div>`).join('')}` : '',
-    `<div class="hd">更多</div><div class="it" data-act="wis-search" data-q="${esc(q)}">${icon('globe', 13)}<span class="grow">在智堡研报中搜索「${esc(q)}」</span></div><div class="it" data-act="ask" data-q="${esc(q)}">${icon('bot', 13)}<span class="grow">问 AI：${esc(q)}</span><span class="dim">Enter</span></div>`,
-  ].join(''), box.left, box.bottom + 4, Math.max(box.width, 380))
+    cmdHTML,
+    r.projects.length ? `<div class="hd">项目（进尽调工作台）</div>${r.projects.map((p, idx) => `<div class="it ${!cmds.length && idx === 0 ? 'on' : ''}" data-act="nb-enter" data-id="${p.id}">${icon('grid', 13)}<span class="grow ell">${esc(p.name)}</span><span class="dim">${esc(p.stage)}</span></div>`).join('')}` : '',
+    r.companies.length ? `<div class="hd">公司档案</div>${r.companies.map(c => `<div class="it" data-act="open-company" data-id="${c.id}">${icon('building', 13)}<span class="grow ell">${esc(c.name)}</span></div>`).join('')}` : '',
+    r.files.length ? `<div class="hd">底稿资料</div>${r.files.map(f => `<div class="it" data-act="file" data-id="${f.id}">${icon('file', 13)}<div class="grow" style="min-width:0"><div class="ell">${esc(f.name)}</div><div class="dim ell" style="font-size:11px">${esc(f.snippet)}</div></div></div>`).join('')}` : '',
+    `<div class="hd">深度检索与问答</div><div class="it" data-act="wis-search" data-q="${esc(q)}">${icon('globe', 13)}<span class="grow">在智堡研报中搜索「${esc(q)}」</span></div><div class="it" data-act="ask" data-q="${esc(q)}">${icon('bot', 13)}<span class="grow">问 AI：${esc(q)}</span><span class="dim">Enter</span></div>`,
+  ].join(''), box.left, box.bottom + 4, Math.max(box.width, 420))
 }
 
 // ───────── 路由（DSH 内嵌时与宿主侧栏双向同步） ─────────
@@ -420,10 +473,17 @@ Object.assign(ACT, {
   notifications: el => {
     get('notifications').then(list => {
       const r = el.getBoundingClientRect()
-      popup(`<div class="hd row">通知<span class="grow"></span><span class="lnk" data-act="notif-read-all">全部已读</span></div>${list.slice(0, 30).map(n => `<div class="it notif ${n.read ? 'dim' : ''}" data-act="notif" data-id="${n.id}" data-p="${n.projectId ?? ''}"><span class="nk k-${n.kind}"></span><div class="grow" style="min-width:0"><div class="ell"><b>${esc(n.title)}</b></div><div class="ell" style="font-size:11.5px;color:var(--muted)">${esc(n.text ?? '')}</div></div><span class="dim" style="font-size:11px">${rel(n.at)}</span></div>`).join('') || '<div class="it off">暂无通知</div>'}`, r.right - 380, r.bottom + 6, 380)
+      popup(`<div class="hd row">通知<span class="grow"></span><span class="lnk" data-act="notif-read-all">全部已读</span></div>${list.slice(0, 30).map(n => `<div class="it notif ${n.read ? 'dim' : ''}" data-act="notif" data-id="${n.id}" data-kind="${esc(n.kind ?? '')}" data-p="${n.projectId ?? ''}"><span class="nk k-${n.kind}"></span><div class="grow" style="min-width:0"><div class="ell"><b>${esc(n.title)}</b></div><div class="ell" style="font-size:11.5px;color:var(--muted)">${esc(n.text ?? '')}</div></div><span class="dim" style="font-size:11px">${rel(n.at)}</span></div>`).join('') || '<div class="it off">暂无通知</div>'}`, r.right - 380, r.bottom + 6, 380)
     })
   },
-  notif: async el => { closePopup(); await post('notification.read', { id: el.dataset.id }); if (el.dataset.p) go('project', { id: el.dataset.p }); else hooks.reload() },
+  notif: async el => {
+    closePopup()
+    await post('notification.read', { id: el.dataset.id })
+    if (el.dataset.p) {
+      const targetView = ['approval', 'review', 'decision'].includes(el.dataset.kind) ? 'flowboard' : 'notebook'
+      go(targetView, { id: el.dataset.p })
+    } else hooks.reload()
+  },
   'notif-read-all': async () => { closePopup(); await post('notification.read', {}); hooks.reload() },
   persona: el => {
     const d = D()
@@ -478,6 +538,7 @@ ACT['top-settings-menu'] = el => {
   const d = D()
   const dir = d.mounts.find(m => m.kind === 'nas') ?? d.mounts.find(m => m.kind === 'local')
   menuAt(el, [
+    mi('enterprise-open', '企业开箱落地向导', {}, { ic: 'building' }),
     mi('nb-api', '模型连接', {}, { ic: 'spark' }),
     mi('nb-arch-open', '运行状态', {}, { ic: 'shield' }),
     mi('persona', d.mode === 'saas' ? '账户' : '切换岗位', {}, { ic: 'user' }),
@@ -546,7 +607,11 @@ window.addEventListener('drop', async e => {
   e.preventDefault(); dragDepth = 0; $('#drop').hidden = true
   const files = [...e.dataTransfer.files]
   if (!files.length) return
-  const projectId = ['project', 'notebook', 'flowboard'].includes(S.view) ? S.sel : undefined
+  const projectId = ['project', 'notebook', 'flowboard'].includes(S.view) ? S.sel : (S.view === 'workbench' && S.nbExpanded ? S.nbExpanded : undefined)
+  if (!projectId && S.view === 'workbench' && can('project.create') && can('material.upload') && hooks.openQuickProject) {
+    hooks.openQuickProject(files)
+    return
+  }
   for (const file of files) {
     if (file.size > 40 * 1024 * 1024) { toast(`${file.name} 超过 40MB，请放入 NAS 目录后扫描`, 'deny'); continue }
     const r = await act('kb.upload', { projectId, mountId: projectId ? undefined : 'm_up', name: file.name, data: await toB64(file) }, `已上传 ${file.name}${projectId ? '（项目底稿）' : ''}`)

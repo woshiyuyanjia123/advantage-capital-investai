@@ -55,7 +55,7 @@ export function createExtractor({ db, kb, org, ai, projection }) {
   async function sourcesFor(user, projectId, fileIds) {
     const p = db.get('projects', projectId)
     org.assertProject(user, p)
-    let files = fileIds?.length ? fileIds.map(id => kb.file(id)).filter(Boolean) : kb.list(user, { companyId: p.companyId }).filter(f => f.mountId !== 'm_ws' && f.chars > 0)
+    let files = fileIds?.length ? fileIds.map(id => kb.file(id)).filter(Boolean) : kb.list(user, { projectId: p.id }).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/') && f.chars > 0)
     files = files.filter(f => kb.visible(user, f))
     const out = []
     for (const f of files.slice(0, 12)) { const r = await kb.read(f.id, user); out.push({ n: out.length + 1, file: f, fileId: f.id, path: r.path, text: r.text, level: f.level ?? 1 }) }

@@ -162,11 +162,21 @@ export class KB {
     return { file: f, buffer: await readFile(await this.pathOf(id)) }
   }
 
-  list(user, { mountId, q, companyId, projectId, limit = 500 } = {}) {
+  list(user, opts = {}) {
+    const { mountId, q, projectId, limit = 500 } = opts
+    let companyId = opts.companyId
+    let projName = null
+    if (projectId) {
+      const p = this.db.get('projects', projectId)
+      companyId = p?.companyId ?? null
+      projName = p?.name ?? null
+    }
     let list = this.files().filter(f => !user || this.visible(user, f))
     if (mountId) list = list.filter(f => f.mountId === mountId)
-    if (projectId) { const p = this.db.get('projects', projectId); companyId = p?.companyId }
     if (companyId) list = list.filter(f => this.companyFor(f)?.id === companyId)
+    else if (projectId || ('companyId' in opts && opts.companyId === null)) {
+      list = projName ? list.filter(f => f.rel.includes(`项目资料/${projName}/`) || f.rel.startsWith(`${projName}/`)) : []
+    }
     if (q) { const t = q.toLowerCase(); list = list.filter(f => f.rel.toLowerCase().includes(t) || f.preview.toLowerCase().includes(t)) }
     return list.sort((a, b) => b.mtime - a.mtime).slice(0, limit)
   }

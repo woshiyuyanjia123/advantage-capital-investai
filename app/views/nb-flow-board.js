@@ -1,5 +1,5 @@
-// 阶段门禁与投决中心（三栏）：左边选工作成果并报送，中间是各阶段的工作项，右边是决策表决和岗位权限
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, ficon, opts, dialog, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered, can } from '/api/investai?asset=ui.js'
+// 阶段门禁与投决中心（三栏）：左边选工作成果并报送，中间是各阶段的工作项（支持催办），右边是决策表决、交接简报和岗位权限
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, opts, dialog, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered, can } from '/api/investai?asset=ui.js'
 
 let fb = { projectId: null, data: null, pickedArt: null, pickedWork: null, lightText: '', loading: false }
 
@@ -89,6 +89,8 @@ function renderPipelineCol(x, p, b) {
       ${can('project.member') ? `<button class="btn sm ghost" data-act="members">成员授权</button>` : ''}
       ${can('project.edit') ? `<button class="btn sm ghost" data-act="edit-fields">项目字段</button>` : ''}
       ${can('fill.manage') ? `<button class="btn sm ghost" data-act="fill-new">外部填报</button>` : ''}
+      <button class="btn sm ghost" data-act="fb-handover" data-p="${p.id}" title="一键汇总项目要素、阶段准入、底稿与待办交接包">交接简报</button>
+      <button class="btn sm ghost" data-act="open-project" data-id="${p.id}" title="查看会议纪要、提取台账与历史快照回滚">全景台账</button>
       <button class="btn sm ghost" data-act="go" data-view="workbench">投研项目总览</button></header>
     <div class="nb-track">
       <div class="nb-track-pct"><b data-count="${f.overallPct}">${f.overallPct}</b><i>%</i></div>
@@ -115,6 +117,7 @@ function renderWorkNode(w) {
       <div class="meta ell">${esc(w.assigneeName)} · 定稿：${esc((w.holders?.finalize ?? []).join('、') || '部门负责人、合伙人')}</div></div>
     <span class="pill ${dl ? `dl-${dl.status}` : `ws-${w.status}`}">${dl ? `${DL_STATUS[dl.status]} v${dl.v}` : WORK_STATUS[w.status] || w.status}</span>
     <div class="acts">
+      ${(!dl || dl.status !== 'final') && w.assignee ? `<button class="btn sm ghost" data-act="fb-nudge" data-p="${S.sel}" data-w="${w.id}" title="向负责人或复核人发送站内与群消息催办提醒">催办</button>` : ''}
       ${dl && dl.status === 'draft' && dl.v ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.submit" data-d="${dl.id}" ${off(P.submit)}>提请复核</button>` : ''}
       ${dl && dl.status === 'review' ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.finalize" data-d="${dl.id}" ${off(P.finalize)}>确认定稿</button>` : ''}
       <button class="btn sm go" data-act="fb-slot-sub" data-w="${w.id}" data-t="${esc(w.type)}" ${fb.pickedArt ? '' : 'disabled'}>报送至此</button>
@@ -140,7 +143,8 @@ function renderPermissionCol(x, p, b) {
       <header class="nb-pane-hd sticky"><b>决策节点</b><span class="grow"></span><span class="tag ${b.readiness.ok ? 'real' : 'amber'}">${b.readiness.ok ? '已满足准入' : `${lacking.length || ''} 项待定稿`}</span></header>
       <div class="nb-gate" style="flex-wrap:wrap;gap:6px">
         ${pending ? `${outcomes.map(([k, v]) => `<button class="btn ${FB_OUTCOME_CLS[k] || ''} grow" data-act="fb-vote" data-a="${pending.id}" data-d="${k}" title="${esc(v?.label || '')}">${esc(FB_OUTCOME_LABEL[k] ?? v?.label ?? k)}</button>`).join('')}
-          <button class="btn sm ghost" data-act="fb-vote" data-a="${pending.id}" data-recuse="1">申请回避</button>`
+          <button class="btn sm ghost" data-act="fb-vote" data-a="${pending.id}" data-recuse="1">申请回避</button>
+          <button class="btn sm ghost" data-act="fb-nudge" data-p="${p.id}" data-a="${pending.id}" title="向尚未投票的表决人发送催办提醒">${icon('bell', 12)}催办表决</button>`
           : `<button class="btn grow ${b.readiness.ok ? 'pri' : 'nope'}" data-act="fb-gate" data-p="${p.id}">${icon('vote', 14)}发起本阶段决策表决</button>`}
       </div>
       ${lacking.length ? `<div class="nb-lack" id="fbLack">${lacking.map(i => `<div><b class="ell">${esc(i.work)}</b><span>${esc(i.why || i.status || '待定稿')}</span></div>`).join('')}</div>` : ''}
@@ -214,6 +218,23 @@ Object.assign(ACT, {
       opinion = r.opinion.trim()
     }
     if (await act('approval.vote', { id: el.dataset.a, decision: dec, opinion }, '表决已记录')) await again()
+  },
+  'fb-nudge': async el => {
+    const pid = el.dataset.p || S.sel
+    const r = await act('nb.oa.nudge', { projectId: pid, approvalId: el.dataset.a || undefined, workId: el.dataset.w || undefined })
+    if (r) toast(`已向 ${r.notified.join('、')} 发送催办通知`, 'ok')
+  },
+  'fb-handover': async el => {
+    const pid = el.dataset.p || S.sel
+    const r = await act('nb.oa.handover', { projectId: pid, saveAsNote: true })
+    if (!r) return
+    const res = await dialog(`<h3>${esc(r.title)}</h3><div class="infobox">已同步保存至本项目「尽调纪要」，便于团队岗位交接或投委会前速览。</div>
+      <div class="paper" style="max-height:52vh;overflow:auto"><div class="md">${md(r.markdown)}</div></div>
+      <div class="acts"><button class="btn" type="button" data-dlg="no">关闭</button><button class="btn pri" type="button" data-dlg="ok">复制简报全文</button></div>`, { wide: true })
+    if (res) {
+      await navigator.clipboard?.writeText(r.markdown).catch(() => {})
+      toast('交接与上会简报已复制到剪贴板', 'ok')
+    }
   },
 })
 VIEWS.flowboard = renderFlowBoard

@@ -46,7 +46,7 @@ export function agentTools({ db, kb, org, wisburg, ai, route }, user, job, aiLev
         const p = db.get('projects', projectId)
         org.assertProject(user, p)
         const works = (p.works ?? []).filter(w => w.stageId === p.stageId).map(w => ({ work: w.type, required: w.required, status: w.status, deliverable: w.deliverableId ? db.get('deliverables', w.deliverableId)?.status : null }))
-        return { ...pv(p), desc: p.desc, works, files: kb.list(user, { companyId: p.companyId }).map(f => ({ fileId: f.id, name: f.name, level: LV(f.level), readable: proj.file(v, f) && levelOk(f) })), timeline: (p.timeline ?? []).slice(-5) }
+        return { ...pv(p), desc: p.desc, works, files: kb.list(user, { projectId: p.id }).map(f => ({ fileId: f.id, name: f.name, level: LV(f.level), readable: proj.file(v, f) && levelOk(f) })), timeline: (p.timeline ?? []).slice(-5) }
       } },
     { name: 'check_readiness', level: 1, label: '检查准入', description: '检查项目当前阶段进入下一环节的准入条件（必做成果是否已定稿）与决策节点信息。', parameters: obj({ projectId: str('项目 ID') }, ['projectId']),
       run: ({ projectId }) => { const p = db.get('projects', projectId); org.assertProject(user, p); const r = ai.engine.readiness(p); return { stage: r.stage.name, gate: r.stage.gate?.name, approvers: r.stage.gate?.roles, ready: r.ok, items: r.items } } },

@@ -3,7 +3,7 @@
 import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, avatar, get, post, act, toast, dialog, confirmBox, askText, drawer, drawerHead, can, user, userName, fmt, ymd, rel, opts, empty, LEVELS } from '/api/investai?asset=ui.js'
 
 const TABS = [
-  ['org', '组织与人员', 'org.manage'], ['roles', '岗位权限', null], ['workflow', '流程配置', null], ['security', '密级与敏感字段', 'settings.manage'],
+  ['onboarding', '企业开箱向导', null], ['org', '组织与人员', 'org.manage'], ['roles', '岗位权限', null], ['workflow', '流程配置', null], ['security', '密级与敏感字段', 'settings.manage'],
   ['ai', 'AI 策略与模型', null], ['integrations', '集成', 'integration.manage'], ['automation', '自动化与定时', 'settings.manage'], ['cloud', '云端与安全', 'org.manage'], ['audit', '审计与回滚', 'audit.read'], ['eval', '评测', 'ai.policy'],
 ]
 const AI_L = ['关闭', '辅助建议', '起草待确认', '授权执行']
@@ -21,11 +21,17 @@ VIEWS.settings = v => {
 const saveSection = async (section, value, ok = '已保存（变更已记录，可回滚）') => { const r = await act('settings.update', { section, value }, ok); if (r) await hooks.reload({ files: false }); return r }
 
 const T = {
+  // ───────── 企业开箱落地向导（6 项体检 + Excel/CSV 批量导入团队账号） ─────────
+  async onboarding(el) {
+    const st = await get('nb.enterprise.status').catch(e => ({ items: [], scorePct: 0, error: e.message }))
+    const canOrg = can('org.manage')
+    el.innerHTML = `${ renderOnboardingBody(st, canOrg) }`
+  },
   // ───────── 组织与人员 ─────────
   async org(el) {
     const users = await get('users')
     const d = D()
-    el.innerHTML = `<div class="setgrid"><div class="box"><h3>${icon('user', 15)}人员<span class="grow"></span><button class="btn sm pri" data-act="user-edit">${icon('plus', 13)}新增</button></h3>
+    el.innerHTML = `<div class="setgrid"><div class="box"><h3>${icon('user', 15)}人员<span class="grow"></span><button class="btn sm" data-act="batch-user-modal">${icon('upload', 13)}批量导入</button><button class="btn sm pri" data-act="user-edit">${icon('plus', 13)}新增</button></h3>
       <div class="tablebox"><table class="t"><thead><tr><th>姓名</th><th>账号</th><th>部门</th><th>岗位</th><th>状态</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td><div class="own">${avatar(u.name, 24)}<div><div>${esc(u.name)}</div><div class="dim" style="font-size:11px">${esc(u.title ?? '')}</div></div></div></td><td class="mono">${esc(u.username)}</td><td>${esc(d.depts.find(x => x.id === u.deptId)?.name ?? '')}</td><td>${(u.roles ?? []).map(r => `<span class="tag">${esc(r)}</span>`).join(' ')}</td><td>${u.disabled ? '<span class="bad">停用</span>' : '<span class="ok">正常</span>'}</td><td><button class="btn sm ghost" data-act="user-edit" data-id="${u.id}">编辑</button></td></tr>`).join('')}</tbody></table></div></div>
       <div class="box"><h3>${icon('building', 15)}部门<span class="grow"></span><button class="btn sm" data-act="dept-edit">${icon('plus', 13)}新增</button></h3>${d.depts.map(x => `<div class="li2"><b class="grow">${esc(x.name)}</b><span class="dim">${users.filter(u => u.deptId === x.id).length} 人</span><button class="btn sm ghost" data-act="dept-edit" data-id="${x.id}">改名</button></div>`).join('')}
         <h3 style="margin-top:14px">${icon('set', 15)}机构信息</h3><label class="f">机构名称<input class="input" id="orgName" value="${esc(d.settings.org?.name ?? '')}"></label><button class="btn sm pri" data-act="org-save">保存</button>
@@ -220,7 +226,66 @@ function stageCard(s, i, w, ed) {
 }
 const wfRerender = () => T.workflow($('#sbody'))
 
+function renderOnboardingBody(st, canOrg) {
+  return `<div class="box" style="margin-bottom:14px">
+    <div class="row"><h3>${icon('building', 16)}企业开箱就绪度：${st.scorePct ?? 0}%（${st.readyCount ?? 0}/${st.totalCount ?? 6} 项已就绪）</h3><span class="grow"></span>
+      <button class="btn sm" data-act="nb-api">${icon('spark', 13)}配置模型连接</button>
+      ${can('project.create') ? `<button class="btn sm pri" data-act="quick-project">${icon('plus', 13)}带底稿快速立项</button>` : ''}</div>
+    <div class="prog" style="margin:8px 0 14px"><i style="width:${st.scorePct ?? 0}%"></i></div>
+    <div class="ent-grid">${(st.items ?? []).map(it => `<div class="ent-card ${it.ok ? 'ok' : 'warn'}">
+      <div class="row"><span class="dot ${it.ok ? 'ok' : 'warn'}"></span><b class="grow">${esc(it.title)}</b>
+        ${it.act ? `<button class="btn sm ghost" data-act="${esc(it.act)}">去配置 ›</button>` : it.nav ? `<button class="btn sm ghost" data-act="ent-go" data-nav="${esc(it.nav)}">查看 ›</button>` : ''}</div>
+      <div class="dim" style="font-size:12px;margin-top:4px">${esc(it.detail)}</div>
+    </div>`).join('')}</div>
+  </div>
+  ${canOrg ? `<div class="box">
+    <div class="row"><h3>${icon('upload', 15)}快速组建团队：Excel / CSV 批量导入部门与员工账号</h3><span class="grow"></span>
+      <button class="btn sm ghost" data-act="ent-fill-sample">填入示例模板</button></div>
+    <div class="dim" style="font-size:12px;margin:4px 0 8px">支持从 Excel 直接复制多行粘贴，或按逗号分隔：<span class="mono">姓名, 账号, 部门, 岗位, 职务, 邮箱</span>。不存在的部门将自动创建；中文岗位名（合伙人 / 部门负责人 / 投资经理 / 分析师 / 风控 / 法务 / 财务 / 投后 / 管理员）自动识别授权。</div>
+    <textarea class="input area mono" id="entCsvInput" style="height:140px" placeholder="姓名, 账号, 部门, 岗位, 职务, 邮箱&#10;陆明, luming, 科技投资部, 投资经理, 副总裁, luming@org.com&#10;顾凯, gukai, 风控合规部, 风控+法务, 风控总监, gukai@org.com"></textarea>
+    <div class="row" style="margin-top:8px"><span class="dim" style="font-size:11.5px">${D().mode === 'saas' ? '多人登录模式下，新账号将自动生成高强度随机初始密码，并在下方展示一次供分发（首次登录须改密）。' : '当前为桌面/插件模式，导入后可在右上角岗位列表中验证各人员的数据范围与权限。'}</span><span class="grow"></span>
+      <button class="btn pri" data-act="ent-import-run">${icon('check', 13)}立即批量导入</button></div>
+    <div id="entImportOut" style="margin-top:10px"></div>
+  </div>` : '<div class="infobox">如需批量导入全公司部门与员工账号，请使用具备「组织与人员管理」权限的账号操作。</div>'}`
+}
+
+async function openEnterpriseDrawer() {
+  const st = await get('nb.enterprise.status').catch(e => { toast(e.message, 'deny'); return null })
+  if (!st) return
+  drawer(`${drawerHead('企业开箱落地向导', '模型连通 · 组织建号 · 存储挂载 · 群机器人协同')}<div class="body">${renderOnboardingBody(st, can('org.manage'))}</div>`, true)
+}
+
+const SAMPLE_CSV = `姓名, 账号, 部门, 岗位, 职务, 邮箱
+陆明, luming, 科技投资部, 投资经理, 投资副总裁, luming@advantagecap.cn
+沈佳, shenjia, 科技投资部, 分析师, 高级投资经理, shenjia@advantagecap.cn
+顾凯, gukai, 风控合规部, 风控+法务, 风控总监, gukai@advantagecap.cn
+唐宁, tangning, 产业赋能部, 投后, 投后总监, tangning@advantagecap.cn`
+
 Object.assign(ACT, {
+  'enterprise-open': () => openEnterpriseDrawer(),
+  'ent-go': el => {
+    const [view, sub] = String(el.dataset.nav || '').split(':')
+    $('#drawer').hidden = true
+    hooks.go(view || 'settings', { sub })
+  },
+  'ent-fill-sample': () => { const box = $('#entCsvInput'); if (box) { box.value = SAMPLE_CSV; box.focus() } },
+  'batch-user-modal': () => openEnterpriseDrawer(),
+  'ent-import-run': async el => {
+    const csvText = $('#entCsvInput')?.value?.trim()
+    if (!csvText) return toast('请先粘贴人员名单或点击「填入示例模板」', 'warn')
+    el.disabled = true
+    const r = await act('nb.enterprise.importUsers', { csvText })
+    el.disabled = false
+    if (!r) return
+    toast(`导入完成：新增 ${r.created.length} 人，更新 ${r.updated.length} 人`, 'ok')
+    await hooks.reload({ files: false })
+    const pwRows = r.created.filter(x => x.initialPassword)
+    const outBox = $('#entImportOut')
+    if (outBox) {
+      outBox.innerHTML = `<div class="infobox">已新增 <b>${r.created.length}</b> 人，更新 <b>${r.updated.length}</b> 人${r.errors?.length ? `；跳过异常 ${r.errors.length} 行（${esc(r.errors[0])}）` : ''}。</div>
+        ${pwRows.length ? `<div class="warnbox" style="margin-top:8px">以下初始密码<b>仅显示这一次</b>，请复制后分发给对应同事（首次登录强制改密）：<pre class="raw" style="margin-top:6px">${esc(pwRows.map(u => `${u.name}\t${u.username}\t${u.dept}\t初始密码：${u.initialPassword}`).join('\n'))}</pre></div>` : ''}`
+    }
+  },
   'sec-save': async () => {
     const v = {}
     for (const i of $$('[data-sec]')) v[i.dataset.sec] = i.type === 'checkbox' ? i.checked : Number(i.value)
