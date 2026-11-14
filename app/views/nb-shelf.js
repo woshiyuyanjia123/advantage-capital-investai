@@ -5,12 +5,19 @@ S.nbExpanded ??= null
 let justOpened = null
 
 const FEATURED = [
-  ['var(--violet)', '双轮驱动总纲', '股权投资与产业投资：发现价值、挖掘价值、提升价值', '大科技 · 大健康 · 大生态'],
-  ['var(--green)', '政府产业投行', '一链两基两中心与六大产业生态招商', '资本招商 · 存量盘活 · 增量招引'],
-  ['var(--amber)', '财务与法务尽调', '审计报告与 BP 口径冲突排查、三表勾稽', '收入确认 · 客户函证 · 代持还原'],
-  ['var(--blue)', '投委会立项与投决', 'Pre-IPO 投资建议书与估值敏感性测算', '动态 PE 分位 · 回购条款 · 交割先决条件'],
-  ['var(--red)', '投后赋能与退出', '募集资金监管、经营跟踪与 IPO、并购退出', '预算达成率 · 产业协同 · 回购预警'],
+  ['var(--violet)', '双轮驱动总纲', '股权投资与产业投资：发现价值、挖掘价值、提升价值', '大科技 · 大健康 · 大生态', { bt: '', q: '' }],
+  ['var(--green)', '政府产业投行', '一链两基两中心与六大产业生态招商', '资本招商 · 存量盘活 · 增量招引', { bt: 'industrial', q: '产业' }],
+  ['var(--amber)', '财务与法务尽调', '审计报告与 BP 口径冲突排查、三表勾稽', '收入确认 · 客户函证 · 代持还原', { bt: '', stage: '尽职调查' }],
+  ['var(--blue)', '投委会立项与投决', 'Pre-IPO 投资建议书与估值敏感性测算', '动态 PE 分位 · 回购条款 · 交割先决条件', { bt: '', stage: '投资决策' }],
+  ['var(--red)', '投后赋能与退出', '募集资金监管、经营跟踪与 IPO、并购退出', '预算达成率 · 产业协同 · 回购预警', { bt: '', stage: '投后管理' }],
 ]
+
+function pickFeaturedTarget(projects, spec) {
+  if (!projects.length) return null
+  if (spec.stage) return projects.find(p => p.stage === spec.stage && p.status === 'active') ?? projects.find(p => p.stage === spec.stage) ?? null
+  if (spec.bt) return projects.find(p => p.businessType === spec.bt && p.status === 'active') ?? projects.find(p => p.businessType === spec.bt) ?? null
+  return projects.find(p => p.status === 'active') ?? projects[0]
+}
 
 const no2 = i => String(i + 1).padStart(2, '0')
 
@@ -77,7 +84,7 @@ export function renderNotebookShelf(v) {
     <header class="nb-top"><h1>投研项目总览</h1><span class="nb-top-n">在管 ${active} · 共 ${d.projects.length}</span><span class="grow"></span>
       <label class="nb-find">${icon('search', 14)}<input id="nbShelfQ" placeholder="搜索项目" value="${esc(S.filters.q || '')}" autocomplete="off"></label>
       ${can('project.create') ? `<button class="btn pri" data-act="new-project">${icon('plus', 14)}发起项目立项</button>` : ''}</header>
-    <section class="nb-feat">${FEATURED.map(([c, org, title, meta], idx) => `<button class="nb-feat-card" style="--c:${c}" data-act="nb-enter" data-id="${d.projects[idx % Math.max(1, d.projects.length)]?.id || ''}">
+    <section class="nb-feat">${FEATURED.map(([c, org, title, meta], idx) => `<button class="nb-feat-card" style="--c:${c}" data-act="nb-feat-go" data-idx="${idx}">
       <span class="org">${esc(org)}</span><b>${esc(title)}</b><span class="meta">${esc(meta)}</span></button>`).join('')}</section>
     <nav class="rtabs nb-bt">${[['', '全部项目', d.projects.length], ...d.businessTypes.map(b => [b.id, b.name, d.projects.filter(p => p.businessType === b.id).length])].map(([k, l, n]) => `<button class="${bt === k ? 'on' : ''}" data-act="bt" data-k="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>
     <div class="nb-list" id="nbList">${listHTML(d)}</div></div>`
@@ -104,6 +111,15 @@ Object.assign(ACT, {
     if (box) { box.innerHTML = listHTML(D()); justOpened = null } else hooks.refresh()
   },
   'nb-open-folder': async el => { const r = await act('nb.folder.open', { projectId: el.dataset.p, filePath: el.dataset.fp }); if (r) toast(`已打开 ${r.opened}`, 'ok') },
+  'nb-feat-go': el => {
+    const spec = FEATURED[Number(el.dataset.idx)]?.[4] ?? {}
+    const target = pickFeaturedTarget(D().projects, spec)
+    if (target) { S.sel = target.id; S.project = null; hooks.go('notebook', { id: target.id }); return }
+    if (spec.bt !== undefined) S.filters.bt = spec.bt
+    if (spec.q !== undefined) S.filters.q = spec.q
+    hooks.refresh()
+    toast('当前无该专题对应项目，已为你筛选列表', 'warn')
+  },
   'nb-enter': el => { S.sel = el.dataset.id; S.project = null; hooks.go('notebook', { id: el.dataset.id }) },
   'nb-plug-sub': async el => {
     el.classList.add('busy')

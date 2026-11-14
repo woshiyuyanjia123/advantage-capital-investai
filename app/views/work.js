@@ -72,7 +72,8 @@ async function newProject() {
     <div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">创建</button></div>`)
   if (!r) return
   const p = await act('project.create', { businessType: r.businessType, name: r.name, companyId: r.companyId || undefined, companyName: r.companyId ? undefined : r.companyName || r.name.split(/\s/)[0], industry: r.industry, desc: r.desc, fields: r.round ? { round: r.round } : undefined }, '项目已创建，进入流程第一阶段')
-  if (p) { await hooks.reload(); hooks.go('project', { id: p.id }) }
+  const fromNb = ['workbench', 'notebook', 'flowboard'].includes(S.view)
+  if (p) { await hooks.reload(); hooks.go(fromNb ? 'notebook' : 'project', { id: p.id }) }
 }
 
 Object.assign(ACT, {

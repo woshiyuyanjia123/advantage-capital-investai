@@ -141,7 +141,14 @@ export class AI {
     const cloud = s.external?.approved === false ? { ok: false, note: '外部模型未获机构批准' } : await this.adapterInfo(this.cloud)
     const local = await this.adapterInfo(this.localAdapter())
     const primary = s.mode === 'local' ? local : cloud.ok ? cloud : local
-    return { mode: s.mode, sensitiveLevel: s.sensitiveLevel, cloud, local, ok: !!primary.ok, label: primary.ok ? primary.label : '离线引擎', verified: !!primary.verified, note: primary.ok ? '' : (s.mode === 'local' ? '本地处理：未配置本机模型' : cloud.note) }
+    const confidentialBlocked = !!primary.ok && s.mode !== 'local' && (s.sensitiveLevel ?? 2) <= 2 && !local.ok
+    const confNote = confidentialBlocked ? `含${LEVEL[s.sensitiveLevel ?? 2]}及以上资料且未配置本地模型：按策略走离线引擎` : ''
+    return {
+      mode: s.mode, sensitiveLevel: s.sensitiveLevel, cloud, local, ok: !!primary.ok,
+      label: primary.ok ? primary.label : '离线引擎', verified: !!primary.verified,
+      note: primary.ok ? confNote : (s.mode === 'local' ? '本地处理：未配置本机模型' : cloud.note),
+      confidentialBlocked,
+    }
   }
 
   /** 模型路由：按上下文最高密级决定能用哪个模型。返回 { adapter, route, label, reason }。 */
@@ -200,12 +207,15 @@ export class AI {
   }
 
   // ───────── 任务 ─────────
+  chatKey(userId, projectId) {
+    return projectId ? `${userId}:${projectId}` : userId
+  }
   newJob(user, kind, fields) {
     const job = { id: `j_${randomUUID().slice(0, 10)}`, kind, by: user.name, userId: user.id, status: 'running', phase: 'queued', reads: [], cites: [], steps: [], sources: [], text: '', engine: null, startedAt: Date.now(), ...fields }
     job.abort = new AbortController()
     this.live.set(job.id, job)
     this.record(job)
-    if (!fields.silent) this.addChat(user.id, { role: 'ai', jobId: job.id })
+    if (!fields.silent) this.addChat(user.id, { role: 'ai', jobId: job.id }, fields.projectId)
     return job
   }
   record(job) {
@@ -232,8 +242,9 @@ export class AI {
     this.record(job)
     setTimeout(() => this.live.delete(job.id), 120000).unref?.()
   }
-  addChat(userId, msg) {
-    const doc = this.db.get('chats', userId) ?? { id: userId, messages: [] }
+  addChat(userId, msg, projectId = null) {
+    const key = this.chatKey(userId, projectId)
+    const doc = this.db.get('chats', key) ?? { id: key, messages: [] }
     if (msg.jobId && doc.messages.some(m => m.jobId === msg.jobId)) return
     const messages = [...doc.messages, { id: randomUUID().slice(0, 10), at: Date.now(), ...msg }].slice(-200)
     this.db.putQuiet('chats', { ...doc, messages })
@@ -505,18 +516,20 @@ export class AI {
 
   async agent(user, text, intent) {
     const lv = this.org.assertAi(user, 1, { businessType: intent.project?.businessType })
-    const route = await this.route(this.settings.models.mode === 'local' ? 3 : 1)
+    const picked = (intent.fileIds ?? []).map(id => this.kb.file(id)).filter(f => f && this.kb.visible(user, f))
+    const levelMax = Math.max(this.settings.models.mode === 'local' ? 3 : 1, ...picked.map(f => f.level ?? 1))
+    const route = await this.route(levelMax)
     if (!route.adapter || typeof route.adapter.turn !== 'function') return this.answer(user, text, intent)
     const job = this.newJob(user, 'agent', { title: text.slice(0, 40), projectId: intent.project?.id, engine: `${route.label} · 智能体`, route: { route: route.route, reason: route.reason }, aiLevel: lv })
     // 最近几轮对话作为背景文字放进本轮提问，不以 assistant 消息回放：DeepSeek 思考模式下带工具的请求要求每条历史 assistant 消息
     // 都带完整思维链（reasoning_content），缺了直接返回 400。以前被拒绝的指令（「帮我表决」等）留下的回复就会触发这个错误；
     // 而智能体自己的回答只记了任务 ID、没有正文，等于从来没进过上下文。
-    const doc = this.db.get('chats', user.id)
+    const doc = this.db.get('chats', this.chatKey(user.id, intent.project?.id))
     // 末尾两条是本轮的提问与本任务自己，不算历史
     const context = (doc?.messages ?? []).slice(-10, -2).map(m => m.role === 'user' ? `用户：${m.text}` : `助手：${String(m.text ?? (m.jobId ? this.db.get('jobs', m.jobId)?.text ?? '' : '')).slice(0, 1500)}`).filter(l => l !== '助手：').join('\n')
     void (async () => {
       try {
-        await runAgent({ db: this.db, kb: this.kb, org: this.org, wisburg: this.wisburg, ai: this, route }, { adapter: route.adapter, user, job, text, project: intent.project, context, aiLevel: lv })
+        await runAgent({ db: this.db, kb: this.kb, org: this.org, wisburg: this.wisburg, ai: this, route }, { adapter: route.adapter, user, job, text, project: intent.project, context, aiLevel: lv, fileIds: intent.fileIds ?? [] })
         if (job.abort.signal.aborted) return
         this.health.set(route.label, { verified: true })
         if (!job.saved) job.cites = job.sources.filter(s => job.text.includes(`[${s.n}]`)).map(s => ({ n: s.n, fileId: s.fileId ?? null, wisburg: s.wisburg, path: s.path }))

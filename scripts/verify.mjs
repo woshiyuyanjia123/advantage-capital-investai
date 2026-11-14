@@ -356,7 +356,7 @@ const dtUrl = new URL(outbound.find(o => o.url.includes('dingtalk')).url)
 ok('钉钉签名正确', decodeURIComponent(dtUrl.searchParams.get('sign')) === createHmac('sha256', 'dt-secret').update(`${dtUrl.searchParams.get('timestamp')}\ndt-secret`).digest('base64'))
 ok('企业微信 markdown 消息格式', JSON.parse(outbound.find(o => o.url.includes('wecom')).body).msgtype === 'markdown')
 ok('密钥不写入数据库', !(await readFile(join(TMP, 'data', 'investai.sqlite'))).includes('dt-secret'))
-ok('密钥文件权限 600', ((await stat(process.env.INVESTAI_SECRETS)).mode & 0o777) === 0o600)
+ok('密钥文件权限 600', process.platform === 'win32' ? (await stat(process.env.INVESTAI_SECRETS)).size > 2 : ((await stat(process.env.INVESTAI_SECRETS)).mode & 0o777) === 0o600)
 outbound.length = 0
 await core.notify.notify([], { kind: 'approval', title: '测试事件推送', text: 'x' })
 ok('业务事件自动推送到已启用通道', outbound.filter(o => o.url.includes('push.mock')).length === 3)

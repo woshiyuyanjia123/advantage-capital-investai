@@ -1,5 +1,5 @@
 // 尽调与研判工作台（三栏）：左栏上方是三个修订工具，下面是底稿；中栏是阶段进度和问答；右栏是成果编制、已编制成果和尽调纪要
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, menuAt, mi, drawer, drawerHead, opts, firstPaint, entered } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, menuAt, mi, drawer, drawerHead, opts, firstPaint, entered, can } from '/api/investai?asset=ui.js'
 
 /** 左栏只列原始底稿：工作区里的成果版本、「Studio成品」文件夹里生成的成品不算底稿 */
 function rawSources(x) {
@@ -7,21 +7,32 @@ function rawSources(x) {
   const raw = all.filter(f => f.mountId !== 'm_ws' && !String(f.rel || '').includes('/Studio成品/') && !/^(项目信息表|尽调报告|立项报告|尽调清单|NDA)-v\d+\./i.test(f.name))
   return raw.length ? raw : all
 }
-/** 换了项目或一份都没勾时，默认勾上全部底稿 */
+/** 仅在切换项目时默认勾上全部底稿，允许用户手动全不选而不再自动回勾 */
 function defaultChecks(x) {
   const raw = rawSources(x)
-  if (raw.length && !raw.some(f => S.ctx.fileIds.includes(f.id))) S.ctx.fileIds = raw.map(f => f.id)
+  const pid = x?.project?.id
+  if (pid && S.ctx.projId !== pid) {
+    S.ctx.projId = pid
+    S.ctx.fileIds = raw.map(f => f.id)
+  } else {
+    const valid = new Set(raw.map(f => f.id))
+    S.ctx.fileIds = (S.ctx.fileIds ?? []).filter(id => valid.has(id))
+  }
   return raw
 }
 
 async function loadNbProject() {
   if (!S.sel) S.sel = D()?.projects?.[0]?.id
   if (!S.sel) return
+  const prevPid = S.project?.project?.id
   S.project = await get('project', { id: S.sel }).catch(e => ({ error: e.message }))
   defaultChecks(S.project)
+  if (prevPid && prevPid !== S.sel) await hooks.loadChat?.(S.sel)
   if (S.view === 'notebook') renderNbWorkspace($('#view'))
   hooks.renderAI?.()
 }
+hooks.loadNbProject = loadNbProject
+hooks.paintNbChat = () => paintChat(true)
 
 const no2 = i => String(i + 1).padStart(2, '0')
 
@@ -114,6 +125,9 @@ function renderCenterPane(x, p, f) {
       <button class="btn ghost sm ico" data-act="go" data-view="workbench" title="投研项目总览">${icon('left', 15)}</button>
       <h2 class="ell" title="${esc(p.name)}">${esc(p.name)}</h2><span class="tag blue">${esc(p.stage)}</span>
       <span class="grow"></span>
+      ${can('project.member') ? `<button class="btn sm ghost" data-act="members">成员授权</button>` : ''}
+      ${can('project.edit') ? `<button class="btn sm ghost" data-act="edit-fields">项目字段</button>` : ''}
+      ${can('fill.manage') ? `<button class="btn sm ghost" data-act="fill-new">外部填报</button>` : ''}
       <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">管控看板</button>
       <button class="btn sm pri" data-act="nb-submit-menu" data-p="${p.id}">${icon('upload', 13)}报送</button></header>
     <div class="nb-track">
@@ -265,6 +279,7 @@ async function harnessGo(run) {
   if (!h || h.busy) return
   readHarnessForm()
   if (!h.kinds.length) return toast('先勾选要制作的材料', 'warn')
+  if (!S.ctx.fileIds?.length) return toast('请先在左侧勾选至少 1 份底稿', 'warn')
   const body = { projectId: h.projectId, presetId: h.presetId, goal: h.goal, thinkingDepth: h.thinkingDepth, kinds: h.kinds, pageCount: h.pageCount, withTianyancha: h.withTianyancha, autoSubmitStage: h.autoSubmitStage, theme: studioCfg().theme, density: studioCfg().density, fileIds: S.ctx.fileIds }
   // 出方案之后又改了深度、要求或天眼查选项，方案就不作数了，执行时重新出
   const fit = h.plan && h.plan.thinkingDepth === h.thinkingDepth && (h.plan.userGoal || '') === h.goal && !!h.plan.specs?.withTianyancha === h.withTianyancha
@@ -377,6 +392,7 @@ Object.assign(ACT, {
   'nb-make': async el => {
     const k = el.dataset.k
     const pid = el.dataset.p || S.sel
+    if (!S.ctx.fileIds?.length) return toast('请先在左侧勾选至少 1 份底稿后再生成成果', 'warn')
     const cfg = studioCfg()
     S.makingStudio = { k, label: el.dataset.l || '' }
     hooks.refresh()
@@ -459,8 +475,10 @@ Object.assign(ACT, {
     const pid = el.dataset.p || S.sel
     const art = S.project?.artifacts?.items?.[Number(el.dataset.i)]
     if (art) {
+      S.fbPickArtName = art.name
       const r = await act('nb.flow.submit', { projectId: pid, artifactPath: art.fullPath, artifactName: art.name, autoSubmitReview: true })
       if (r) toast(`「${art.name}」已报送到工作项「${r.workType}」v${r.version}`, 'ok')
+      else toast('请在左侧确认要报送的目标工作项后再点「报送」', 'warn')
     }
     ACT['nb-flowboard']({ dataset: { p: pid } })
   },

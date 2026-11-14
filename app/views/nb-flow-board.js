@@ -1,5 +1,5 @@
 // 阶段门禁与投决中心（三栏）：左边选工作成果并报送，中间是各阶段的工作项，右边是决策表决和岗位权限
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, ficon, opts, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, ficon, opts, dialog, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered, can } from '/api/investai?asset=ui.js'
 
 let fb = { projectId: null, data: null, pickedArt: null, pickedWork: null, lightText: '', loading: false }
 
@@ -17,12 +17,17 @@ export async function loadFlowBoard(projectId) {
   fb.projectId = pid
   fb.data = boardData
   const arts = boardData.artifacts?.items ?? []
+  if (S.fbPickArtName) {
+    fb.pickedArt = arts.find(a => a.name === S.fbPickArtName) ?? fb.pickedArt
+    S.fbPickArtName = null
+  }
   if (!fb.pickedArt && arts.length) fb.pickedArt = arts[0]
   const curStage = boardData.stages.find(s => s.current) ?? boardData.stages[0]
   if (!fb.pickedWork && curStage?.works?.length) fb.pickedWork = curStage.works[0]
   fb.loading = false
   if (S.view === 'flowboard') renderFlowBoard($('#view'))
 }
+hooks.loadFlowBoard = loadFlowBoard
 
 const no2 = i => String(i + 1).padStart(2, '0')
 
@@ -74,12 +79,16 @@ function renderArtSubmitCol(p, b, sel) {
 }
 
 function renderPipelineCol(x, p, b) {
+  if (x?.project?.id) S.project = x
   const f = p.flow ?? { overallPct: p.progress ?? 0, curStagePct: 0, stageDetails: [] }
   return `<section class="nb-pane nb-mid">
     <header class="nb-mid-hd">
       <button class="btn ghost sm ico" data-act="go" data-view="notebook" data-sub="${p.id}" title="尽调与研判工作台">${icon('left', 15)}</button>
       <h2 class="ell" title="${esc(p.name)}">${esc(p.name)}</h2><span class="tag blue">${esc(p.stage)}</span>
       <span class="grow"></span>
+      ${can('project.member') ? `<button class="btn sm ghost" data-act="members">成员授权</button>` : ''}
+      ${can('project.edit') ? `<button class="btn sm ghost" data-act="edit-fields">项目字段</button>` : ''}
+      ${can('fill.manage') ? `<button class="btn sm ghost" data-act="fill-new">外部填报</button>` : ''}
       <button class="btn sm ghost" data-act="go" data-view="workbench">投研项目总览</button></header>
     <div class="nb-track">
       <div class="nb-track-pct"><b data-count="${f.overallPct}">${f.overallPct}</b><i>%</i></div>
@@ -116,23 +125,29 @@ const SCOPE = { own: '本人', dept: '本部门', assigned: '指定授权', post
 const CATEGORY = { amount: '金额', valuation: '估值', terms: '条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }
 const LEVEL = ['公开', '内部', '机密', '绝密']
 
+const FB_OUTCOME_LABEL = { pass: '同意', hold: '继续持有', return: '退回补充', reject: '否决' }
+const FB_OUTCOME_CLS = { pass: 'pri', hold: '', return: '', reject: 'danger' }
+
 function renderPermissionCol(x, p, b) {
   const d = D()
   const caps = b.caps
+  const saasStatic = d.mode === 'saas' || d.settings?.desktop?.personaSwitch === false
   const pending = x.approvals?.find(a => a.status === 'pending')
   const lacking = pending ? [] : (b.readiness?.items ?? []).filter(i => !i.ok)
+  const outcomes = Object.entries(pending?.gate?.outcomes ?? { pass: {}, return: {} })
   return `<section class="nb-pane nb-right">
     <div class="nb-right-scroll" data-keep="fbright">
       <header class="nb-pane-hd sticky"><b>决策节点</b><span class="grow"></span><span class="tag ${b.readiness.ok ? 'real' : 'amber'}">${b.readiness.ok ? '已满足准入' : `${lacking.length || ''} 项待定稿`}</span></header>
-      <div class="nb-gate">
-        ${pending ? `<button class="btn pri grow" data-act="fb-vote" data-a="${pending.id}" data-d="pass">同意</button>
-          <button class="btn grow" data-act="fb-vote" data-a="${pending.id}" data-d="return">退回补充</button>`
+      <div class="nb-gate" style="flex-wrap:wrap;gap:6px">
+        ${pending ? `${outcomes.map(([k, v]) => `<button class="btn ${FB_OUTCOME_CLS[k] || ''} grow" data-act="fb-vote" data-a="${pending.id}" data-d="${k}" title="${esc(v?.label || '')}">${esc(FB_OUTCOME_LABEL[k] ?? v?.label ?? k)}</button>`).join('')}
+          <button class="btn sm ghost" data-act="fb-vote" data-a="${pending.id}" data-recuse="1">申请回避</button>`
           : `<button class="btn grow ${b.readiness.ok ? 'pri' : 'nope'}" data-act="fb-gate" data-p="${p.id}">${icon('vote', 14)}发起本阶段决策表决</button>`}
       </div>
       ${lacking.length ? `<div class="nb-lack" id="fbLack">${lacking.map(i => `<div><b class="ell">${esc(i.work)}</b><span>${esc(i.why || i.status || '待定稿')}</span></div>`).join('')}</div>` : ''}
       <header class="nb-pane-hd sticky"><b>岗位</b><span class="n">${esc(caps.roleNames.join('、'))}</span></header>
-      ${b.users.slice(0, 8).map(u => `<button class="nb-role ${u.id === d.me.id ? 'on' : ''}" data-act="fb-switch-user" data-u="${u.id}">
-        <i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></button>`).join('')}
+      ${b.users.slice(0, 8).map(u => saasStatic
+        ? `<div class="nb-role ${u.id === d.me.id ? 'on' : ''}"><i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></div>`
+        : `<button class="nb-role ${u.id === d.me.id ? 'on' : ''}" data-act="fb-switch-user" data-u="${u.id}"><i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></button>`).join('')}
       <header class="nb-pane-hd sticky"><b>权限</b></header>
       <div class="kv nb-kv">
         <div><span>数据范围</span><b>${esc(caps.scopes.map(s => SCOPE[s] ?? s).join('、'))}</b></div>
@@ -180,7 +195,25 @@ Object.assign(ACT, {
     if (await act('project.gate', { id: el.dataset.p }, '已发起阶段决策表决')) await again()
   },
   'fb-vote': async el => {
-    if (await act('approval.vote', { id: el.dataset.a, decision: el.dataset.d, opinion: el.dataset.d === 'pass' ? '同意' : '退回补充' }, '表决已记录')) await again()
+    if (el.dataset.recuse === '1') {
+      const r = await dialog(`<h3>申请利益回避</h3><p class="dim">确认回避本轮决策投票？投票人数统计将排除您。</p>
+        <label class="f">回避说明（可选）<input class="input" name="opinion" placeholder="例如：存在关联利益或亲属关系"></label>
+        <div class="acts"><button class="btn" type="button" data-dlg="no">取消</button><button class="btn pri" type="button" data-dlg="ok">确认回避</button></div>`)
+      if (!r) return
+      if (await act('approval.vote', { id: el.dataset.a, recuse: true, opinion: r.opinion?.trim() || '利益回避' }, '已记录回避')) await again()
+      return
+    }
+    const dec = el.dataset.d
+    const label = FB_OUTCOME_LABEL[dec] || dec
+    let opinion = '同意'
+    if (dec !== 'pass') {
+      const r = await dialog(`<h3>${esc(label)} · 填写决策意见</h3>
+        <label class="f">意见 / 理由（必填）<textarea class="input area" name="opinion" required placeholder="请说明${esc(label)}的具体理由与后续要求"></textarea></label>
+        <div class="acts"><button class="btn" type="button" data-dlg="no">取消</button><button class="btn ${dec === 'reject' ? 'danger' : 'pri'}" type="button" data-dlg="ok">确认${esc(label)}</button></div>`)
+      if (!r || !r.opinion?.trim()) return
+      opinion = r.opinion.trim()
+    }
+    if (await act('approval.vote', { id: el.dataset.a, decision: dec, opinion }, '表决已记录')) await again()
   },
 })
 VIEWS.flowboard = renderFlowBoard

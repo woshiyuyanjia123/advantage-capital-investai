@@ -80,13 +80,18 @@ const T = {
     const models = canPolicy ? await get('models').catch(() => []) : []
     el.innerHTML = `<div class="setgrid"><div class="box"><h3>${icon('bot', 15)}模型路由</h3>
         <div class="kv"><div><span>外部模型</span><b class="${m.cloud.ok ? 'ok' : ''}">${esc(m.cloud.ok ? m.cloud.label : m.cloud.note ?? '未配置')}</b></div><div><span>本地模型</span><b class="${m.local.ok ? 'ok' : ''}">${esc(m.local.ok ? m.local.label : m.local.note ?? '未配置')}</b></div></div>
-        <label class="f">路由模式<select class="select" id="mMode" ${canPolicy ? '' : 'disabled'}>${opts([['hybrid', '混合：按资料密级自动选择（推荐）'], ['local', '仅本地：所有内容只交给本机模型'], ['external', '外部优先：仍受密级限制']], s.models.mode)}</select></label>
+        ${m.confidentialBlocked ? `<div class="warnbox" style="margin:6px 0;font-size:12px">当前密级限制为「${esc(LEVELS[s.models.sensitiveLevel ?? 2] ?? '机密')}及以上只用本地」且未配置本机模型：涉及项目资料的问答和起草会转为离线引擎。如机构已批准外部模型，可将下方密级限制调整为「不限制」。</div>` : ''}
+        <label class="f">路由模式<select class="select" id="mMode" ${canPolicy ? '' : 'disabled'}>${opts([['hybrid', '混合：按资料密级自动选择（推荐）'], ['local', '仅本地：所有内容只交给本机模型'], ['external', '外部优先：仍受下方密级限制']], s.models.mode)}</select></label>
         <label class="f">密级限制：该密级及以上的资料只交给本地模型<select class="select" id="mLevel" ${canPolicy ? '' : 'disabled'}>${opts([...LEVELS.map((l, i) => [i, `${l}及以上`]), [4, '不限制（全部允许外部模型，需机构授权）']], s.models.sensitiveLevel)}</select></label>
         <label class="f"><span><input type="checkbox" id="mApproved" ${s.models.external?.approved !== false ? 'checked' : ''} ${canPolicy ? '' : 'disabled'}> 机构已批准使用外部模型（取消则全部改为本地 / 离线）</span></label>
         ${m.cloud.lastError ? `<div class="dim" style="font-size:12px;margin-bottom:8px">最近一次调用出错（暂时性问题，下次会照常调用）：${esc(m.cloud.lastError)}</div>` : ''}
         ${d.mode === 'dsh' ? (models.length ? `<label class="f">外部模型选择（来自 DSH 已配置供应商）<select class="select" id="mChoice">${opts(models.map(x => [`${x.provider}|${x.model}`, `${x.provider} · ${x.name}`]), s.models.external?.provider ? `${s.models.external.provider}|${({ 'deepseek-v4.1-flash': 'deepseek-flash', 'deepseek-chat': 'deepseek-flash', 'deepseek-reasoner': 'deepseek-flash' }[s.models.external.model] ?? s.models.external.model)}` : '', '自动（优先 DeepSeek V4.1 Flash）')}</select></label>` : `<div class="dim" style="font-size:12px;margin-bottom:8px">DSH 尚未配置模型供应商：在 DSH 设置 → 模型 中添加 DeepSeek API Key 后，这里可以选择模型。</div>`)
-          : `<label class="f">DeepSeek API Key（只保存在本机密钥文件，不进数据库）<div class="row"><input class="input grow" type="password" id="dskey" autocomplete="off" placeholder="${m.cloud.ok || m.cloud.label ? '已配置：输入新 Key（如 sk-...）可替换' : '粘贴 DeepSeek API Key（如 sk-...）'}" ${canPolicy ? '' : 'disabled'}><button class="btn sm pri" data-act="secret" data-k="deepseekApiKey" data-src="dskey" ${canPolicy ? '' : 'disabled'}>保存</button>${canPolicy ? '<button class="btn sm" data-act="model-test">测试连接</button>' : ''}</div></label>
+          : `<label class="f">外部模型来源<select class="select" id="mSource" ${canPolicy ? '' : 'disabled'}>${opts([['auto', 'DeepSeek 官方 / 自动'], ['custom', '自定义 OpenAI 兼容接口']], s.models.external?.source || 'auto')}</select></label>
+          <label class="f">DeepSeek API Key（只保存在本机密钥文件，不进数据库）<div class="row"><input class="input grow" type="password" id="dskey" autocomplete="off" placeholder="${m.cloud.ok || m.cloud.label ? '已配置：输入新 Key（如 sk-...）可替换' : '粘贴 DeepSeek API Key（如 sk-...）'}" ${canPolicy ? '' : 'disabled'}><button class="btn sm pri" data-act="secret" data-k="deepseekApiKey" data-src="dskey" ${canPolicy ? '' : 'disabled'}>保存</button>${canPolicy ? '<button class="btn sm" data-act="model-test">测试连接</button>' : ''}</div></label>
         ${models.length ? `<label class="f">DeepSeek 模型<select class="select" id="mChoice" ${canPolicy ? '' : 'disabled'}>${opts(models.map(x => [`${x.provider}|${x.model}`, x.name]), s.models.external?.model ? `deepseek|${({ 'deepseek-v4.1-flash': 'deepseek-flash', 'deepseek-chat': 'deepseek-flash', 'deepseek-reasoner': 'deepseek-flash' }[s.models.external.model] ?? s.models.external.model)}` : '', '默认（DeepSeek V4.1 Flash）')}</select></label>` : ''}`}
+        <label class="f">自定义接口 Base URL（选自定义来源时生效）<input class="input mono" id="mCustomUrl" value="${esc(s.models.external?.customBaseURL ?? '')}" placeholder="https://api.deepseek.com 或 https://api.siliconflow.cn/v1" ${canPolicy ? '' : 'disabled'}></label>
+        <label class="f">自定义模型 ID<input class="input mono" id="mCustomModel" value="${esc(s.models.external?.customModel ?? '')}" placeholder="如 Qwen/Qwen2.5-72B（留空按上方预设）" ${canPolicy ? '' : 'disabled'}></label>
+        ${d.mode !== 'dsh' ? `<label class="f">自定义接口 API Key<div class="row"><input class="input grow" type="password" id="custkey" autocomplete="off" placeholder="选非 DeepSeek 自定义接口时保存此密钥" ${canPolicy ? '' : 'disabled'}><button class="btn sm" data-act="secret" data-k="customApiKey" data-src="custkey" ${canPolicy ? '' : 'disabled'}>保存密钥</button></div></label>` : ''}
         <label class="f">本地模型地址（OpenAI 兼容，仅限本机回环地址）<input class="input mono" id="mLocalUrl" value="${esc(s.models.local?.baseURL ?? '')}" placeholder="http://127.0.0.1:11434/v1" ${canPolicy ? '' : 'disabled'}></label>
         <label class="f">本地模型名称<input class="input mono" id="mLocalModel" value="${esc(s.models.local?.model ?? '')}" placeholder="本机已加载的模型名" ${canPolicy ? '' : 'disabled'}></label>
         ${canPolicy ? '<button class="btn sm pri" data-act="models-save">保存</button>' : ''}</div>
@@ -321,7 +326,15 @@ Object.assign(ACT, {
   'models-save': async () => {
     const choice = $('#mChoice')?.value
     const [provider, model] = choice ? choice.split('|') : [null, null]
-    await saveSection('models', { mode: $('#mMode').value, sensitiveLevel: Number($('#mLevel').value), external: { approved: $('#mApproved').checked, provider: provider || null, model: model || null }, local: { baseURL: $('#mLocalUrl').value.trim(), model: $('#mLocalModel').value.trim() } })
+    const source = $('#mSource')?.value ?? D().settings.models.external?.source ?? 'auto'
+    const customBaseURL = $('#mCustomUrl')?.value?.trim() ?? ''
+    const customModel = $('#mCustomModel')?.value?.trim() ?? ''
+    await saveSection('models', {
+      mode: $('#mMode').value,
+      sensitiveLevel: Number($('#mLevel').value),
+      external: { approved: $('#mApproved').checked, source, provider: provider || null, model: model || null, customBaseURL, customModel },
+      local: { baseURL: $('#mLocalUrl').value.trim(), model: $('#mLocalModel').value.trim() },
+    })
   },
   'aipol-save': async () => {
     const pol = { businessTypes: {}, workTypes: {}, levels: {} }

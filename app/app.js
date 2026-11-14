@@ -24,7 +24,14 @@ async function loadState() {
   refreshView()
   renderAI()
 }
-hooks.reload = async ({ files = true } = {}) => { if (files) S.files = await get('files').catch(() => []); await loadState(); if (S.view === 'project' && S.sel) await hooks.loadProject?.() }
+hooks.reload = async ({ files = true } = {}) => {
+  if (files) S.files = await get('files').catch(() => [])
+  await loadState()
+  if (S.view === 'project' && S.sel) await hooks.loadProject?.()
+  else if (S.view === 'notebook' && S.sel) await hooks.loadNbProject?.()
+  else if (S.view === 'flowboard' && S.sel) await hooks.loadFlowBoard?.(S.sel)
+  window.dispatchEvent(new CustomEvent('investai:reload'))
+}
 let polling = false
 setInterval(async () => {
   if (!S.data || document.hidden || polling) return
@@ -35,6 +42,7 @@ setInterval(async () => {
 // ───────── 顶栏 ─────────
 function modelStat() {
   const m = D().model
+  if (m.ok && m.confidentialBlocked) return ['warn', `${m.label}（机密走离线）`]
   if (m.ok) return m.verified ? ['ok', m.label] : ['warn', `${m.label}（待验证）`]
   return ['warn', '离线引擎']
 }
@@ -47,7 +55,7 @@ function renderHdr() {
   $('#hdr').innerHTML = `
     <div class="logo"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')}</span></div>
     <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、资料，或提问" autocomplete="off"><span class="kbd">${/Mac/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</span></div>
-    <button class="nb-model" data-act="nb-api" title="模型连接"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
+    <button class="nb-model" data-act="nb-api" title="${esc(d.model?.note || '模型连接')}"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
     <button class="btn ghost ico" data-act="theme-toggle" title="${theme() === 'dark' ? '换成浅色' : '换成深色'}">${icon(theme() === 'dark' ? 'sun' : 'moon', 16)}</button>
     <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span class="hd-lbl">设置与帮助</span></button>
     <button class="btn ghost ico bellbtn" data-act="notifications" title="通知">${icon('bell', 17)}${d.unread ? `<i>${d.unread > 99 ? '99+' : d.unread}</i>` : ''}</button>
@@ -107,13 +115,17 @@ async function runSearch() {
 // ───────── 路由（DSH 内嵌时与宿主侧栏双向同步） ─────────
 function go(view, { sub, fromHost, id } = {}) {
   if (view === 'assistant') { S.aiOpen = true; S.atab = 'chat'; renderChrome(); renderAI(); $('#prompt')?.focus(); return }
+  const prevSel = S.sel
   if (['project', 'notebook', 'flowboard'].includes(view) && id) { S.sel = id; S.project = null; sub = id }
+  const selChanged = S.sel && S.sel !== prevSel
+  if (selChanged) S.ctx.fileIds = []
   S.sub = sub ?? (view === S.view ? S.sub : '')
   const changed = S.view !== view
   S.view = view
   closePopup()
   renderChrome()
   renderView()
+  if (selChanged) loadChat(S.sel)
   history.replaceState(null, '', `#${view}${S.sub ? `:${S.sub}` : ''}`)
   if (EMBED && !fromHost && changed) parent.postMessage({ type: 'investai:view', view: view === 'project' ? 'pipeline' : view }, location.origin)
 }
@@ -279,7 +291,13 @@ function track(job, onDone) {
 }
 hooks.track = track
 
-async function loadChat() { S.chat = await get('chat.history').catch(() => []); for (const m of S.chat) if (m.job?.status === 'running') track(m.job); if (S.atab === 'chat') renderAIBody(true) }
+async function loadChat(pid = ctxProject()?.id ?? null) {
+  S.chat = await get('chat.history', pid ? { projectId: pid } : undefined).catch(() => [])
+  for (const m of S.chat) if (m.job?.status === 'running') track(m.job)
+  if (S.atab === 'chat') renderAIBody(true)
+  hooks.paintNbChat?.()
+}
+hooks.loadChat = loadChat
 async function send(textArg, extra = {}) {
   const ta = $('#prompt')
   const text = (textArg ?? ta.value).trim()
@@ -294,14 +312,16 @@ async function send(textArg, extra = {}) {
     if (r.job) track(r.job, extra.onDone)
     if (r.nav?.projectId && S.view !== 'project' && !extra.stay) go('project', { id: r.nav.projectId })
     if (!extra.keepCtx) S.ctx.fileIds = []
-    S.chat = await get('chat.history')
+    S.chat = await get('chat.history', ctxProject()?.id ? { projectId: ctxProject().id } : undefined)
     for (const m of S.chat) if (m.job && S.live.has(m.job.id)) m.job = S.live.get(m.job.id)
     if (extra.onJob && r.job) extra.onJob(r.job)
     renderAI()
     if (S.atab === 'chat') renderAIBody(true)
+    hooks.paintNbChat?.()
   } catch (e) {
     S.chat.push({ role: 'ai', text: e.message, tone: 'deny' })
     renderAIBody(true)
+    hooks.paintNbChat?.()
   } finally { $('#sendBtn').disabled = false }
 }
 hooks.send = send
@@ -370,9 +390,9 @@ Object.assign(ACT, {
     await hooks.reload()
   },
   cancel: async el => { const j = await act('job.cancel', { id: el.dataset.id }); if (j) { S.live.set(j.id, j); updateJobMsg(j) } },
-  'chat-clear': async () => { await post('chat.clear'); S.chat = []; renderAIBody(true) },
+  'chat-clear': async () => { await post('chat.clear', { projectId: ctxProject()?.id ?? null }); S.chat = []; renderAIBody(true); hooks.paintNbChat?.() },
   'pick-project': el => { const r = el.getBoundingClientRect(); popup(D().projects.filter(p => p.status === 'active').map(p => `<div class="it ${p.id === S.sel ? 'on' : ''}" data-act="set-sel" data-id="${p.id}"><span class="grow ell">${esc(p.name)}</span><span class="dim">${esc(p.stage)}</span></div>`).join('') || '<div class="it off">没有可见项目</div>', r.right - 300, r.bottom + 4, 300) },
-  'set-sel': el => { closePopup(); S.sel = el.dataset.id; renderAI() },
+  'set-sel': el => { closePopup(); const next = el.dataset.id; if (next !== S.sel) { S.sel = next; S.project = null; S.ctx.fileIds = []; loadChat(S.sel); if (S.view === 'notebook') hooks.loadNbProject?.(S.sel); else if (S.view === 'flowboard') hooks.loadFlowBoard?.(S.sel); else if (S.view === 'project') hooks.refresh?.() } renderAI() },
   'ctx-file': el => { S.ctx.fileIds = S.ctx.fileIds.filter(x => x !== el.dataset.id); renderAI() },
   'ctx-add': el => { if (!S.ctx.fileIds.includes(el.dataset.id)) S.ctx.fileIds.push(el.dataset.id); closeDrawer(); S.aiOpen = true; S.atab = 'chat'; renderChrome(); renderAI(); toast('已带入 AI 上下文') },
   'draft-type': el => { S.draftType = el.dataset.t; renderAIBody() },
@@ -563,7 +583,7 @@ try {
   renderChrome()
   renderView()
   renderAI()
-  await loadChat()
+  await loadChat(ctxProject()?.id ?? null)
   if (D().me.mustChange) await forcePassword()
   try { if (!localStorage.getItem('investai.tour.v2')) setTimeout(() => startTour(), 600) } catch { /* 无痕模式 */ }
 } catch (e) {

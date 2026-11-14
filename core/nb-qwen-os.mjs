@@ -1,6 +1,7 @@
 // 机构智能协同 范式融合引擎（Agent as an OS：IM 钉钉/项目群聊协同 × Office 原地人机共创 × SaaS 自动任务与 DWS 事件源 × MCP 协议）
 import { complete } from './llm.mjs'
-import { generateStudioArtifact } from './nb-studio-gen.mjs'
+import { gatherDocs, generateStudioArtifact } from './nb-studio-gen.mjs'
+import { sourceDigest } from './nb-ground.mjs'
 import { submitArtifactToNode } from './nb-flow-board.mjs'
 
 const DEFAULT_AUTOTASKS = [
@@ -54,24 +55,34 @@ export async function dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai
   return { state: st, artifact: art, flow: flowRes }
 }
 
-export async function inlineCoCreateRewrite({ db, org, deliverables, ai }, user, p, b) {
+export async function inlineCoCreateRewrite({ db, kb, org, deliverables, lifecycle, ai }, user, p, b) {
   const fullText = String(b.fullText || '')
   const selected = String(b.selectedText || '').trim()
   const inst = String(b.instruction || '结合项目底稿强化数据论证并精炼表述').trim()
-  if (!selected) throw new Error('请先在文档中选中一段需要让 Agent 改写的文字')
-  let replacement = `**【Agent 人机共创修订】** ${selected}（已按「${inst}」结合勾选底稿核验增强 [1]）`
-  const route = await ai?.route?.(1).catch(() => ({ adapter: null }))
-  if (route?.adapter) {
-    const out = await complete(route.adapter, {
-      system: '你是机构智能协同风格的Office原地人机共创助手。只输出替换选中段落后的修订后Markdown正文片段，严禁编造底稿外数字，保留[n]引用。',
-      user: `项目：${p.name}\n原选中段落：\n${selected}\n\n修改指令：${inst}\n请直接输出替换后的段落：`,
-      maxTokens: 1200, reasoning: 'off', signal: AbortSignal.timeout(25000),
-    }).catch(() => '')
-    if (out && out.trim()) replacement = out.trim()
-  }
-  const nextMd = fullText.includes(selected) ? fullText.replace(selected, replacement) : `${fullText}\n\n${replacement}`
+  if (!selected) throw Object.assign(new Error('请先在文档中选中一段需要让 Agent 改写的文字'), { status: 400 })
   const d = b.deliverableId ? db.get('deliverables', b.deliverableId) : deliverables.ensure(p.id, b.workType || '尽调报告', {}, user)
-  if (d.status === 'final') db.putQuiet('deliverables', { ...d, status: 'draft' })
+  if (!d) throw Object.assign(new Error('成果不存在'), { status: 404 })
+  lifecycle?.authorize?.(user, d, 'aiWrite')
+  let docs = [], levelMax = 1
+  if (kb) {
+    const pickedIds = Array.isArray(b.fileIds) && b.fileIds.length ? b.fileIds : undefined
+    const loaded = await gatherDocs({ kb, org }, user, p, pickedIds).catch(() => ({ docs: [], levelMax: 1 }))
+    docs = loaded.docs
+    levelMax = Math.max(1, loaded.levelMax)
+  }
+  const route = await ai?.route?.(levelMax).catch(() => ({ adapter: null, reason: '模型路由失败' }))
+  if (!route?.adapter) {
+    throw Object.assign(new Error(route?.reason || '当前无可用模型（或含机密底稿且未配置本地模型），请先在顶部「模型连接」配置后再使用 AI 改写'), { status: 503 })
+  }
+  const docBrief = docs.length ? `\n\n可用项目底稿：\n${sourceDigest(docs, 20000)}` : ''
+  const out = await complete(route.adapter, {
+    system: '你是机构智能协同风格的Office原地人机共创助手。必须结合提供的底稿事实改写，只输出替换选中段落后的修订后Markdown正文片段，严禁编造底稿外数字，保留或补充准确[n]引用。',
+    user: `项目：${p.name}${docBrief}\n\n原选中段落：\n${selected}\n\n修改指令：${inst}\n请直接输出替换后的段落：`,
+    maxTokens: 2000, reasoning: 'low', signal: AbortSignal.timeout(120000),
+  }).catch(e => { throw Object.assign(new Error(`AI 原地改写调用失败：${e.message}`), { status: 502 }) })
+  const replacement = String(out || '').trim()
+  if (!replacement) throw Object.assign(new Error('模型返回了空内容，未修改原文'), { status: 502 })
+  const nextMd = fullText.includes(selected) ? fullText.replace(selected, replacement) : `${fullText}\n\n${replacement}`
   const ver = await deliverables.saveText(user, d.id, nextMd, `人机共创原地改写：${inst.slice(0, 40)}`)
   const st = getOsState(db, p)
   st.messages.push({ id: `m_${Date.now()}_c`, sender: 'Agent OS（Office 人机共创）', role: 'agent', badge: 'DWS.doc.coedit', at: Date.now(), text: `${user.name} 在《${d.title}》中选中文字完成了原地人机共创（「${inst}」），已实时生成 v${ver.version.v}。`, actions: ['✍️ Office 原地替换完成', `📦 自动升级版本 v${ver.version.v}`] })

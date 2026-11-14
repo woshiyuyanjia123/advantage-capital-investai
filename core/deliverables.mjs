@@ -55,7 +55,7 @@ export function createDeliverables({ db, kb, org, events, lifecycle }) {
   }
 
   /** 新增版本：给 markdown 则按成果格式渲染；给 buffer（用户上传/Office 编辑）则原样保存并抽取文字。 */
-  async function addVersion(user, d0, { markdown, buffer, ext, engine, cites = [], note = '', sources = 0, outline, citeCheck, review } = {}) {
+  async function addVersion(user, d0, { markdown, buffer, ext, engine, cites = [], note = '', sources = 0, outline, citeCheck, review, preserveFinal = false, richDeck = false } = {}) {
     const d = db.get('deliverables', d0.id)
     const p = db.get('projects', d.projectId)
     const v = d.versions.length + 1
@@ -76,9 +76,9 @@ export function createDeliverables({ db, kb, org, events, lifecycle }) {
     const mdRel = `${projectDir(p)}/.versions/${d.type}-v${v}.md`
     await mkdir(dirname(join(ws.path, mdRel)), { recursive: true })
     await writeFile(join(ws.path, mdRel), text ?? '')
-    const version = { v, fileId: saved.id, path: saved.display, ext: fileExt, mdRel, by: user.name, byId: user.id, engine: engine ?? '人工', at: Date.now(), cites, note, sources, outline, citeCheck, review, bytes: buf.length }
+    const version = { v, fileId: saved.id, path: saved.display, ext: fileExt, mdRel, by: user.name, byId: user.id, engine: engine ?? '人工', at: Date.now(), cites, note, sources, outline, citeCheck, review, bytes: buf.length, ...(richDeck ? { richDeck: true } : {}) }
     for (const c of cites) { const f = c.fileId && kb.file(c.fileId); if (f) db.putQuiet('files', { ...f, refs: (f.refs ?? 0) + 1 }) }
-    const next = db.put('deliverables', { ...d, versions: [...d.versions, version], status: d.status === 'final' ? 'draft' : d.status }, meta(user, `新增 v${v}（${engine ?? '人工'}）${note ? `：${note}` : ''}`, 'version'))
+    const next = db.put('deliverables', { ...d, versions: [...d.versions, version], status: preserveFinal ? d.status : (d.status === 'final' ? 'draft' : d.status) }, meta(user, `新增 v${v}（${engine ?? '人工'}）${note ? `：${note}` : ''}`, 'version'))
     db.put('projects', { ...p, updatedAt: Date.now(), works: (p.works ?? []).map(w => w.deliverableId === d.id && w.status === 'todo' ? { ...w, status: 'doing' } : w) }, meta(user, `「${d.type}」新增 v${v}`, 'touch'))
     events?.emit('deliverable.version', { deliverable: next, version, user })
     return { deliverable: next, version }

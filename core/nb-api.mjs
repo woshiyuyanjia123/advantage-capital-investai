@@ -113,6 +113,17 @@ export function createHybridCloudLlm({ dshAdapter, fallbackAdapter = null, readS
   })
 }
 
+export function validateCustomBaseURL(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (/^(?:sk|rk|pk|ak|ds|nvapi|gsk|xai)-/i.test(s)) {
+    throw Object.assign(new Error('Base URL 应填写接口地址（如 https://api.deepseek.com），请勿在此处填写 API Key'), { status: 400 })
+  }
+  const norm = normalizeBaseURL(s)
+  if (!norm) throw Object.assign(new Error('Base URL 格式不正确，请填写 http:// 或 https:// 开头的接口地址'), { status: 400 })
+  return norm
+}
+
 export async function quickConnectApi({ db, ai, mode }, user, b) {
   const s = db.get('settings', 'main')
   const routeMode = ['local', 'hybrid', 'external'].includes(b.mode) ? b.mode : s.models.mode
@@ -130,32 +141,36 @@ export async function quickConnectApi({ db, ai, mode }, user, b) {
     await writeSecret('deepseekApiKey', cleanKey)
     await writeSecret('customApiKey', cleanKey)
   }
-  let cleanCustomURL = b.customBaseURL !== undefined ? String(b.customBaseURL).trim() : undefined
-  if (cleanCustomURL) {
-    if (/^(?:sk|rk|pk|ak|ds|nvapi|gsk|xai)-/i.test(cleanCustomURL)) {
-      throw Object.assign(new Error('Base URL 应填写接口地址（如 https://api.deepseek.com），请勿在此处填写 API Key'), { status: 400 })
-    }
-    const norm = normalizeBaseURL(cleanCustomURL)
-    if (!norm) throw Object.assign(new Error('Base URL 格式不正确，请填写 http:// 或 https:// 开头的接口地址'), { status: 400 })
-    cleanCustomURL = norm
-  }
-  const requestedSource = b.source ?? s.models.external?.source ?? 'auto'
-  const hasCustomOverride = (cleanCustomURL && !/^https:\/\/api\.deepseek\.com$/i.test(cleanCustomURL)) || Boolean(String(b.customModel ?? '').trim())
-  const effectiveSource = (mode === 'dsh' && cleanKey && b.source !== 'dsh') || (hasCustomOverride && b.source !== 'dsh') ? 'custom' : requestedSource
-  const targetURL = cleanCustomURL ?? s.models.external?.customBaseURL ?? 'https://api.deepseek.com'
+  const cleanCustomURL = b.customBaseURL !== undefined ? validateCustomBaseURL(b.customBaseURL) : undefined
+  const prevExt = s.models.external ?? {}
+  const requestedSource = b.source ?? prevExt.source ?? 'auto'
+  const prevUrl = String(prevExt.customBaseURL ?? '').trim()
+  const prevModel = String(prevExt.customModel ?? '').trim()
+  const nextModel = String(b.customModel ?? '').trim()
+  // 用户显式从 custom 切回 auto（前端带出旧值或传 clearCustom）时尊重 auto，否则若新填入自定义地址/模型则自动升为 custom
+  const switchingToAuto = b.source === 'auto' && prevExt.source === 'custom'
+  const samePrevCustom = (cleanCustomURL === undefined || cleanCustomURL === prevUrl) && (b.customModel === undefined || nextModel === prevModel)
+  const hasCustomOverride = (cleanCustomURL && !/^https:\/\/api\.deepseek\.com$/i.test(cleanCustomURL)) || Boolean(nextModel)
+  const resetToAuto = Boolean(b.clearCustom) || (switchingToAuto && samePrevCustom)
+  const effectiveSource = resetToAuto
+    ? 'auto'
+    : ((mode === 'dsh' && cleanKey && b.source !== 'dsh') || (hasCustomOverride && b.source !== 'dsh') ? 'custom' : requestedSource)
+  const effUrl = resetToAuto ? '' : cleanCustomURL
+  const effCustomModel = resetToAuto ? '' : (b.customModel !== undefined ? nextModel : undefined)
+  const targetURL = (effUrl || undefined) ?? prevUrl ?? 'https://api.deepseek.com'
   const isTargetDs = /(^|\.)deepseek\.com(\/|$|:)/i.test(targetURL)
   const isCustomNonDs = effectiveSource === 'custom' && !isTargetDs
   const resolveDsModel = m => /^deepseek-/i.test(String(m ?? '')) ? normalizeModel(m) : DEFAULT_MODEL
   const external = {
-    ...s.models.external,
+    ...prevExt,
     approved: b.approved ?? true,
     source: effectiveSource,
     ...(b.provider !== undefined ? { provider: b.provider } : {}),
     ...(b.model !== undefined ? { model: isCustomNonDs ? b.model : (effectiveSource === 'custom' && isTargetDs ? resolveDsModel(b.model) : normalizeModel(b.model)) } : {}),
-    ...(cleanCustomURL !== undefined ? { customBaseURL: cleanCustomURL } : {}),
-    ...(b.customModel !== undefined ? { customModel: isCustomNonDs ? String(b.customModel).trim() : normalizeModel(String(b.customModel).trim()) } : {}),
+    ...(effUrl !== undefined ? { customBaseURL: effUrl } : {}),
+    ...(effCustomModel !== undefined ? { customModel: isCustomNonDs ? effCustomModel : normalizeModel(effCustomModel) } : {}),
   }
-  const sensitiveLevel = b.sensitiveLevel !== undefined ? Number(b.sensitiveLevel) : (mode !== 'saas' && routeMode !== 'local' ? 4 : s.models.sensitiveLevel)
+  const sensitiveLevel = b.sensitiveLevel !== undefined ? Number(b.sensitiveLevel) : (routeMode !== 'local' ? 4 : s.models.sensitiveLevel)
   db.put('settings', { ...s, models: { ...s.models, mode: routeMode, sensitiveLevel, local, external } }, { actor: user, reason: '优势资本投研 API 快速配置', action: 'settings' })
   ai.resetHealth()
   if (b.test) {

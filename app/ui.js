@@ -6,7 +6,7 @@ export const API = '/api/investai'
 export const $ = (s, el = document) => el.querySelector(s)
 export const $$ = (s, el = document) => [...el.querySelectorAll(s)]
 export const EMBED = document.documentElement.dataset.embedded === '1'
-export const VERSION = 'v2.1'
+export const VERSION = 'v3.2.2'
 
 // ───────── 主题：深色（默认）/ 浅色，记在 localStorage，内嵌时通知 DSH 宿主一起切 ─────────
 const THEME_KEY = 'investai.theme'

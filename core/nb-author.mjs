@@ -176,3 +176,18 @@ export async function authorStructured(adapter, p, docs, task, { maxTokens = 160
   const out = await askJson(adapter, { system: `${ROLE}\n${RULES}`, user: `${brief(p, docs)}\n\n${task}`, maxTokens, onUsage: n => { chars += n } })
   return { out, chars }
 }
+
+/** 综合数据表：由模型依据底稿与指令整理结构化分析表（含来源编号 [n]）。 */
+export async function authorTable(adapter, p, docs, { prompt = '' } = {}) {
+  let chars = 0
+  const j = await askJson(adapter, {
+    system: `${ROLE}\n${RULES}`,
+    maxTokens: 12000,
+    onUsage: n => { chars += n },
+    user: `${brief(p, docs)}${prompt ? `\n\n使用者的制表要求：${prompt}` : ''}\n\n请基于以上底稿整理一张结构化投研数据核对表，字段精炼、数字保持底稿原样并在「来源与口径」列注明 [n] 编号；缺数据的格写「待补充」。\n只输出 JSON：{"sheetName":"综合指标分析","columns":["指标或事项","数值或口径","对比/变化或核实要点","来源与口径"],"rows":[["…","…","…","[1]"]],"note":"一句话说明核对结论与口径差异"}`,
+  })
+  const cols = Array.isArray(j?.columns) ? j.columns.map(c => String(c || '').trim()).filter(Boolean).slice(0, 10) : []
+  const rows = Array.isArray(j?.rows) ? j.rows.filter(r => Array.isArray(r) && r.length).map(r => cols.map((_, idx) => String(r[idx] ?? '').trim())) : []
+  if (cols.length < 2 || !rows.length) throw new Error('模型未生成有效二维表')
+  return { sheetName: String(j.sheetName || '综合分析表').replace(/[\\/?*[\]:]/g, '').slice(0, 26) || '综合分析表', columns: cols, rows, note: String(j.note || '').trim(), chars }
+}

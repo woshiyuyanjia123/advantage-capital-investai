@@ -20,7 +20,7 @@ import { createMarket } from './market.mjs'
 import { viewer } from './projection.mjs'
 import { VOCAB } from './vocab.mjs'
 import { createSessionStore, createLoginGuard, createSync, DEFAULT_SECURITY, DEFAULT_SYNC, SYNC_ROLES, SYNC_COLLECTIONS, DEVICE_SCOPES } from './cloud.mjs'
-import { probeLocalModels, quickConnectApi } from './nb-api.mjs'
+import { probeLocalModels, quickConnectApi, validateCustomBaseURL } from './nb-api.mjs'
 import { computeFlowMetrics, listNotes, saveNote, deleteNote } from './nb-flow.mjs'
 import { slidesFromMd, slidesToMd, transcribeAudioLocal, handlePluginSubmit } from './nb-studio.mjs'
 import { listProjectArtifacts, openProjectFolderOrFile } from './nb-folder.mjs'
@@ -177,8 +177,13 @@ export function createApi(ctx) {
     const wf = engine.def(p)
     const r = engine.readiness(p)
     const dls = db.find('deliverables', d => d.projectId === p.id)
+    const pv = projectView(user, p)
+    const chatMsgs = db.get('chats', ai.chatKey(user.id, p.id))?.messages ?? []
+    const lastUserQ = [...chatMsgs].reverse().find(m => m.role === 'user')?.text ?? ''
+    const lastAiAns = [...chatMsgs].reverse().find(m => m.role === 'ai')?.text ?? ''
+    const lackingWorks = (r?.items ?? []).filter(i => !i.ok).map(i => i.work)
     return {
-      project: projectView(user, p), timeline: p.timeline ?? [],
+      project: pv, timeline: p.timeline ?? [],
       // 每项工作：当前用户能否编辑 / 让 AI 起草（没有成果时按「草稿」判定），前端据此启用按钮并显示原因
       works: (p.works ?? []).map(w => { const d = w.deliverableId ? db.get('deliverables', w.deliverableId) : { projectId: p.id, type: w.type, status: 'draft', versions: [] }; return { ...w, assigneeName: db.get('users', w.assignee)?.name, can: { edit: lifecycle.actions(user, d).edit, aiWrite: lifecycle.actions(user, d).aiWrite } } }),
       guide: guide(user, p, r),
@@ -195,7 +200,7 @@ export function createApi(ctx) {
       tasks: db.find('tasks', t => t.projectId === p.id),
       notes: listNotes(db, p.id),
       artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p),
-      followUps: buildFollowUps(projectView(user, p), '', kb.list(user, { companyId: p.companyId }).slice(0, 3).map(f => f.name)),
+      followUps: buildFollowUps(pv, lastUserQ, kb.list(user, { companyId: p.companyId }).slice(0, 3).map(f => f.name), lastAiAns, lackingWorks),
       osState: getOsState(db, p),
       history: db.history('projects', p.id, 60),
       canVote: db.find('approvals', a => a.projectId === p.id && a.status === 'pending' && a.voters.includes(user.id)).map(a => a.id),
@@ -207,10 +212,10 @@ export function createApi(ctx) {
     const text = String(b.text ?? '').trim().slice(0, 4000)
     if (!text) throw fail('指令不能为空')
     const context = b.context ?? {}
-    ai.addChat(user.id, { role: 'user', text })
-    const reply = msg => { ai.addChat(user.id, { role: 'ai', ...msg }); return msg }
     const ps = visibleProjects(user)
     const p = findProject(text, ps) ?? ps.find(x => x.id === context.projectId) ?? null
+    ai.addChat(user.id, { role: 'user', text }, p?.id ?? null)
+    const reply = msg => { ai.addChat(user.id, { role: 'ai', ...msg }, p?.id ?? null); return msg }
     if (/(删除|删掉).{0,8}项目|导出(全部|全量|所有)|全量导出/.test(text)) return reply({ text: `「${/删/.test(text) ? '删除项目' : '导出全量数据'}」属于敏感操作，AI 不执行；${org.can(user, /删/.test(text) ? 'project.delete' : 'export.all') ? '请在界面中操作并完成二次确认' : '⚠️ 权限不足，请联系管理员'}。`, tone: 'deny' })
     if (/(表决|投票|批准|审批通过|定稿|推进到|立项通过|过会)/.test(text) && !/(生成|起草|准备|材料|纪要|分析)/.test(text)) return reply({ text: '⚠️ AI 不能替代有权人员作出正式决策（表决、审批、定稿、推进阶段）。我可以帮你准备材料、检查准入条件、汇总意见。', tone: 'warn' })
     const type = findType(text)
@@ -224,7 +229,7 @@ export function createApi(ctx) {
   }
 
   const POST = {
-    chat, 'chat.clear': user => { db.putQuiet('chats', { id: user.id, messages: [] }); return { ok: true } },
+    chat, 'chat.clear': (user, b) => { if (b?.projectId) project(user, b.projectId); db.putQuiet('chats', { id: ai.chatKey(user.id, b?.projectId), messages: [] }); return { ok: true } },
     'job.cancel': (user, b) => ai.poll(ai.cancel(user, b.id).id),
     'ai.plan': (user, b) => ai.plan(user, b),
     'ai.generate': async (user, b) => ai.poll((await ai.generate(user, b)).id),
@@ -238,6 +243,8 @@ export function createApi(ctx) {
     'nb.slides.save': async (user, b) => {
       const p = project(user, b.projectId)
       const d = b.deliverableId ? deliverable(user, b.deliverableId) : deliverables.ensure(p.id, b.workType || '立项报告', { format: 'pptx' }, user)
+      const latest = d.versions?.at(-1)
+      if (latest?.richDeck && !b.confirmOverwrite) throw fail(`当前「${d.type}」v${latest.v}（${latest.engine || '成果编制'}）包含矢量图表与 cards 版式，在左上方幻灯片面板保存会覆盖为简版文本；确认覆盖请传 confirmOverwrite`, 409)
       const md = slidesToMd(b.title || d.title, b.slides ?? [])
       return deliverables.saveText(user, d.id, md, b.note || '左上方 PPT 工坊本地修改保存')
     },
@@ -247,7 +254,7 @@ export function createApi(ctx) {
     'nb.harness.plan': (user, b) => planHarnessExecution({ db, kb, org, ai }, user, project(user, b.projectId), b),
     'nb.harness.run': (user, b) => runHarnessPipeline({ db, kb, org, deliverables, lifecycle, ai, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.os.dispatch': (user, b) => dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
-    'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, org, deliverables, ai }, user, project(user, b.projectId), b),
+    'nb.os.inline': (user, b) => inlineCoCreateRewrite({ db, kb, org, deliverables, lifecycle, ai }, user, project(user, b.projectId), b),
     'nb.os.autotask': (user, b) => toggleAutoTask(db, project(user, b.projectId), b.taskId),
     'nb.dify.run': (user, b) => runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.tyc.query': (user, b) => runTianyanchaDueDiligence({ db, kb, org }, user, project(user, b.projectId), b),
@@ -378,6 +385,9 @@ export function createApi(ctx) {
       org.assert(user, perm)
       let value = b.value
       if (sec === 'models' && value.local?.baseURL && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/.test(value.local.baseURL)) throw fail('本地模型地址只允许本机回环地址（如 http://127.0.0.1:11434/v1）')
+      if (sec === 'models' && value.external?.customBaseURL !== undefined) {
+        value = { ...value, external: { ...value.external, customBaseURL: validateCustomBaseURL(value.external.customBaseURL) } }
+      }
       if (sec === 'toolknit') {
         if (value.enabled && !value.licenseAck) throw fail('启用前请确认已取得 toolknit 的商业使用授权（PolyForm Noncommercial 许可）')
         // 只允许启动 toolknit 本身（命令名或以 /toolknit 结尾的绝对路径），不经 shell
@@ -421,6 +431,13 @@ export function createApi(ctx) {
         if (key === 'deepseekApiKey') {
           const customURL = String(S().models?.external?.customBaseURL ?? '').trim()
           if (!customURL || /deepseek\.com/i.test(customURL)) await writeSecret('customApiKey', cleanVal)
+        }
+      }
+      // 管理员保存云端 API Key 且当前尚未配置本机离线模型时，若密级阈值仍停留在默认 2（机密），自动放宽至 4（允许处理项目底稿），避免“已连上模型却静默走离线摘编”
+      if ((key === 'deepseekApiKey' || key === 'customApiKey') && cleanVal) {
+        const s = S()
+        if (s.models?.mode !== 'local' && !s.models?.local?.model && (s.models?.sensitiveLevel ?? 2) === 2) {
+          db.put('settings', { ...s, models: { ...s.models, sensitiveLevel: 4 } }, meta(user, '配置外部模型密钥后允许处理项目底稿', 'settings'))
         }
       }
       // 换了 Key 后立即生效：清掉旧 Key 的失败记录（否则 5 分钟内仍显示「调用失败」并走离线引擎）
@@ -557,7 +574,11 @@ export function createApi(ctx) {
     project: (user, q) => projectDetail(user, q.get('id')),
     deliverable: (user, q) => deliverable(user, q.get('id')),
     'version.text': async (user, q) => { const d = deliverable(user, q.get('id')); return { text: org.redact(user, await deliverables.versionText(d, q.get('v'))) } },
-    'chat.history': user => (db.get('chats', user.id)?.messages ?? []).slice(-80).map(m => m.jobId ? { ...m, job: (() => { try { return ai.poll(m.jobId) } catch { return null } })() } : m),
+    'chat.history': (user, q) => {
+      const pid = q.get('projectId') || null
+      if (pid) project(user, pid)
+      return (db.get('chats', ai.chatKey(user.id, pid))?.messages ?? []).slice(-80).map(m => m.jobId ? { ...m, job: (() => { try { return ai.poll(m.jobId) } catch { return null } })() } : m)
+    },
     job: (user, q) => { const j = ai.poll(q.get('id')); if (j.userId !== user.id) { if (!j.projectId) throw fail('无权查看他人的对话', 403); project(user, j.projectId) } return j },
     files: (user, q) => kb.list(user, { mountId: q.get('mount') || undefined, q: q.get('q') || undefined, companyId: q.get('company') || undefined }).filter(f => !f.rel.includes('/.versions/')).map(f => ({ ...f, mount: kb.mount(f.mountId)?.name, company: kb.companyFor(f)?.short })),
     file: async (user, q) => { const r = await kb.read(q.get('id'), user); return { ...r, text: org.redact(user, r.text), level: LEVELS[r.file.level ?? 1] } },
@@ -652,8 +673,9 @@ export function createApi(ctx) {
     },
     'nb.slides': async (user, q) => {
       const d = deliverable(user, q.get('id'))
+      const latest = d.versions?.at(-1)
       const text = org.redact(user, await deliverables.versionText(d, q.get('v')))
-      return { id: d.id, title: d.title, v: d.versions.length, checkout: d.checkout ?? null, slides: slidesFromMd(text, d.title) }
+      return { id: d.id, type: d.type, title: d.title, v: d.versions.length, checkout: d.checkout ?? null, richDeck: !!latest?.richDeck, lastEngine: latest?.engine ?? '', slides: slidesFromMd(text, d.title) }
     },
     'wisburg.list': (user, q) => { org.assert(user, 'research.view'); return wisburg.list(q.get('resource') || 'reports', { query: q.get('q') || undefined, after: q.get('after') || undefined, first: q.get('first') || 15, startTime: q.get('days') ? new Date(Date.now() - Number(q.get('days')) * 864e5).toISOString() : undefined }) },
     'wisburg.detail': (user, q) => { org.assert(user, 'research.view'); return wisburg.detail(q.get('resource'), q.get('id')) },

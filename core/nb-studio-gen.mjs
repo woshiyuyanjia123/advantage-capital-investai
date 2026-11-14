@@ -5,17 +5,30 @@ import { renderDocx, renderXlsx } from './office.mjs'
 import { writeProjectArtifact } from './nb-folder.mjs'
 import { buildComprehensiveMarkdown } from './nb-deep-doc.mjs'
 import { prepareSources, checkNumbers, checkLine } from './nb-ground.mjs'
-import { authorDeck, authorReport } from './nb-author.mjs'
+import { authorDeck, authorReport, authorTable } from './nb-author.mjs'
 import { buildOfflineDeck, renderDeck, deckText, deckToMarkdown } from './nb-deck.mjs'
 import { buildInteractive, INTERACTIVE } from './nb-interactive.mjs'
+import { WORK_TYPES } from './workflow.mjs'
 
-export function buildFollowUps(p, question = '', checkedNames = []) {
+export function buildFollowUps(p, question = '', checkedNames = [], lastAnswer = '', lackingWorks = []) {
   const src = checkedNames[0] ? `《${checkedNames[0].replace(/\.[^.]+$/, '')}》` : '已勾选的底稿'
   const stage = p?.stage || '当前阶段'
+  const qClean = String(question || '').trim()
+  const aClean = String(lastAnswer || '').trim()
+  const needWork = lackingWorks[0] || `${stage}核心材料`
+  if (qClean || aClean) {
+    const topic = (qClean || aClean).replace(/[？?。！!；;\n]+/g, ' ').trim().slice(0, 22) || '上述问题'
+    const unverified = (aClean.match(/(?:待核实|未提供|尚未|缺失|差异|风险|冲突)[^。\n]{0,26}/) || [])[0]
+    return [
+      `围绕「${topic}」，逐条对照 ${src} 与其他勾选底稿，确认数字口径是否一致。`,
+      unverified ? `针对「${unverified}」，向被投企业或中介补充调取哪些关键底稿？` : `针对「${topic}」反映出的问题，还有哪些关键尽调事项尚未核实？`,
+      `把「${topic}」的核心判断与依据整理成可写入「${needWork}」的结论段（保留 [n] 引用）。`,
+    ]
+  }
   return [
-    `${src}和其他底稿在同一指标上有没有口径不一致的地方？`,
-    `按「${stage}」的准入要求，这个项目还缺哪些材料、哪些事项没核实？`,
-    `把上面的分析整理成一份给投委会的汇报提纲，每页一个判断。`,
+    `${src}和其他底稿在核心财务与业务指标上有没有口径不一致的地方？`,
+    lackingWorks.length ? `按「${stage}」准入要求，先核查「${lackingWorks.slice(0, 2).join('、')}」还缺哪些客观依据？` : `按「${stage}」的准入要求，这个项目还缺哪些材料、哪些事项没核实？`,
+    `把针对「${needWork}」的关键发现整理成给投委会的汇报提纲，每页一个判断。`,
   ]
 }
 
@@ -36,7 +49,10 @@ export async function gatherDocs({ kb, org }, user, p, fileIds) {
     allFiles = kb.list(user, { companyId: p.companyId }).filter(f => !f.rel.includes('/.versions/'))
   }
   const rawSources = allFiles.filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/'))
-  const matched = fileIds?.length ? allFiles.filter(f => fileIds.includes(f.id)) : []
+  if (Array.isArray(fileIds) && fileIds.length === 0) {
+    throw Object.assign(new Error('请至少勾选 1 份底稿后再生成成果'), { status: 400 })
+  }
+  const matched = Array.isArray(fileIds) && fileIds.length ? allFiles.filter(f => fileIds.includes(f.id)) : []
   const picked = (matched.length ? matched : rawSources.length ? rawSources : allFiles).slice(0, 20)
   const docs = []
   let levelMax = 0
@@ -80,8 +96,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     deck.engineNote = engine ? `正文由 ${engine} 依据底稿撰写。${issues.join('；')}` : `本稿未调用模型，内容为底稿原文摘编（${note}）。`
     const buf = await renderDeck(deck, { theme })
     const pages = deck.slides.length + 2
-    const d = deliverables.ensure(p.id, '立项报告', { format: 'pptx' }, user)
-    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: deckToMarkdown(deck), ext: '.pptx', engine: engine || '底稿摘编', sources: docs.length, note: `${pages} 页` })
+    const curPptWork = (p.works ?? []).find(w => w.stageId === p.stageId && WORK_TYPES[w.type]?.format === 'pptx' && w.status !== 'done')
+      ?? (p.works ?? []).find(w => w.stageId === p.stageId && WORK_TYPES[w.type]?.format === 'pptx')
+    const pptType = b.workType || curPptWork?.type || '立项报告'
+    const d = deliverables.ensure(p.id, pptType, { workId: curPptWork?.id, format: 'pptx' }, user)
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: deckToMarkdown(deck), ext: '.pptx', engine: engine || '底稿摘编', sources: docs.length, note: `${pages} 页`, preserveFinal: d.status === 'final', richDeck: true })
     return save(`${p.name}_演示文稿_${pages}页_${stamp}.pptx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `${pages} 页 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues, pages })
   }
 
@@ -100,25 +119,44 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     const check = checkNumbers(md, G.corpus)
     const title = md.match(/^#\s+(.+)$/m)?.[1] ?? `${p.name} ${type}`
     const buf = await renderDocx({ title, subtitle: `${engine ? `${engine} 依据 ${docs.length} 份底稿撰写` : `${docs.length} 份底稿的原文摘编`} · ${stamp}`, markdown: md.replace(/^#\s+.+\n+/, ''), footer: checkLine(check) + (check.unmatched.length ? `：${check.unmatched.slice(0, 8).map(u => u.value).join('、')}` : '') })
-    const d = deliverables.ensure(p.id, memo ? '投资建议书' : '尽调报告', {}, user)
-    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: engine || '底稿摘编', sources: docs.length, note: type })
+    const docWorkType = b.workType || (memo ? '投资建议书' : '尽调报告')
+    const d = deliverables.ensure(p.id, docWorkType, {}, user)
+    const ver = await deliverables.addVersion(user, d, { buffer: buf, markdown: md, ext: '.docx', engine: engine || '底稿摘编', sources: docs.length, note: type, preserveFinal: d.status === 'final' })
     const chars = md.replace(/\s/g, '').length
     return save(`${p.name}_${type}_${stamp}.docx`, buf, { workType: d.type, deliverableId: d.id, version: ver.version.v, summary: `约 ${chars} 字 · ${describe(engine, note)} · ${checkLine(check)}`, engine: engine || '底稿摘编', engineNote: note, check, issues })
   }
 
   if (kind === 'table' || kind === 'xlsx') {
-    const sheets = G.tables.slice(0, 12).map((t, i) => ({
+    let aiSheet = null, engine = '', note = route.adapter ? '' : route.reason
+    if (route.adapter) {
+      try {
+        aiSheet = await authorTable(route.adapter, p, docs, { prompt: b.prompt })
+        engine = route.label
+      } catch (e) { note = `模型制表失败：${e.message}` }
+    }
+    const sheets = []
+    if (aiSheet) {
+      sheets.push({
+        name: aiSheet.sheetName,
+        columns: aiSheet.columns.map((h, c) => ({ header: h, key: `c${c}`, width: Math.max(14, Math.min(42, h.length * 2 + 10)) })),
+        rows: aiSheet.rows.map(r => Object.fromEntries(aiSheet.columns.map((_, c) => [`c${c}`, /^-?[\d,]+(\.\d+)?$/.test(r[c]) ? Number(r[c].replace(/,/g, '')) : r[c]]))),
+        notes: aiSheet.note ? `${aiSheet.note}（由 ${engine} 整理）` : `由 ${engine} 依据勾选底稿整理`,
+      })
+    }
+    sheets.push(...G.tables.slice(0, 12).map((t, i) => ({
       name: `${i + 1}-${t.title}`.slice(0, 28),
       columns: t.head.map((h, c) => ({ header: h || `列${c + 1}`, key: `c${c}`, width: Math.max(12, Math.min(40, String(h).length * 2 + 8)) })),
       rows: t.rows.map(r => Object.fromEntries(r.map((v, c) => [`c${c}`, /^-?[\d,]+(\.\d+)?$/.test(v) ? Number(v.replace(/,/g, '')) : v]))),
       notes: `来源：[${t.n}]《${t.source}》`,
-    }))
+    })))
     const numbered = G.passages.filter(x => /\d/.test(x.text))
     sheets.push({ name: '数据摘录', columns: [{ header: '编号', key: 'i', width: 8 }, { header: '底稿原文', key: 't', width: 80 }, { header: '来源', key: 's', width: 30 }, { header: '主题', key: 'k', width: 16 }], rows: numbered.map((x, i) => ({ i: i + 1, t: x.text, s: `[${x.n}] ${G.sources[x.n - 1].name}`, k: x.topics.map(t => ({ overview: '主体', business: '业务', finance: '财务', risk: '风险', todo: '待核实' })[t]).join('、') })) })
     const todo = G.passages.filter(x => x.topics.includes('todo') || x.topics.includes('risk'))
     if (todo.length) sheets.push({ name: '风险与待核实', columns: [{ header: '编号', key: 'i', width: 8 }, { header: '事项（底稿原文）', key: 't', width: 80 }, { header: '来源', key: 's', width: 30 }, { header: '责任人', key: 'o', width: 14 }, { header: '核实结果', key: 'r', width: 30 }], rows: todo.map((x, i) => ({ i: i + 1, t: x.text, s: `[${x.n}] ${G.sources[x.n - 1].name}`, o: '', r: '' })) })
+    const checkSource = aiSheet ? aiSheet.rows.flat().join(' ') + ' ' + aiSheet.note : ''
+    const check = checkSource ? checkNumbers(checkSource, G.corpus) : { total: 0, matched: 0, derived: 0, unmatched: [] }
     const buf = await renderXlsx({ title: `${p.name} 底稿数据表`, sheets })
-    return save(`${p.name}_数据表_${stamp}.xlsx`, buf, { summary: `${sheets.length} 张工作表：底稿原表 ${G.tables.length} 张、数据摘录 ${numbered.length} 条${todo.length ? `、风险与待核实 ${todo.length} 条` : ''}`, engine: '底稿摘编' })
+    return save(`${p.name}_数据表_${stamp}.xlsx`, buf, { summary: `${sheets.length} 张工作表：${aiSheet ? '综合分析 1 张、' : ''}底稿原表 ${G.tables.length} 张、数据摘录 ${numbered.length} 条${todo.length ? `、风险与待核实 ${todo.length} 条` : ''}${aiSheet ? ` · ${describe(engine, note)}` : ''}`, engine: engine || '底稿摘编', engineNote: note, check })
   }
 
   const label = INTERACTIVE[kind] ?? '专项成果'

@@ -83,7 +83,7 @@ Object.assign(ACT, {
     const instruction = $('#nbInlineInst')?.value?.trim() || '结合勾选底稿强化量化论证并精炼表述'
     wordSt.inst = $('#nbInlineInst')?.value ?? ''
     el.disabled = true
-    const r = await act('nb.os.inline', { projectId: wordSt.projectId, deliverableId: wordSt.did, workType: wordSt.type, fullText, selectedText, instruction }, '已改写选中段落，存为新版本')
+    const r = await act('nb.os.inline', { projectId: wordSt.projectId, deliverableId: wordSt.did, workType: wordSt.type, fullText, selectedText, instruction, fileIds: S.ctx.fileIds }, '已改写选中段落，存为新版本')
     el.disabled = false
     if (!r?.markdown) return
     wordSt.text = r.markdown
@@ -94,4 +94,9 @@ Object.assign(ACT, {
     const j = await act('ai.generate', { projectId: wordSt.projectId, deliverableId: wordSt.did, type: wordSt.type, fileIds: S.ctx.fileIds, prompt: `生成并完善「${wordSt.type}」` }, '正在起草文书')
     if (j) hooks.track(j)
   },
+})
+
+window.addEventListener('investai:reload', () => {
+  if (!wordSt || !$('#nbWordArea') || document.activeElement?.id === 'nbWordArea') return
+  openLocalWordStudio(wordSt.projectId, wordSt.type)
 })
