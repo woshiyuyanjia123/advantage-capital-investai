@@ -1,27 +1,44 @@
-// 投研项目总览：上方聚合个人待办审批（企业 OA 门户），下方项目全周期进度、带底稿快速立项与阶段成果报送
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, dialog, pick, toB64, can, P_STATUS, due, opts, firstPaint, entered } from '/api/investai?asset=ui.js'
+// 分部门专属操作台与跨部门脱敏进度总览：
+//   1. 按登录者所属部门渲染差异化操作台（Hero、三层架构条、KPI、部门专属业务与 AI 模块、部门标志性业务视图、工作队列）
+//   2. 仅企业管理层 / 合伙人展示「管理层全局驾驶舱」（待决队列、九部门运行巡检矩阵、全院敏感台账）
+//   3. 各部门均可查看「全院脱敏项目进度看板」（阶段进度实时同步，未授权项目底稿与敏感字段严格隔离）
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, dialog, drawer, drawerHead, closeDrawer, pick, toB64, can, P_STATUS, LEVELS, AI_LEVEL, RULE, due, opts, firstPaint, entered } from '/api/investai?asset=ui.js'
 
 S.nbExpanded ??= null
 S.oaOpen ??= true
+S.execTab ??= 'overview'
+S.progFilter ??= 'all'
 let justOpened = null
 let oaCache = null
-
-const FEATURED = [
-  ['var(--violet)', '双轮驱动总纲', '股权投资与产业投资：发现价值、挖掘价值、提升价值', '大科技 · 大健康 · 大生态', { bt: '', q: '' }],
-  ['var(--green)', '政府产业投行', '一链两基两中心与六大产业生态招商', '资本招商 · 存量盘活 · 增量招引', { bt: 'industrial', q: '产业' }],
-  ['var(--amber)', '财务与法务尽调', '审计报告与 BP 口径冲突排查、三表勾稽', '收入确认 · 客户函证 · 代持还原', { bt: '', stage: '尽职调查' }],
-  ['var(--blue)', '投委会立项与投决', 'Pre-IPO 投资建议书与估值敏感性测算', '动态 PE 分位 · 回购条款 · 交割先决条件', { bt: '', stage: '投资决策' }],
-  ['var(--red)', '投后赋能与退出', '募集资金监管、经营跟踪与 IPO、并购退出', '预算达成率 · 产业协同 · 回购预警', { bt: '', stage: '投后管理' }],
-]
-
-function pickFeaturedTarget(projects, spec) {
-  if (!projects.length) return null
-  if (spec.stage) return projects.find(p => p.stage === spec.stage && p.status === 'active') ?? projects.find(p => p.stage === spec.stage) ?? null
-  if (spec.bt) return projects.find(p => p.businessType === spec.bt && p.status === 'active') ?? projects.find(p => p.businessType === spec.bt) ?? null
-  return projects.find(p => p.status === 'active') ?? projects[0]
-}
+let wsLoadingKey = null
 
 const no2 = i => String(i + 1).padStart(2, '0')
+const ROUTE_LABEL = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }
+
+function getCachedWs(d) {
+  const key = `${d.rev}:${d.me.id}`
+  return S.deptWs?.key === key ? S.deptWs.data : null
+}
+
+async function ensureDeptWorkspace() {
+  const d = D()
+  if (!d?.me) return
+  const key = `${d.rev}:${d.me.id}`
+  if (S.deptWs?.key === key || wsLoadingKey === key) return
+  wsLoadingKey = key
+  try {
+    const data = await get('dept.workspace')
+    if (D()?.rev === d.rev && D()?.me?.id === d.me.id) {
+      S.deptWs = { key, data }
+      hooks.renderNav?.()
+      if (S.view === 'workbench' || S.view === 'pipeline') renderNotebookShelf($('#view'))
+    }
+  } catch (err) {
+    console.warn('dept.workspace load failed:', err)
+  } finally {
+    if (wsLoadingKey === key) wsLoadingKey = null
+  }
+}
 
 /** 展开区：左边是各阶段的百分比，右边是成果报送入口 */
 function renderFlowDrawer(p, fresh) {
@@ -55,8 +72,9 @@ function renderFlowDrawer(p, fresh) {
 
 function oaInboxHTML(ib) {
   if (!ib) return ''
+  const dp = D()?.deptProfile
   if (!ib.total) {
-    return `<div class="nb-oa empty-oa"><span class="dot ok"></span><span>我的待办：当前无待表决或待复核积压事项</span><span class="grow"></span><button class="lnk" data-act="enterprise-open">企业开箱配置 ›</button></div>`
+    return `<div class="nb-oa empty-oa"><span class="dot ok"></span><span>我的待办：当前无待表决或待复核积压事项</span><span class="grow"></span>${(dp?.canOpenSettings || can('org.manage')) ? '<button class="lnk" data-act="enterprise-open">企业开箱配置 ›</button>' : ''}</div>`
   }
   const pills = [
     ib.approvals.length && `<span class="tag amber">待我表决 ${ib.approvals.length}</span>`,
@@ -86,7 +104,331 @@ async function refreshOaBar() {
   if (box) box.innerHTML = oaInboxHTML(ib)
 }
 
+function heroActionsHTML(d, dp) {
+  const firstActive = d.projects.find(p => p.status === 'active') ?? d.projects[0]
+  const firstInd = d.projects.find(p => p.businessType === 'industrial' && p.status === 'active') ?? firstActive
+  const firstPost = d.projects.find(p => ['post', 'exit', 'archive'].includes(p.stageKind)) ?? firstActive
+  const key = dp?.key ?? 'financial'
+  const btns = []
+  if (key === 'executive') {
+    btns.push(`<button class="btn pri" data-act="dept-go-decision">${icon('vote', 14)}投决表决中枢</button>`)
+    btns.push(`<button class="btn" data-act="dept-exec-tab" data-tab="departments">${icon('building', 14)}九部门巡检</button>`)
+    btns.push(`<button class="btn" data-act="dept-exec-tab" data-tab="ledger">${icon('chart', 14)}全院敏感台账</button>`)
+    if (can('project.create') && can('material.upload')) btns.push(`<button class="btn ghost" data-act="quick-project">${icon('upload', 14)}快速立项</button>`)
+  } else if (key === 'industrial') {
+    if (can('project.create') && can('material.upload')) btns.push(`<button class="btn pri" data-act="quick-project" data-bt="industrial">${icon('upload', 14)}产业项目建档</button>`)
+    if (firstInd) btns.push(`<button class="btn" data-act="nb-flowboard" data-p="${firstInd.id}">${icon('flow', 14)}产投四阶段门禁</button>`)
+    btns.push(`<button class="btn ghost" data-act="go" data-view="research">${icon('globe', 14)}产业政策研究</button>`)
+  } else if (key === 'financial') {
+    if (can('project.create') && can('material.upload')) btns.push(`<button class="btn pri" data-act="quick-project" data-bt="financial">${icon('upload', 14)}带 BP 快速立项</button>`)
+    btns.push(`<button class="btn" data-act="go" data-view="extract">${icon('extract', 14)}BP与财报提取</button>`)
+    if (firstActive) btns.push(`<button class="btn ghost" data-act="nb-enter" data-id="${firstActive.id}">${icon('spark', 14)}尽调与研判台</button>`)
+  } else if (key === 'finance') {
+    btns.push(`<button class="btn pri" data-act="go" data-view="extract">${icon('extract', 14)}财报三表提取</button>`)
+    if (firstActive) btns.push(`<button class="btn" data-act="nb-enter" data-id="${firstActive.id}">${icon('table', 14)}财务审阅工作台</button>`)
+    if (firstActive) btns.push(`<button class="btn ghost" data-act="nb-flowboard" data-p="${firstActive.id}">${icon('check', 14)}交割打款会签</button>`)
+  } else if (key === 'legal') {
+    btns.push(`<button class="btn pri" data-act="go" data-view="templates">${icon('tpl', 14)}标准协议模板库</button>`)
+    if (firstActive) btns.push(`<button class="btn" data-act="nb-enter" data-id="${firstActive.id}">${icon('shield', 14)}法审尽调工作台</button>`)
+    if (firstActive) btns.push(`<button class="btn ghost" data-act="nb-flowboard" data-p="${firstActive.id}">${icon('flow', 14)}确权交割会签</button>`)
+  } else if (key === 'risk') {
+    if (firstActive) btns.push(`<button class="btn pri" data-act="nb-flowboard" data-p="${firstActive.id}">${icon('vote', 14)}独立风控表决</button>`)
+    if (firstActive) btns.push(`<button class="btn" data-act="nb-enter" data-id="${firstActive.id}">${icon('shield', 14)}风控底稿审阅</button>`)
+    btns.push(`<button class="btn ghost" data-act="go" data-view="settings" data-sub="audit">${icon('history', 14)}合规审计轨迹</button>`)
+  } else if (key === 'postinv') {
+    if (firstPost) btns.push(`<button class="btn pri" data-act="nb-enter" data-id="${firstPost.id}">${icon('chart', 14)}投后与退出工作台</button>`)
+    btns.push(`<button class="btn" data-act="go" data-view="meetings">${icon('mic', 14)}投后复盘纪要</button>`)
+    if (firstPost) btns.push(`<button class="btn ghost" data-act="nb-flowboard" data-p="${firstPost.id}">${icon('flow', 14)}归档与退出门禁</button>`)
+  } else if (key === 'fund') {
+    btns.push(`<button class="btn pri" data-act="dept-ai-prompt" data-prompt="${esc(dp?.workspaceHints?.quickQuestions?.[0]?.[1] || '基于公开研究起草机构 LP 募资路演要点')}">${icon('spark', 14)}AI 募资路演助手</button>`)
+    btns.push(`<button class="btn" data-act="go" data-view="research">${icon('industry', 14)}宏观与赛道研报</button>`)
+    btns.push(`<button class="btn ghost" data-act="go" data-view="companies">${icon('building', 14)}合作主体与 LP 库</button>`)
+  } else if (key === 'it') {
+    btns.push(`<button class="btn pri" data-act="enterprise-open">${icon('building', 14)}企业开箱与批量建号</button>`)
+    btns.push(`<button class="btn" data-act="nb-api">${icon('bot', 14)}多模型安全路由</button>`)
+    btns.push(`<button class="btn ghost" data-act="go" data-view="settings" data-sub="roles">${icon('shield', 14)}四层权限与流程编排</button>`)
+  }
+  return btns.join('')
+}
+
+function renderHero(d, dp) {
+  const m = d.model ?? {}
+  const route = ROUTE_LABEL[m.mode] ?? m.mode ?? '混合路由'
+  const modelLabel = m.ok ? (m.verified ? m.label : `${m.label}（待验证）`) : '离线合规引擎'
+  return `<section class="dp-hero" style="--dp-accent:${esc(dp?.accentVar || 'var(--accent)')}">
+    <div class="dp-hero-top">
+      <div class="dp-hero-title">
+        <div class="dp-hero-badges">
+          <span class="dp-badge"><i class="dp-dot"></i>${esc(dp?.badge || '投资业务操作台')}</span>
+          ${dp?.roleSubBadge ? `<span class="dp-subbadge">${esc(dp.roleSubBadge)}</span>` : ''}
+          <span class="tag ${dp?.isExecutive ? 'real' : ''}">${dp?.isExecutive ? '全机构全内容权限' : '本部门专属工作台 · 全院脱敏进度可视'}</span>
+        </div>
+        <h1>${esc(dp?.workspaceTitle || '投研操作台')}</h1>
+        <p class="dp-tag">${esc(dp?.tagline || '')}</p>
+      </div>
+      <div class="dp-hero-acts">${heroActionsHTML(d, dp)}</div>
+    </div>
+    <div class="dp-layers">
+      <div class="dp-layer"><b>01 投资业务交互层</b><span>${esc(dp?.businessLayer || '')}</span></div>
+      <div class="dp-layer"><b>02 AI 协作与执行层</b><span>${esc(dp?.aiLayer || '')}</span></div>
+      <div class="dp-layer"><b>03 底层模型与密级层</b><span>${esc(route)} · ${esc(modelLabel)} · 资料密级 ≤ ${esc(LEVELS[d.caps?.clearance ?? 1])} · AI ${esc(AI_LEVEL[d.caps?.ai ?? 1])}</span></div>
+    </div>
+  </section>`
+}
+
+function renderKpis(ws) {
+  if (!ws?.kpis?.length) return ''
+  return `<section class="dp-kpis">${ws.kpis.map(k => `<div class="dp-kpi tone-${esc(k.tone || 'plain')}">
+    <span class="dp-kpi-lab">${esc(k.label)}</span>
+    <b class="dp-kpi-val">${esc(String(k.value))}</b>
+    <span class="dp-kpi-sub ell">${esc(k.sub || '')}</span>
+  </div>`).join('')}</section>`
+}
+
+function renderModules(ws) {
+  if (!ws?.modules?.length) return ''
+  return `<section class="dp-sec">
+    <div class="dp-sec-hd"><h2>本部门高频业务与 AI 工具</h2><span class="dim">一键唤起本部门常用流程与专属 AI 指令</span></div>
+    <div class="dp-mod-grid">${ws.modules.map(m => {
+      const attrs = [
+        `data-act="${esc(m.act)}"`,
+        m.projectId ? `data-p="${esc(m.projectId)}" data-id="${esc(m.projectId)}"` : '',
+        m.view ? `data-view="${esc(m.view)}"` : '',
+        m.sub ? `data-sub="${esc(m.sub)}"` : '',
+        m.tab ? `data-tab="${esc(m.tab)}"` : '',
+        m.businessType ? `data-bt="${esc(m.businessType)}"` : '',
+        m.prompt ? `data-prompt="${esc(m.prompt)}"` : '',
+        m.disabled ? 'disabled' : '',
+      ].filter(Boolean).join(' ')
+      return `<button class="dp-mod tone-${esc(m.tone || 'accent')}" ${attrs}>
+        <div class="dp-mod-hd"><span class="dp-mod-ic">${icon(m.icon || 'spark', 16)}</span><span class="dp-mod-layer">${esc(m.layer || 'AI 协作')}</span><span class="grow"></span>${icon('right', 13)}</div>
+        <b>${esc(m.title)}</b>
+        <p>${esc(m.desc)}</p>
+      </button>`
+    }).join('')}</div>
+  </section>`
+}
+
+function renderIndustrialBoard(phases, compact = false) {
+  if (!phases?.length) return ''
+  return `<div class="dp-ind-grid ${compact ? 'compact' : ''}">${phases.map(ph => `<article class="dp-ind-col">
+    <header class="dp-ind-hd"><span class="dp-ind-no">${esc(ph.no)}</span><div class="grow" style="min-width:0"><b>${esc(ph.name)}</b><span class="dim ell">${esc(ph.dept)}</span></div><span class="tag ${ph.projects.length ? 'real' : ''}">${ph.projects.length} 个项目</span></header>
+    ${compact ? '' : `<ul class="dp-ind-steps">${ph.steps.map(st => `<li>${esc(st)}</li>`).join('')}</ul>`}
+    <div class="dp-ind-projs">${ph.projects.length ? ph.projects.map(p => p.canOpen
+      ? `<button class="dp-mini-proj" data-act="nb-enter" data-id="${p.id}"><b class="ell grow">${esc(p.name)}</b><span>${esc(p.stage)} · ${p.overallPct}%</span></button>`
+      : `<button class="dp-mini-proj locked" data-act="dept-prog-locked"><b class="ell grow">${esc(p.name)}</b><span>${esc(p.stage)} · ${p.overallPct}%</span></button>`).join('')
+      : '<div class="dp-empty-sm">当前阶段暂无在途产投项目</div>'}</div>
+  </article>`).join('')}</div>`
+}
+
+function renderFinancialFunnel(funnel) {
+  if (!funnel?.length) return ''
+  return `<div class="dp-funnel">${funnel.map(st => `<div class="dp-fn-col ${st.count ? 'has' : ''}">
+    <div class="dp-fn-hd"><span class="no">${esc(st.no)}</span><b class="grow">${esc(st.name)}</b><span class="cnt">${st.count}</span></div>
+    <div class="dp-fn-list">${st.projects.length ? st.projects.map(p => p.canOpen
+      ? `<button class="dp-mini-proj" data-act="nb-enter" data-id="${p.id}"><span class="ell grow">${esc(p.name)}</span><b>${p.overallPct}%</b></button>`
+      : `<button class="dp-mini-proj locked" data-act="dept-prog-locked"><span class="ell grow">${esc(p.name)}</span><b>${p.overallPct}%</b></button>`).join('')
+      : '<span class="dim" style="font-size:11.5px">暂无</span>'}</div>
+  </div>`).join('')}</div>`
+}
+
+function renderRiskAlertsList(alerts) {
+  if (!alerts?.length) {
+    return `<div class="dp-all-clear">${icon('check', 16)}<b>当前受监项目无退回整改或口径异常预警</b><span class="dim">持续监测各阶段准入与底稿数字核验</span></div>`
+  }
+  return `<div class="dp-alert-grid">${alerts.map(a => `<article class="dp-alert lv-${esc(a.level || 'amber')}">
+    <div class="dp-alert-hd"><span class="tag ${a.level === 'red' ? 'lv3' : a.level === 'blue' ? 'blue' : 'amber'} sm">${esc(a.tag)}</span><b class="ell grow">${esc(a.projectName)}</b>
+      <button class="btn sm ghost" data-act="${esc(a.action || 'nb-flowboard')}" data-p="${a.projectId}" data-id="${a.projectId}">处理 ›</button></div>
+    <p>${esc(a.detail)}</p>
+  </article>`).join('')}</div>`
+}
+function renderExecutiveCockpit(ws) {
+  const ex = ws.executive
+  if (!ex) return ''
+  const tab = S.execTab || 'overview'
+  const tabs = [
+    ['overview', '决策总览与双轮漏斗', ex.decisionQueue.length],
+    ['departments', '九部门运行巡检矩阵', ex.departments.length],
+    ['ledger', '全院敏感台账（领导独享）', ex.sensitiveLedger.length],
+  ]
+  let body = ''
+  if (tab === 'overview') {
+    body = `<div class="dp-exec-block">
+      <div class="dp-sub-hd"><h3>待决与上会队列</h3><span class="dim">共 ${ex.decisionQueue.length} 项进行中表决 · 待您表决 ${ex.summary.myPendingVotes} 项</span></div>
+      ${ex.decisionQueue.length ? `<div class="dp-dec-list">${ex.decisionQueue.map(a => `<div class="dp-dec-row ${a.myTurn ? 'mine' : ''}">
+        <span class="tag ${a.myTurn ? 'amber' : 'blue'} sm">${a.myTurn ? '轮到您表决' : '表决进行中'}</span>
+        <div class="grow" style="min-width:0"><b>${esc(a.projectName)}</b><div class="dim ell" style="font-size:11.5px">${esc(a.businessName)} · ${esc(a.deptName)} · ${esc(a.gateName)}（${esc(RULE[a.rule] || a.rule)} · 已投 ${a.votesDone}/${a.votesTotal}）</div></div>
+        <div class="dp-dec-nums"><span>金额 <b>${esc(a.amount)}</b></span><span>估值 <b>${esc(a.valuation)}</b></span></div>
+        <div class="row" style="gap:6px"><button class="btn sm pri" data-act="nb-flowboard" data-p="${a.projectId}">去表决</button><button class="btn sm ghost" data-act="nb-enter" data-id="${a.projectId}">看底稿</button></div>
+      </div>`).join('')}</div>` : '<div class="dp-all-clear">当前无待决投委会 / 立项会表决事项</div>'}
+    </div>
+    <div class="dp-exec-block">
+      <div class="dp-sub-hd"><h3>股权投资六阶段漏斗</h3><span class="dim">财务投资在途 ${ex.summary.financialActive} 个</span></div>
+      ${renderFinancialFunnel(ws.financialFunnel)}
+    </div>
+    <div class="dp-exec-block">
+      <div class="dp-sub-hd"><h3>产业投资四阶段推进（立项承接 → 尽调承做 → 落地承销 → 管理退出）</h3><span class="dim">产业投资在途 ${ex.summary.industrialActive} 个</span></div>
+      ${renderIndustrialBoard(ws.industrialPhases, true)}
+    </div>
+    ${ws.riskAlerts?.length ? `<div class="dp-exec-block"><div class="dp-sub-hd"><h3>全院风险与准入预警</h3><span class="dim">${ws.riskAlerts.length} 项需管理层关注</span></div>${renderRiskAlertsList(ws.riskAlerts)}</div>` : ''}`
+  } else if (tab === 'departments') {
+    body = `<div class="dp-dept-matrix">${ex.departments.map(dept => `<article class="dp-dept-card" style="--dp-accent:${esc(dept.accentVar || 'var(--accent)')}">
+      <header class="dp-dept-card-hd">
+        <div class="grow" style="min-width:0"><b>${esc(dept.name)}</b><span class="dim ell">${esc(dept.workspaceTitle)} · ${dept.headCount} 人</span></div>
+        <button class="btn sm ghost" data-act="dept-exec-inspect" data-dept="${esc(dept.id)}">巡检详情 ›</button>
+      </header>
+      <div class="dp-dept-stats">
+        <div><span>在途/总项目</span><b>${dept.activeCount} / ${dept.projectCount}</b></div>
+        <div><span>平均进度</span><b>${dept.avgProgress}%</b></div>
+        <div><span>待办工作项</span><b>${dept.openWorksCount}</b></div>
+        <div><span>待审/待决</span><b>${dept.pendingReviews}/${dept.pendingApprovals}</b></div>
+      </div>
+      <div class="dp-dept-bar"><i style="width:${dept.avgProgress}%"></i></div>
+      <div class="dp-dept-members ell" title="${esc(dept.members.map(m => `${m.name}(${m.title})`).join('、'))}">成员：${esc(dept.members.map(m => m.name).join('、') || '暂无')}</div>
+      <div class="dp-dept-projs">${dept.projects.slice(0, 3).map(p => `<button class="dp-mini-proj" data-act="nb-enter" data-id="${p.id}"><span class="ell grow">${esc(p.name)}</span><span>${esc(p.stage)} ${p.overallPct}%</span></button>`).join('') || '<div class="dp-empty-sm">无直管在途项目（按职能协同全院）</div>'}</div>
+    </article>`).join('')}</div>`
+  } else {
+    body = `<div class="dp-ledger-wrap"><table class="dp-ledger">
+      <thead><tr><th>项目名称</th><th>业务线 / 牵头部门</th><th>当前阶段</th><th>进度</th><th>拟投金额</th><th>投前/投后估值</th><th>核心条款与摘要</th><th>待审/待决</th><th>直达</th></tr></thead>
+      <tbody>${ex.sensitiveLedger.map(p => `<tr>
+        <td><b>${esc(p.name)}</b><div class="dim" style="font-size:11px">${esc(p.industry)} · 负责人 ${esc(p.ownerName)}</div></td>
+        <td><span>${esc(p.businessName)}</span><div class="dim" style="font-size:11px">${esc(p.deptName)}</div></td>
+        <td><span class="tag ${p.status === 'active' ? 'blue' : ''} sm">${esc(p.stage)}</span><div class="dim" style="font-size:11px">${esc(P_STATUS[p.status] || p.status)}</div></td>
+        <td><b>${p.overallPct}%</b></td>
+        <td class="mono">${esc(p.fields?.amount || '—')}</td>
+        <td class="mono">${esc(p.fields?.valuation || '—')}</td>
+        <td class="dp-terms-cell" title="${esc(p.fields?.terms || p.desc || '')}">${esc(p.fields?.terms || p.desc || '—')}</td>
+        <td>${p.myPendingVote ? '<span class="tag amber sm">待您表决</span>' : p.pendingApprovals ? `<span class="tag sm">表决 ${p.pendingApprovals}</span>` : ''}${p.pendingReviews ? ` <span class="tag blue sm">待审 ${p.pendingReviews}</span>` : (!p.pendingApprovals ? '<span class="dim">—</span>' : '')}</td>
+        <td><div class="row" style="gap:4px"><button class="btn sm" data-act="nb-enter" data-id="${p.id}">研判</button><button class="btn sm ghost" data-act="nb-flowboard" data-p="${p.id}">门禁</button></div></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`
+  }
+  return `<section class="dp-sec dp-exec-sec" id="dpExecSec">
+    <div class="dp-sec-hd">
+      <div><h2>管理层全局驾驶舱</h2><span class="dim">全机构唯一全内容权限 · 敏感要素、九部门巡检与投决中枢</span></div>
+      <nav class="dp-tabs">${tabs.map(([k, lbl, cnt]) => `<button class="${tab === k ? 'on' : ''}" data-act="dept-exec-tab" data-tab="${k}">${esc(lbl)}<span class="n">${cnt}</span></button>`).join('')}</nav>
+    </div>
+    <div id="dpExecBody">${body}</div>
+  </section>`
+}
+
+function renderSignatureSection(d, dp, ws) {
+  const key = dp?.key ?? 'financial'
+  const firstActive = d.projects.find(p => p.status === 'active') ?? d.projects[0]
+  const pid = firstActive?.id ?? ''
+  if (key === 'executive') return renderExecutiveCockpit(ws)
+  if (key === 'industrial') {
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>产业投资四阶段全流程看板</h2><span class="dim">对齐《产业投资流程》：01 立项及承接 → 02 尽调及承做 → 03 落地及承销（募投）→ 04 管理与退出</span></div>
+      ${renderIndustrialBoard(ws.industrialPhases, false)}
+    </section>`
+  }
+  if (key === 'financial') {
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>股权投资六阶段漏斗</h2><span class="dim">项目机会 → 立项准备 → 尽职调查 → 投资决策 → 交易交割 → 投后管理</span></div>
+      ${renderFinancialFunnel(ws.financialFunnel)}
+    </section>`
+  }
+  if (key === 'finance') {
+    const qs = dp?.workspaceHints?.quickQuestions ?? []
+    const lanes = [
+      { no: '01', title: '财报提取与口径核验', desc: '抽取资产负债表、利润表与现金流量表核心指标，排查审计底稿与 BP 自述背离。', act: 'go', view: 'extract', btn: '进入财报提取' },
+      { no: '02', title: '三表勾稽与估值敏感性', desc: '调动 AI 核查收入确认、应收账龄及经营现金流背离，测算 PE/PS 动态估值区间。', act: 'dept-skill-run', p: pid, prompt: qs[2]?.[1] || qs[0]?.[1] || '', btn: '运行财务 AI 核查' },
+      { no: '03', title: '交割先决条件与打款会签', desc: '复核验资证明、账户监管与交割先决条件，完成财务岗位交割确认会签。', act: 'nb-flowboard', p: pid, btn: '进入交割会签' },
+    ]
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>财务尽调、估值与交割三段式工作流</h2><span class="dim">财务部专属业务闭环 · 全院项目进度同步可见便于提前排期</span></div>
+      <div class="dp-lane-3">${lanes.map(l => `<article class="dp-lane-card">
+        <div class="dp-lane-no">${l.no}</div><b>${esc(l.title)}</b><p>${esc(l.desc)}</p>
+        <button class="btn sm" data-act="${l.act}" ${l.view ? `data-view="${l.view}"` : ''} ${l.p ? `data-p="${l.p}" data-id="${l.p}"` : ''} ${l.prompt ? `data-prompt="${esc(l.prompt)}"` : ''}>${esc(l.btn)} ›</button>
+      </article>`).join('')}</div>
+    </section>`
+  }
+  if (key === 'legal') {
+    const qs = dp?.workspaceHints?.quickQuestions ?? []
+    const lanes = [
+      { no: '01', title: 'NDA 与框架协议标准件', desc: '从机构合规协议模板库调用标准 NDA、框架投资协议与增资扩股协议范本。', act: 'go', view: 'templates', btn: '打开协议模板库' },
+      { no: '02', title: '法调排查与对赌红线审查', desc: 'AI 逐条提取回购、对赌、反稀释与优先清算条款，排查股权代持与重大涉诉风险。', act: 'dept-skill-run', p: pid, prompt: qs[0]?.[1] || '', btn: '启动条款红线审查' },
+      { no: '03', title: '交易文件与落地确权会签', desc: '追踪正式交易文件签署、工商变更与落地确权节点，完成法务交割会签。', act: 'nb-flowboard', p: pid, btn: '进入法务会签' },
+    ]
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>法务协议、尽调与确权三段式工作流</h2><span class="dim">法务部专属合规闭环 · 提前感知全院即将进入法调与交割阶段的项目</span></div>
+      <div class="dp-lane-3">${lanes.map(l => `<article class="dp-lane-card">
+        <div class="dp-lane-no">${l.no}</div><b>${esc(l.title)}</b><p>${esc(l.desc)}</p>
+        <button class="btn sm" data-act="${l.act}" ${l.view ? `data-view="${l.view}"` : ''} ${l.p ? `data-p="${l.p}" data-id="${l.p}"` : ''} ${l.prompt ? `data-prompt="${esc(l.prompt)}"` : ''}>${esc(l.btn)} ›</button>
+      </article>`).join('')}</div>
+    </section>`
+  }
+  if (key === 'risk') {
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>独立风控预警雷达</h2><span class="dim">独立穿透监测退回重做、底稿数据冲突、准入缺口与待表决门禁（LP 与商业秘密合规隔离）</span></div>
+      ${renderRiskAlertsList(ws.riskAlerts)}
+    </section>`
+  }
+  if (key === 'postinv' || key === 'fund') {
+    const isFund = key === 'fund'
+    const title = isFund ? '产投承销与募投窗口雷达' : '即将交割入池项目预警雷达'
+    const sub = isFund ? '实时捕捉处于尽调 / 投决 / 落地阶段的项目募资与承销协同窗口' : '提前关注进入投资决策与交易交割阶段的项目，无缝衔接归档与投后赋能'
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>${title}</h2><span class="dim">${sub}</span></div>
+      ${isFund ? `<div class="dp-firewall">${icon('shield', 15)}<span><b>募资与项目底稿防火墙已生效：</b>基金运营部可实时掌握全院项目阶段进度与承销窗口，未授权项目的原始尽调底稿、估值与敏感商业秘密已自动隔离。</span></div>` : ''}
+      ${ws.handoverWatch?.length ? `<div class="dp-watch-grid">${ws.handoverWatch.map(p => `<article class="dp-watch-card">
+        <div class="row" style="gap:6px"><span class="tag blue sm">${esc(p.stage)}</span><span class="dim" style="font-size:11.5px">${esc(p.businessName)} · ${esc(p.deptName)}</span><span class="grow"></span><b>${p.overallPct}%</b></div>
+        <h3 class="ell">${esc(p.name)}</h3>
+        <div class="dp-dept-bar"><i style="width:${p.overallPct}%"></i></div>
+        <div class="row" style="margin-top:8px"><span class="dim ell grow" style="font-size:11.5px">${esc(p.industry)} · 负责人 ${esc(p.ownerName)}</span>
+          ${p.canOpen ? `<button class="btn sm" data-act="nb-enter" data-id="${p.id}">进工作台</button>` : '<button class="btn sm ghost" data-act="dept-prog-locked">脱敏进度</button>'}</div>
+      </article>`).join('')}</div>` : '<div class="dp-all-clear">当前暂无处于窗口期的交割 / 承销预警项目</div>'}
+    </section>`
+  }
+  if (key === 'it') {
+    const sh = ws.systemHealth
+    const items = sh?.items ?? []
+    return `<section class="dp-sec dp-sig">
+      <div class="dp-sec-hd"><h2>企业开箱就绪体检（${sh?.readyCount ?? 0}/${sh?.totalCount ?? 6} 项就绪 · ${sh?.scorePct ?? 0}%）</h2><span class="dim">系统配置、权限矩阵、多模型安全路由与审计合规健康度</span></div>
+      <div class="dp-firewall">${icon('lock', 15)}<span><b>IT 运维与业务底稿隔离策略：</b>信息技术部负责组织架构、权限规则、流程版本与模型路由维护，不穿透查看未授权项目的敏感商业底稿，仅同步查看全院脱敏项目进度。</span></div>
+      <div class="dp-health-grid">${items.map(it => {
+        const navParts = it.nav ? String(it.nav).split(':') : []
+        const actionAttr = it.act
+          ? `data-act="${esc(it.act)}"`
+          : `data-act="go" data-view="${esc(navParts[0] || 'settings')}" ${navParts[1] ? `data-sub="${esc(navParts[1])}"` : ''}`
+        return `<article class="dp-health-card ${it.ok ? 'ok' : 'warn'}">
+          <div class="row" style="gap:8px"><span class="dot ${it.ok ? 'ok' : 'warn'}"></span><b class="grow">${esc(it.title)}</b><span class="tag ${it.ok ? 'real' : 'amber'} sm">${it.ok ? '已就绪' : '待完善'}</span></div>
+          <p class="dim">${esc(it.detail)}</p>
+          <button class="btn sm ghost" ${actionAttr}>前往配置 ›</button>
+        </article>`
+      }).join('')}</div>
+    </section>`
+  }
+  return ''
+}
+
+function renderWorkQueue(ws) {
+  const q = ws?.workQueue ?? []
+  if (!q.length) return ''
+  return `<section class="dp-sec">
+    <div class="dp-sec-hd"><h2>本部门专属工作队列</h2><span class="dim">按本部门职责、待表决、待复核与个人任务自动聚合（共 ${q.length} 项）</span></div>
+    <div class="dp-wq-list">${q.slice(0, 8).map(it => `<div class="dp-wq-row">
+      <span class="tag ${esc(it.tone || '')} sm">${esc(it.badge)}</span>
+      <b class="ell dp-wq-proj" title="${esc(it.projectName)}">${esc(it.projectName)}</b>
+      <span class="ell grow">${esc(it.title)}</span>
+      <span class="dim ell dp-wq-sub">${esc(it.sub || '')}</span>
+      <button class="btn sm ${it.kind === 'approval' ? 'pri' : ''}" data-act="${esc(it.action || 'nb-enter')}" ${it.projectId ? `data-p="${esc(it.projectId)}" data-id="${esc(it.projectId)}"` : ''}>${esc(it.actionLabel || '处理')}</button>
+    </div>`).join('')}</div>
+  </section>`
+}
+
 function listHTML(d) {
+  const dp = d.deptProfile
+  if (!d.projects.length) {
+    return `<div class="dp-empty-auth">
+      ${icon('shield', 20)}
+      <div class="grow">
+        <b>当前账号（${esc(dp?.deptName || d.me.dept || '')}）暂无已授权穿透底稿的项目</b>
+        <p class="dim">按企业四层权限策略，敏感业务底稿仅向项目团队成员、牵头部门及管理层开放；您仍可在下方「全院项目进度看板」实时掌握全部项目的阶段与推进百分比，或使用上方本部门专属工具。</p>
+      </div>
+    </div>`
+  }
   const bt = S.filters.bt || ''
   const q = (S.filters.q || '').trim()
   const mineIds = S.filters.mine && oaCache ? new Set([...oaCache.approvals.map(x => x.projectId), ...oaCache.reviews.map(x => x.projectId), ...oaCache.mySteps.map(x => x.projectId), ...oaCache.tasks.map(x => x.projectId).filter(Boolean)]) : null
@@ -108,31 +450,98 @@ function listHTML(d) {
         </div>
         <div class="nb-mini" aria-hidden="true">${(f?.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
         <button class="btn sm nb-open" data-act="nb-enter" data-id="${p.id}">进入工作台</button>
-        <button class="btn sm ghost ico nb-open" data-act="nb-flowboard" data-p="${p.id}" title="阶段门禁与投决中心">${icon('flow', 14)}</button>
         <span class="nb-caret">${icon('chev', 15)}</span>
       </div>
-      <div class="nb-row-bar"><i style="width:${pct}%"></i></div>
-      ${exp ? renderFlowDrawer(p, justOpened === p.id) : ''}</article>`
-  }).join('') || '<div class="empty" style="padding:28px 0">没有符合条件的项目</div>'
+      ${exp ? renderFlowDrawer(p, justOpened === p.id) : ''}
+    </article>`
+  }).join('') || `<div class="nb-empty"><p>当前筛选条件下没有匹配项目</p>${can('project.create') && can('material.upload') ? '<button class="btn pri" data-act="quick-project">带底稿快速立项</button>' : ''}</div>`
+}
+
+function progressBoardRowsHTML(board) {
+  const f = S.progFilter || 'all'
+  const list = (board ?? []).filter(p => {
+    if (f === 'active') return p.status === 'active'
+    if (f === 'financial') return p.businessType === 'financial'
+    if (f === 'industrial') return p.businessType === 'industrial'
+    return true
+  })
+  if (!list.length) return '<div class="dp-empty-sm">当前筛选下暂无项目进度记录</div>'
+  return list.map(p => `<div class="dp-prog-row ${p.canOpen ? 'can-open' : 'locked'}">
+    <div class="dp-prog-pct"><b>${p.overallPct}</b><i>%</i></div>
+    <div class="dp-prog-main">
+      <div class="dp-prog-hd">
+        <b class="ell" title="${esc(p.name)}">${esc(p.name)}</b>
+        <span class="tag ${p.status === 'active' ? 'blue' : ''} sm">${esc(p.stage)}</span>
+        <span class="tag sm">${esc(p.businessName)}</span>
+        ${p.readinessOk ? '<span class="tag real sm">准入齐备</span>' : ''}
+      </div>
+      <div class="dp-prog-meta ell">
+        <span>牵头：${esc(p.deptName)}</span>
+        <span>负责人：${esc(p.ownerName)}</span>
+        <span>行业：${esc(p.industry)}</span>
+        <span>${esc(P_STATUS[p.status] || p.status)}</span>
+      </div>
+    </div>
+    <div class="nb-mini dp-prog-bars" aria-hidden="true" title="各阶段推进比例">${(p.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
+    <div class="dp-prog-acts">
+      ${p.canOpen
+        ? `<button class="btn sm" data-act="nb-enter" data-id="${p.id}">工作台</button><button class="btn sm ghost" data-act="nb-flowboard" data-p="${p.id}">门禁</button>`
+        : `<button class="btn sm ghost dp-locked-btn" data-act="dept-prog-locked" title="${esc(p.accessHint)}">${icon('lock', 12)}仅脱敏进度 · 底稿隔离</button>`}
+    </div>
+  </div>`).join('')
+}
+
+function renderProgressBoard(ws) {
+  const board = ws?.progressBoard ?? []
+  if (!board.length) return ''
+  const f = S.progFilter || 'all'
+  const filters = [
+    ['all', '全部', board.length],
+    ['active', '在途', board.filter(p => p.status === 'active').length],
+    ['financial', '财务投资', board.filter(p => p.businessType === 'financial').length],
+    ['industrial', '产业投资', board.filter(p => p.businessType === 'industrial').length],
+  ]
+  return `<section class="dp-sec dp-prog-sec">
+    <div class="dp-sec-hd">
+      <div><h2>全院项目进度看板</h2><span class="dim">跨部门实时同步全机构阶段进度与完成度 · 未授权项目自动隔离底稿与敏感字段</span></div>
+      <nav class="dp-tabs" id="dpProgTabs">${filters.map(([k, l, n]) => `<button class="${f === k ? 'on' : ''}" data-act="dept-prog-filter" data-f="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>
+    </div>
+    <div class="dp-prog-list" id="dpProgList">${progressBoardRowsHTML(board)}</div>
+  </section>`
 }
 
 export function renderNotebookShelf(v) {
   const d = D()
+  const dp = d.deptProfile
+  const ws = getCachedWs(d)
   const bt = S.filters.bt || ''
-  const fresh = firstPaint('shelf')
-  const active = d.projects.filter(p => p.status === 'active').length
-  v.innerHTML = `<div class="nb-shelf ${fresh ? 'enter' : ''}">
-    <header class="nb-top"><h1>投研项目总览</h1><span class="nb-top-n">在管 ${active} · 共 ${d.projects.length}</span><span class="grow"></span>
-      <label class="nb-find">${icon('search', 14)}<input id="nbShelfQ" placeholder="筛选项目" value="${esc(S.filters.q || '')}" autocomplete="off"></label>
-      ${can('project.create') && can('material.upload') ? `<button class="btn" data-act="quick-project" title="选一批 BP/财报文件或粘贴纪要，自动识别要素一步立项入库">${icon('upload', 14)}带材料快速立项</button>` : ''}
-      ${can('project.create') ? `<button class="btn pri" data-act="new-project">${icon('plus', 14)}发起项目立项</button>` : ''}</header>
+  const fresh = firstPaint(`shelf:${d.me.id}:${dp?.key || ''}`)
+  const authTitle = dp?.isExecutive ? '全机构项目列表' : '本部门已授权项目'
+  v.innerHTML = `<div class="nb-shelf dp-shelf ${fresh ? 'enter' : ''}" data-dept="${esc(dp?.key || 'financial')}">
+    ${renderHero(d, dp)}
+    ${ws ? `
+      ${renderKpis(ws)}
+      ${renderModules(ws)}
+      ${renderSignatureSection(d, dp, ws)}
+      ${renderWorkQueue(ws)}
+    ` : '<div class="dp-ws-loading"><span class="spin"></span><span>正在加载本部门专属操作台与全院脱敏进度…</span></div>'}
     <section id="nbOaWrap">${oaInboxHTML(oaCache)}</section>
-    <section class="nb-feat">${FEATURED.map(([c, org, title, meta], idx) => `<button class="nb-feat-card" style="--c:${c}" data-act="nb-feat-go" data-idx="${idx}">
-      <span class="org">${esc(org)}</span><b>${esc(title)}</b><span class="meta">${esc(meta)}</span></button>`).join('')}</section>
-    <nav class="rtabs nb-bt">${[['', '全部项目', d.projects.length], ...d.businessTypes.map(b => [b.id, b.name, d.projects.filter(p => p.businessType === b.id).length])].map(([k, l, n]) => `<button class="${bt === k ? 'on' : ''}" data-act="bt" data-k="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>
-    <div class="nb-list" id="nbList">${listHTML(d)}</div></div>`
+    <section class="dp-sec">
+      <div class="dp-sec-hd">
+        <div><h2>${authTitle}（${d.projects.length}）</h2><span class="dim">${dp?.isExecutive ? '管理层可穿透查看全部项目底稿与敏感字段' : '点击行展开阶段进度与一键报送，或直接进入尽调工作台'}</span></div>
+        <div class="nb-shelf-tools">
+          <label class="nb-find">${icon('search', 14)}<input id="nbShelfQ" placeholder="筛选已授权项目" value="${esc(S.filters.q || '')}" autocomplete="off"></label>
+          ${can('project.create') && can('material.upload') ? `<button class="btn pri sm" data-act="quick-project" data-bt="${dp?.key === 'industrial' ? 'industrial' : 'financial'}">${icon('upload', 13)}快速立项</button>` : ''}
+        </div>
+      </div>
+      ${d.projects.length ? `<nav class="rtabs nb-bt">${[['', '全部已授权', d.projects.length], ...d.businessTypes.map(b => [b.id, b.name, d.projects.filter(p => p.businessType === b.id).length])].map(([k, l, n]) => `<button class="${bt === k ? 'on' : ''}" data-act="bt" data-k="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>` : ''}
+      <div class="nb-list" id="nbList">${listHTML(d)}</div>
+    </section>
+    ${ws ? renderProgressBoard(ws) : ''}
+  </div>`
   if (fresh) entered(v)
   justOpened = null
+  if (!ws) void ensureDeptWorkspace()
   void refreshOaBar()
 }
 
@@ -152,7 +561,7 @@ function guessFromFiles(files = []) {
   return { co: co.slice(0, 24), proj: co ? `${co}${round ? ` ${round}` : '股权投资'}` : '', ind, round }
 }
 
-export async function openQuickProject(initialFiles = []) {
+export async function openQuickProject(initialFiles = [], defaultBt = 'financial') {
   const d = D()
   let picked = [...initialFiles]
   const g0 = guessFromFiles(picked)
@@ -179,7 +588,7 @@ export async function openQuickProject(initialFiles = []) {
   const r = await dialog(`<h3>带底稿快速立项</h3><p class="dim">一步完成「建档公司 + 创建项目 + 底稿入库索引」，创建后直接进入尽调工作台并勾选全部底稿。</p>
     <div class="box" style="margin-bottom:10px"><div class="row"><b class="grow">① 项目底稿文件（BP / 审计财报 / 合同 / 访谈录音等）</b><button type="button" class="btn sm" id="qpPickBtn">${icon('upload', 13)}添加本地文件</button></div>
       <div class="chips" id="qpFileTags" style="margin-top:8px">${paintFiles()}</div></div>
-    <div class="row"><label class="f grow">业务类型<select class="select" name="businessType">${opts(d.businessTypes.map(b => [b.id, b.name]), 'financial')}</select></label>
+    <div class="row"><label class="f grow">业务类型<select class="select" name="businessType">${opts(d.businessTypes.map(b => [b.id, b.name]), defaultBt)}</select></label>
       <label class="f grow">项目名称（留空自动按底稿识别）<input class="input" name="name" value="${esc(g0.proj)}" placeholder="如：某科技 B 轮"></label></div>
     <div class="row"><label class="f grow">拟投企业名称<input class="input" name="companyName" value="${esc(g0.co)}" placeholder="自动关联或建档公司库"></label>
       <label class="f grow">所属行业<input class="input" name="industry" value="${esc(g0.ind)}" placeholder="如：半导体 / 储能"></label>
@@ -209,8 +618,7 @@ Object.assign(ACT, {
   'oa-toggle': (el, e) => { if (e?.target.closest('button')) return; S.oaOpen = !S.oaOpen; const box = $('#nbOaWrap'); if (box) box.innerHTML = oaInboxHTML(oaCache) },
   'oa-filter-mine': () => { S.filters.mine = !S.filters.mine; const box = $('#nbOaWrap'); if (box) box.innerHTML = oaInboxHTML(oaCache); if ($('#nbList')) $('#nbList').innerHTML = listHTML(D()) },
   'oa-task-done': async el => { await act('task.toggle', { id: el.dataset.id }, '任务已完成'); await hooks.reload({ files: false }); void refreshOaBar() },
-  'quick-project': () => openQuickProject(),
-  // 页面的 CSP 不允许内联 onclick，所以在这里判断：点在展开区里面不收起
+  'quick-project': el => openQuickProject([], el?.dataset?.bt || (D()?.deptProfile?.key === 'industrial' ? 'industrial' : 'financial')),
   'nb-card-toggle': (el, e) => {
     if (e?.target.closest('.nb-flow-drawer')) return
     S.nbExpanded = S.nbExpanded === el.dataset.id ? null : el.dataset.id
@@ -220,16 +628,11 @@ Object.assign(ACT, {
     if (box) { box.innerHTML = listHTML(D()); justOpened = null } else hooks.refresh()
   },
   'nb-open-folder': async el => { const r = await act('nb.folder.open', { projectId: el.dataset.p, filePath: el.dataset.fp }); if (r) toast(`已打开 ${r.opened}`, 'ok') },
-  'nb-feat-go': el => {
-    const spec = FEATURED[Number(el.dataset.idx)]?.[4] ?? {}
-    const target = pickFeaturedTarget(D().projects, spec)
-    if (target) { S.sel = target.id; S.project = null; hooks.go('notebook', { id: target.id }); return }
-    if (spec.bt !== undefined) S.filters.bt = spec.bt
-    if (spec.q !== undefined) S.filters.q = spec.q
-    hooks.refresh()
-    toast('当前无该专题对应项目，已为你筛选列表', 'warn')
+  'nb-enter': el => {
+    const id = el.dataset.id || el.dataset.p
+    if (!id) return toast('当前暂无已授权可穿透底稿的项目', 'warn')
+    closeDrawer(); S.sel = id; S.project = null; hooks.go('notebook', { id })
   },
-  'nb-enter': el => { S.sel = el.dataset.id; S.project = null; hooks.go('notebook', { id: el.dataset.id }) },
   'nb-plug-sub': async el => {
     el.classList.add('busy')
     const r = await act('nb.plugin.submit', { projectId: el.dataset.p, deliverableId: el.dataset.d, channel: el.dataset.ch, fileIds: S.ctx.fileIds })
@@ -242,6 +645,73 @@ Object.assign(ACT, {
     const r = await act('nb.plugin.submit', { projectId: el.dataset.p, channel: 'file-upload', name: f.name, data: await toB64(f) })
     if (r) { toast(r.summary, 'ok'); await hooks.reload() }
   },
+  'go-tasks': () => hooks.go('tasks'),
+  'dept-skill-run': el => {
+    const pid = el.dataset.p || D()?.projects?.find(p => p.status === 'active')?.id || D()?.projects?.[0]?.id || ''
+    const prompt = el.dataset.prompt || ''
+    if (!pid) return ACT['dept-ai-prompt'](el)
+    if (prompt) S.pendingNbPrompt = { projectId: pid, prompt }
+    S.sel = pid; S.project = null; hooks.go('notebook', { id: pid })
+  },
+  'dept-ai-prompt': el => {
+    const prompt = el.dataset.prompt || ''
+    hooks.fill?.(prompt)
+    toast('已将本部门专属 AI 指令填入右侧助手，按 Enter 立即生成', 'ok')
+  },
+  'dept-go-decision': el => {
+    const d = D()
+    const ws = getCachedWs(d)
+    const turn = ws?.executive?.decisionQueue?.find(a => a.myTurn) ?? ws?.executive?.decisionQueue?.[0]
+    const pid = turn?.projectId || d.projects.find(p => p.myPendingVote)?.id || d.projects.find(p => p.pendingApproval)?.id || el?.dataset?.p || d.projects[0]?.id
+    if (!pid) return toast('当前暂无待表决项目', 'warn')
+    S.sel = pid; hooks.go('flowboard', { id: pid })
+  },
+  'dept-exec-tab': el => {
+    S.execTab = el.dataset.tab || 'overview'
+    if (S.view === 'workbench' || S.view === 'pipeline') {
+      renderNotebookShelf($('#view'))
+      $('#dpExecSec')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+  },
+  'dept-exec-inspect': el => {
+    const ws = getCachedWs(D())
+    const dept = ws?.executive?.departments?.find(x => x.id === el.dataset.dept)
+    if (!dept) return
+    drawer(`${drawerHead(`${dept.name} · 管理层巡检`, `${dept.workspaceTitle} · 在编 ${dept.headCount} 人 · 平均进度 ${dept.avgProgress}%`)}
+      <div class="dbody">
+        <div class="dp-sec-hd" style="margin-bottom:8px"><h3>部门人员（${dept.headCount}）</h3></div>
+        <div class="chips" style="margin-bottom:16px">${dept.members.map(m => `<span class="tag">${esc(m.name)} · ${esc(m.title)}</span>`).join('') || '<span class="dim">暂无成员</span>'}</div>
+        <div class="dp-sec-hd" style="margin-bottom:8px"><h3>关联项目与敏感要素（${dept.projects.length}）</h3></div>
+        <div class="dp-wq-list" style="margin-bottom:16px">${dept.projects.map(p => `<div class="dp-wq-row">
+          <span class="tag ${p.status === 'active' ? 'blue' : ''} sm">${esc(p.stage)}</span>
+          <b class="ell grow">${esc(p.name)}</b>
+          <span class="dim mono" style="font-size:11.5px">${esc(p.amount)} / ${esc(p.valuation)}</span>
+          <b>${p.overallPct}%</b>
+          <button class="btn sm" data-act="nb-enter" data-id="${p.id}">打开</button>
+        </div>`).join('') || '<div class="dp-empty-sm">暂无关联项目</div>'}</div>
+        <div class="dp-sec-hd" style="margin-bottom:8px"><h3>待办工作项（${dept.openWorksCount}）</h3></div>
+        <div class="dp-wq-list">${dept.openWorks.map(w => `<div class="dp-wq-row">
+          ${w.required ? '<span class="tag amber sm">必做</span>' : '<span class="tag sm">协同</span>'}
+          <b class="ell dp-wq-proj">${esc(w.projectName)}</b>
+          <span class="ell grow">${esc(w.type)}</span>
+          <span class="dim">${esc(w.assigneeName)}</span>
+          <button class="btn sm ghost" data-act="nb-flowboard" data-p="${w.projectId}">门禁</button>
+        </div>`).join('') || '<div class="dp-empty-sm">当前无积压工作项</div>'}</div>
+      </div>`)
+  },
+  'dept-prog-filter': el => {
+    S.progFilter = el.dataset.f || 'all'
+    const ws = getCachedWs(D())
+    const box = $('#dpProgList')
+    if (box && ws) {
+      box.innerHTML = progressBoardRowsHTML(ws.progressBoard)
+      for (const b of $$('#dpProgTabs button')) b.classList.toggle('on', b.dataset.f === S.progFilter)
+    }
+  },
+  'dept-prog-locked': () => {
+    toast('当前账号未加入该项目团队：按权限策略仅展示脱敏阶段进度，底稿与金额/估值字段已隔离。如需查看详情请联系项目负责人或管理层授权。', 'warn')
+  },
 })
+
 VIEWS.workbench = renderNotebookShelf
 VIEWS.pipeline = renderNotebookShelf

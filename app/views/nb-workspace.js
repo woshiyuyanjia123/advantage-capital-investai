@@ -37,6 +37,21 @@ hooks.paintNbChat = () => paintChat(true)
 const no2 = i => String(i + 1).padStart(2, '0')
 
 export function renderNbWorkspace(v) {
+  const projs = D()?.projects ?? []
+  if (!projs.length) {
+    const dp = D()?.deptProfile
+    v.innerHTML = `<div class="page"><div class="nb-empty-ws">
+      ${icon('shield', 26)}
+      <h2>当前账号暂无已授权可穿透底稿的项目</h2>
+      <p class="dim">${esc(dp?.deptName || D()?.me?.dept || '当前部门')}遵循机构四层权限边界：未授权项目的原始底稿与敏感字段严格隔离。您可返回本部门操作台查看「全院脱敏项目进度看板」，或使用行业研究与 AI 协作助手。</p>
+      <div class="row" style="gap:8px;justify-content:center;margin-top:14px">
+        <button class="btn pri" data-act="go" data-view="workbench">返回${esc(dp?.workspaceTitle || '本部门操作台')}</button>
+        <button class="btn" data-act="go" data-view="research">行业研究与智堡</button>
+      </div>
+    </div></div>`
+    return
+  }
+  if (!S.sel || !projs.some(x => x.id === S.sel)) S.sel = projs[0].id
   if (!S.project || S.project.project?.id !== S.sel) {
     v.innerHTML = '<div class="nb-loading"><span class="spin"></span></div>'
     loadNbProject()
@@ -59,6 +74,14 @@ export function renderNbWorkspace(v) {
   for (const el of $$('[data-keep]', v)) el.scrollTop = keep[el.dataset.keep] ?? (el.dataset.keep === 'chat' ? el.scrollHeight : 0)
   if (draft && $('#nbChatInput')) $('#nbChatInput').value = draft
   if (fresh) entered(v)
+  if (S.pendingNbPrompt && S.pendingNbPrompt.projectId === p.id) {
+    const q = S.pendingNbPrompt.prompt
+    S.pendingNbPrompt = null
+    setTimeout(() => {
+      const box = $('#nbChatInput')
+      if (box && q) { box.value = q; ACT['nb-chat-send']() }
+    }, 60)
+  }
 }
 
 // 左上方的三个修订工具：在抽屉里逐页或逐句修改，也可以用本机 Office/WPS 打开
@@ -105,14 +128,16 @@ function sourceBriefHTML(x, p) {
   const gB = raw.filter(f => sourceGrade(f.name) === 'B').length
   const gC = raw.filter(f => sourceGrade(f.name) === 'C').length
   const lacking = (x.readiness?.items ?? []).filter(i => !i.ok).map(i => i.work)
-  const quickQs = [
+  const hints = D()?.deptProfile?.workspaceHints
+  const defaultQuickQs = [
     ['口径冲突排查', '逐项比对勾选的公司自述材料和审计、合同、访谈底稿，列出同一财务或业务指标说法不一致的地方，每条标出处。'],
     ['阶段准入核查', `对照当前「${p.stage || '本阶段'}」的准入要求，检查目前已勾选底稿能支撑哪些结论、还缺失哪些核心核验材料？`],
     ['核心指标提炼', '从已勾选底稿中提炼营收、毛利率、净利润、客户集中度、估值与核心条款等关键数字，全部标注原文出处，未披露的写明未披露。'],
     ['模拟投决追问', '站在投委会反方委员立场，基于当前底稿列出最尖锐的 5 个风险追问及底稿中的疑点依据。'],
   ]
+  const quickQs = hints?.quickQuestions?.length ? hints.quickQuestions : defaultQuickQs
   return `<div class="nb-chat-empty nb-brief">
-    <div class="nb-brief-hd"><h2>${esc(p.name)}</h2><span class="tag blue">${esc(p.stage || '立项')}</span></div>
+    <div class="nb-brief-hd"><h2>${esc(p.name)}</h2><span class="tag blue">${esc(p.stage || '立项')}</span>${hints?.lensLabel ? `<span class="tag real">${esc(hints.lensLabel)}</span>` : ''}</div>
     <p>已勾选 <b data-src-n>${S.ctx.fileIds.length}</b> / ${raw.length} 份底稿（A级硬证据 ${gA} · B级纪要 ${gB} · C级自述 ${gC}）${lacking.length ? ` · 本阶段待定稿：${esc(lacking.slice(0, 3).join('、'))}` : ' · 本阶段必做项已齐备'}</p>
     <div class="nb-brief-grid">${quickQs.map(([t, q]) => `<button class="nb-brief-q" data-act="nb-q" data-q="${esc(q)}"><b>${esc(t)}</b><span class="ell">${esc(q)}</span></button>`).join('')}</div>
     <div class="nb-empty-acts">
@@ -217,7 +242,11 @@ function renderRightPane(x, p) {
       <button class="btn sm pri" data-act="nb-harness-open" data-p="${p.id}">成套制作</button>
       <button class="btn sm ghost" data-act="nb-arch-open" data-p="${p.id}">状态</button>
       <button class="btn sm ghost" data-act="nb-dify-open" data-p="${p.id}">模板</button></header>
-    <div class="nb-studio">${STUDIO.map(([k, ic, l]) => `<button class="nb-make ${making?.k === k ? 'busy' : ''}" data-act="nb-make" data-p="${p.id}" data-k="${k}" data-l="${l}" ${making ? 'disabled' : ''}>${icon(ic, 18)}<span>${l}</span></button>`).join('')}</div>
+    <div class="nb-studio">${(() => {
+      const pref = new Set(D()?.deptProfile?.workspaceHints?.preferredStudio ?? [])
+      const ordered = [...STUDIO.filter(([k]) => pref.has(k)), ...STUDIO.filter(([k]) => !pref.has(k))]
+      return ordered.map(([k, ic, l]) => `<button class="nb-make ${pref.has(k) ? 'pref' : ''} ${making?.k === k ? 'busy' : ''}" data-act="nb-make" data-p="${p.id}" data-k="${k}" data-l="${l}" ${making ? 'disabled' : ''}>${pref.has(k) ? '<i class="pref-tag">推荐</i>' : ''}${icon(ic, 18)}<span>${l}</span></button>`).join('')
+    })()}</div>
     <div class="nb-cfg ${S.showStudioCfg ? 'open' : ''}">
       <button class="nb-cfg-hd" data-act="nb-cfg-toggle"><span>规格</span><b class="grow" data-cfg-sum>${cfgLine(cfg)}</b>${icon('chev', 13)}</button>
       ${S.showStudioCfg ? `<div class="nb-cfg-bd">

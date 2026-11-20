@@ -1,7 +1,16 @@
 // 阶段门禁与投决中心（三栏）：左边选工作成果并报送，中间是各阶段的工作项（支持催办），右边是决策表决、交接简报和岗位权限
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, opts, dialog, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered, can } from '/api/investai?asset=ui.js'
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, get, act, toast, ficon, opts, dialog, closeDrawer, DL_STATUS, WORK_STATUS, RULE, firstPaint, entered, can } from '/api/investai?asset=ui.js'
 
 let fb = { projectId: null, data: null, pickedArt: null, pickedWork: null, lightText: '', loading: false }
+S.fbDeptOnly ??= false
+
+function isDeptWork(w) {
+  const d = D()
+  const hints = d?.deptProfile?.workspaceHints
+  const types = new Set(hints?.focusWorkTypes ?? [])
+  const roles = new Set(hints?.focusRoles ?? [])
+  return w.assignee === d?.me?.id || types.has(w.type) || (w.role && roles.has(w.role))
+}
 
 export async function loadFlowBoard(projectId) {
   const pid = projectId || S.sel || D()?.projects?.[0]?.id
@@ -32,7 +41,21 @@ hooks.loadFlowBoard = loadFlowBoard
 const no2 = i => String(i + 1).padStart(2, '0')
 
 export function renderFlowBoard(v) {
-  if (!fb.data || fb.projectId !== (S.sel || D()?.projects?.[0]?.id)) {
+  const projs = D()?.projects ?? []
+  if (!projs.length) {
+    const dp = D()?.deptProfile
+    v.innerHTML = `<div class="page"><div class="nb-empty-ws">
+      ${icon('flow', 26)}
+      <h2>当前账号暂无可进入阶段门禁的已授权项目</h2>
+      <p class="dim">${esc(dp?.deptName || D()?.me?.dept || '当前部门')}暂未加入具体项目团队，您可在部门操作台实时查看全院项目脱敏进度看板。</p>
+      <div class="row" style="gap:8px;justify-content:center;margin-top:14px">
+        <button class="btn pri" data-act="go" data-view="workbench">返回${esc(dp?.workspaceTitle || '本部门操作台')}</button>
+      </div>
+    </div></div>`
+    return
+  }
+  if (!S.sel || !projs.some(x => x.id === S.sel)) S.sel = projs[0].id
+  if (!fb.data || fb.projectId !== S.sel) {
     v.innerHTML = '<div class="nb-loading"><span class="spin"></span></div>'
     loadFlowBoard(S.sel)
     return
@@ -91,19 +114,23 @@ function renderPipelineCol(x, p, b) {
       ${can('fill.manage') ? `<button class="btn sm ghost" data-act="fill-new">外部填报</button>` : ''}
       <button class="btn sm ghost" data-act="fb-handover" data-p="${p.id}" title="一键汇总项目要素、阶段准入、底稿与待办交接包">交接简报</button>
       <button class="btn sm ghost" data-act="open-project" data-id="${p.id}" title="查看会议纪要、提取台账与历史快照回滚">全景台账</button>
-      <button class="btn sm ghost" data-act="go" data-view="workbench">投研项目总览</button></header>
+      <button class="btn sm ${S.fbDeptOnly ? 'pri' : 'ghost'}" data-act="fb-dept-only" title="仅筛选本部门职责或指派给我的工作项">${S.fbDeptOnly ? '✓ 仅看本部门' : '仅看本部门事项'}</button>
+      <button class="btn sm ghost" data-act="go" data-view="workbench">返回操作台</button></header>
     <div class="nb-track">
       <div class="nb-track-pct"><b data-count="${f.overallPct}">${f.overallPct}</b><i>%</i></div>
       <div class="nb-track-segs">${(f.stageDetails ?? []).map((st, i) => `<button class="nb-seg ${st.state}" data-act="fb-jump" data-i="${i}" title="${esc(st.name)} ${st.pct}%">
         <span class="bar"><i style="width:${st.pct}%"></i></span><span class="nm ell"><b>${no2(st.index)}</b><span class="t"> ${esc(st.name)}</span></span></button>`).join('')}</div>
     </div>
     <div class="nb-fb-stages" data-keep="fbmid">
-      ${b.stages.map((st, idx) => `<section class="nb-fb-stage ${st.current ? 'cur' : ''}" data-stage="${idx}">
+      ${b.stages.map((st, idx) => {
+        const works = S.fbDeptOnly ? st.works.filter(isDeptWork) : st.works
+        return `<section class="nb-fb-stage ${st.current ? 'cur' : ''}" data-stage="${idx}">
         <header><span class="no">${no2(idx)}</span><h3>${esc(st.name)}</h3>${st.current ? '<span class="tag blue">当前</span>' : ''}
           <span class="grow"></span>${st.gate ? `<span class="gate" title="${esc(RULE[st.gate.rule] || '')}">${icon('vote', 12)}${esc(st.gate.name)}</span>` : ''}
           <span class="pc">${f.stageDetails?.[idx]?.pct ?? 0}%</span></header>
-        ${st.works.map(w => renderWorkNode(w)).join('') || '<div class="nb-none">这个阶段没有工作项</div>'}
-      </section>`).join('')}
+        ${works.map(w => renderWorkNode(w)).join('') || `<div class="nb-none">${S.fbDeptOnly ? '本阶段无本部门职责事项（关闭「仅看本部门」可看全部）' : '这个阶段没有工作项'}</div>`}
+      </section>`
+      }).join('')}
     </div>
   </section>`
 }
@@ -112,8 +139,10 @@ function renderWorkNode(w) {
   const dl = w.deliverable
   const P = w.perms ?? {}
   const off = c => c?.ok === false ? `disabled title="${esc(c.why || '当前岗位不能操作')}"` : ''
-  return `<div class="nb-node ${fb.pickedWork?.id === w.id ? 'on' : ''}">
-    <div class="grow" style="min-width:0"><div class="nm"><b>${esc(w.type)}</b>${w.required ? '<span class="req">必做</span>' : ''}</div>
+  const mine = w.assignee === D()?.me?.id
+  const hit = isDeptWork(w)
+  return `<div class="nb-node ${fb.pickedWork?.id === w.id ? 'on' : ''} ${hit ? 'dept-hit' : ''}">
+    <div class="grow" style="min-width:0"><div class="nm"><b>${esc(w.type)}</b>${w.required ? '<span class="req">必做</span>' : ''}${hit ? `<span class="tag ${mine ? 'real' : 'blue'} sm">${mine ? '我负责' : '本部门职责'}</span>` : ''}</div>
       <div class="meta ell">${esc(w.assigneeName)} · 定稿：${esc((w.holders?.finalize ?? []).join('、') || '部门负责人、合伙人')}</div></div>
     <span class="pill ${dl ? `dl-${dl.status}` : `ws-${w.status}`}">${dl ? `${DL_STATUS[dl.status]} v${dl.v}` : WORK_STATUS[w.status] || w.status}</span>
     <div class="acts">
@@ -166,7 +195,8 @@ function renderPermissionCol(x, p, b) {
 const again = async () => { await hooks.reload({ files: false }); await loadFlowBoard(S.sel) }
 
 Object.assign(ACT, {
-  'nb-flowboard': el => { const id = el.dataset.p || S.sel; S.sel = id; fb.projectId = null; hooks.go('flowboard', { id }) },
+  'nb-flowboard': el => { const id = el.dataset.p || S.sel; if (!id) return toast('当前暂无已授权项目', 'warn'); closeDrawer(); S.sel = id; fb.projectId = null; hooks.go('flowboard', { id }) },
+  'fb-dept-only': () => { S.fbDeptOnly = !S.fbDeptOnly; renderFlowBoard($('#view')) },
   'fb-pick-art': el => { const arts = fb.data?.artifacts?.items ?? []; fb.pickedArt = arts[Number(el.dataset.i)] ?? null; renderFlowBoard($('#view')) },
   'fb-jump': el => $(`.nb-fb-stage[data-stage="${el.dataset.i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
   'fb-submit-now': async el => {

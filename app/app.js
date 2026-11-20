@@ -46,21 +46,27 @@ function modelStat() {
   if (m.ok) return m.verified ? ['ok', m.label] : ['warn', `${m.label}（待验证）`]
   return ['warn', '离线引擎']
 }
+function isRightAiHidden() {
+  if (['notebook', 'flowboard'].includes(S.view)) return true
+  if (S.view === 'workbench') return !S.aiWorkbenchOpen
+  return !S.aiOpen
+}
 function renderHdr() {
   const d = D()
-  const nas = d.mounts.find(m => m.kind === 'nas')
+  const dp = d.deptProfile
   const [mc, mt] = modelStat()
-  const w = d.wisburg
   const route = { hybrid: '混合路由', local: '仅本地', external: '外部模型' }[d.model.mode] ?? d.model.mode
+  const aiHidden = isRightAiHidden()
+  const showAiBtn = aiHidden && !['notebook', 'flowboard'].includes(S.view)
   $('#hdr').innerHTML = `
-    <div class="logo"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span><span class="ver">${esc(d.settings.org?.name ?? '')}</span></div>
+    <div class="logo" data-act="go" data-view="workbench" style="cursor:pointer" title="返回本部门操作台"><span class="mk">AC</span><span class="nm">优势资本 · 智能投研</span>${dp ? `<span class="dp-hdr-pill" style="--dp-accent:${esc(dp.accentVar)}" title="${esc(dp.tagline || '')}"><i class="dp-dot"></i><span>${esc(dp.badge)}</span></span>` : `<span class="ver">${esc(d.settings.org?.name ?? '')}</span>`}</div>
     <div class="gsearch"><span class="ic">${icon('search', 15)}</span><input id="gsearch" placeholder="搜索项目、底稿，或输入快捷指令" autocomplete="off"><span class="kbd">${/Mac/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</span></div>
-    <button class="nb-model" data-act="nb-api" title="${esc(d.model?.note || '模型连接')}"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>
+    ${dp?.canOpenSettings || can('ai.policy') ? `<button class="nb-model" data-act="nb-api" title="${esc(d.model?.note || '模型连接')}"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></button>` : `<span class="nb-model static" title="${esc(d.model?.note || '模型路由状态')}"><span class="dot ${mc}"></span><span>${esc(route)} · ${esc(mt)}</span></span>`}
     <button class="btn ghost ico" data-act="theme-toggle" title="${theme() === 'dark' ? '换成浅色' : '换成深色'}">${icon(theme() === 'dark' ? 'sun' : 'moon', 16)}</button>
     <button class="btn ghost sm" data-act="top-settings-menu" title="设置、账户与帮助">${icon('set', 15)}<span class="hd-lbl">设置与帮助</span></button>
     <button class="btn ghost ico bellbtn" data-act="notifications" title="通知">${icon('bell', 17)}${d.unread ? `<i>${d.unread > 99 ? '99+' : d.unread}</i>` : ''}</button>
-    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.title)}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.caps.roleNames[0] ?? '')}</span></span>${icon('chev', 14)}</button>
-    ${!S.aiOpen ? `<button class="btn ghost ico" data-act="ai-toggle" title="打开 AI 协作">${icon('bot', 17)}</button>` : ''}`
+    <button class="me-btn" data-act="persona" title="${esc(d.me.name)} · ${esc(d.me.dept || '')} · ${esc(d.me.title || '')}（${esc(d.caps.roleNames.join('、'))}）"><span class="avatar" style="background:${avColor(d.me.name)}">${esc(d.me.name.slice(0, 1))}</span><span class="me-n"><b>${esc(d.me.name)}</b><span>${esc(d.me.dept || d.caps.roleNames[0] || '')}</span></span>${icon('chev', 14)}</button>
+    ${showAiBtn ? `<button class="btn ghost ico" data-act="ai-toggle" title="打开右侧 AI 协作助手">${icon('bot', 17)}</button>` : ''}`
   const input = $('#gsearch')
   input.value = searchTerm
   input.addEventListener('focus', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 40) })
@@ -95,30 +101,45 @@ function renderHdr() {
   })
 }
 
-// ───────── 左导航 ─────────
+// ───────── 左导航（按登录者所属部门动态生成专属操作台菜单） ─────────
 export const NAV = () => {
   const d = D()
+  const dp = d.deptProfile
+  const badges = {
+    ...(d.deptBadges ?? {}),
+    ...(S.deptWs?.key === `${d.rev}:${d.me.id}` ? S.deptWs.data?.counts : {}),
+  }
+  if (dp?.nav?.length) {
+    return dp.nav.map(it => [it.view, it.icon, it.label, it.badgeKey ? (badges[it.badgeKey] || 0) : 0, it.sub || ''])
+  }
   return [
-    ['workbench', 'grid', '投研项目总览', d.projects.filter(p => p.status === 'active').length],
-    ['notebook', 'spark', '尽调与研判工作台'],
-    ['flowboard', 'flow', '阶段门禁与投决中心'],
-    ['knowledge', 'kb', '底稿资料库', d.kpi.kbFiles],
-    ['settings', 'set', '机构治理与模型配置'],
+    ['workbench', 'grid', '投研项目总览', d.projects.filter(p => p.status === 'active').length, ''],
+    ['notebook', 'spark', '尽调与研判工作台', 0, ''],
+    ['flowboard', 'flow', '阶段门禁与投决中心', 0, ''],
+    ['knowledge', 'kb', '底稿资料库', d.kpi.kbFiles, ''],
+    ['settings', 'set', '机构治理与模型配置', 0, ''],
   ]
 }
 function renderNav() {
   if (EMBED) return
   const d = D()
+  const dp = d.deptProfile
   const caps = d.caps
-  $('#nav').innerHTML = `<div class="menu">${NAV().map(([v, ic, label, n]) => `<button class="${S.view === v || (v === 'workbench' && ['project', 'pipeline'].includes(S.view)) ? 'on' : ''}" data-act="go" data-view="${v}" title="${label}">${icon(ic, 17)}<span class="lbl">${label}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>
-    <div class="store"><h4>我的权限</h4>
-      <div class="sr"><span class="dot ok"></span><span>数据范围</span><span class="ell">${esc(caps.scopes.map(s => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[s])).join('、'))}</span></div>
+  $('#nav').innerHTML = `${dp ? `<div class="dp-nav-head" style="--dp-accent:${esc(dp.accentVar)}"><span class="dp-nav-tag">${esc(dp.badge)}</span><b class="ell" title="${esc(dp.workspaceTitle)}">${esc(dp.workspaceTitle)}</b><span class="dim ell">${esc(dp.roleSubBadge || d.caps.roleNames[0] || '')}</span></div>` : ''}
+    <div class="menu">${NAV().map(([v, ic, label, n, sub]) => {
+      const on = (S.view === v && (!sub || S.sub === sub)) || (v === 'workbench' && ['project', 'pipeline'].includes(S.view))
+      return `<button class="${on ? 'on' : ''}" data-act="go" data-view="${v}"${sub ? ` data-sub="${esc(sub)}"` : ''} title="${esc(label)}">${icon(ic, 17)}<span class="lbl">${esc(label)}</span>${n ? `<span class="n">${n}</span>` : ''}</button>`
+    }).join('')}</div>
+    <div class="store"><h4>${dp?.isExecutive ? '领导全局权限' : '本部门权限边界'}</h4>
+      <div class="sr"><span class="dot ${dp?.isExecutive ? 'ok' : 'warn'}"></span><span>视图边界</span><span class="ell">${dp?.isExecutive ? '全机构全内容' : '本部门·全院进度'}</span></div>
+      <div class="sr"><span class="dot ok"></span><span>项目范围</span><span class="ell">${esc(caps.scopes.map(s => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[s])).join('、'))}</span></div>
       <div class="sr"><span class="dot ${caps.clearance >= 2 ? 'ok' : 'warn'}"></span><span>资料密级</span><span>≤ ${LEVELS[caps.clearance]}</span></div>
       <div class="sr"><span class="dot ${caps.ai >= 2 ? 'ok' : 'warn'}"></span><span>AI 参与</span><span>${['关闭', '辅助建议', '起草待确认', '授权执行'][caps.ai]}</span></div>
-      <p>${caps.categories.length ? `可见敏感字段：${esc(caps.categories.map(c => ({ amount: '金额', valuation: '估值', terms: '条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }[c])).join('、'))}` : '敏感字段（金额/估值/条款）已对你脱敏'}</p></div>`
+      <p>${dp?.isExecutive ? '管理层独享全院敏感台账、九部门运行巡检与全部底稿权限。' : (caps.categories.length ? `可见敏感字段：${esc(caps.categories.map(c => ({ amount: '金额', valuation: '估值', terms: '条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }[c])).join('、'))}；未授权项目仅看脱敏进度` : '敏感字段（金额/估值/条款）已脱敏；全院项目仅看脱敏进度')}</p></div>`
 }
+hooks.renderNav = renderNav
 function renderChrome() {
-  const hideRight = !S.aiOpen || ['notebook', 'workbench', 'flowboard'].includes(S.view)
+  const hideRight = isRightAiHidden()
   $('#app').classList.toggle('embed', EMBED || ['notebook', 'flowboard'].includes(S.view))
   $('#app').classList.toggle('ai-off', hideRight)
   renderHdr(); renderNav()
@@ -134,8 +155,8 @@ const QUICK_CMDS = () => {
     pid && can('material.upload') && { act: 'nb-url-src', ic: 'globe', label: '抓取公开网页链接入当前项目底稿', kw: '网页 链接 url 抓取 新闻 公告', data: { p: pid } },
     pid && { act: 'nb-harness-open', ic: 'spark', label: '成套制作投研材料（方案审阅 → 质检报送）', kw: '成套 制作 ppt 报告 备忘录 harness', data: { p: pid } },
     pid && { act: 'nb-flowboard', ic: 'flow', label: '进入阶段门禁与投决中心（报送 / 表决 / 催办）', kw: '门禁 审批 表决 报送 催办 oa', data: { p: pid } },
-    { act: 'enterprise-open', ic: 'shield', label: '企业开箱落地向导与批量导入员工账号', kw: '企业 开箱 部署 批量 导入 账号 员工 部门' },
-    { act: 'nb-api', ic: 'bot', label: '配置或切换 AI 大模型连接', kw: '模型 api key 连接 deepseek 本地' },
+    (can('org.manage') || D()?.deptProfile?.isExecutive) && { act: 'enterprise-open', ic: 'shield', label: '企业开箱落地向导与批量导入员工账号', kw: '企业 开箱 部署 批量 导入 账号 员工 部门' },
+    (D()?.deptProfile?.canOpenSettings || can('ai.policy')) && { act: 'nb-api', ic: 'bot', label: '配置或切换 AI 大模型连接', kw: '模型 api key 连接 deepseek 本地' },
   ].filter(Boolean)
 }
 
@@ -379,7 +400,7 @@ async function send(textArg, extra = {}) {
 }
 hooks.send = send
 function fill(text) {
-  if (!S.aiOpen) { S.aiOpen = true; renderChrome() }
+  if (!S.aiOpen || (S.view === 'workbench' && !S.aiWorkbenchOpen)) { S.aiOpen = true; if (S.view === 'workbench') S.aiWorkbenchOpen = true; renderChrome() }
   S.atab = 'chat'
   renderAI()
   const ta = $('#prompt')
@@ -417,10 +438,14 @@ async function openWis(resource, id) {
 
 // ───────── 通用事件 ─────────
 Object.assign(ACT, {
-  go: el => go(el.dataset.view, { sub: el.dataset.sub }),
+  go: el => go(el.dataset.view, { sub: el.dataset.sub ?? '' }),
   'theme-toggle': () => { setTheme(theme() === 'dark' ? 'light' : 'dark'); renderChrome() },
   'open-project': el => { closePopup(); closeDrawer(); go('project', { id: el.dataset.id }) },
-  'ai-toggle': () => { S.aiOpen = !S.aiOpen; renderChrome(); renderAI() },
+  'ai-toggle': () => {
+    if (S.view === 'workbench') { S.aiWorkbenchOpen = !S.aiWorkbenchOpen; if (S.aiWorkbenchOpen) S.aiOpen = true }
+    else S.aiOpen = !S.aiOpen
+    renderChrome(); renderAI()
+  },
   'ai-info': () => {
     const d = D(), m = d.model
     dialog(`<h3>AI 模型路由与权限</h3><div class="kv">
@@ -488,11 +513,24 @@ Object.assign(ACT, {
   persona: el => {
     const d = D()
     const r = el.getBoundingClientRect()
-    if (d.mode === 'saas') return popup(`<div class="hd">${esc(d.me.name)} · ${esc(d.me.title)}</div><div class="it" data-act="my-password">${icon('edit', 13)}修改密码</div><div class="it" data-act="logout">${icon('x', 13)}退出登录</div>`, r.right - 220, r.bottom + 6, 220)
+    if (d.mode === 'saas') return popup(`<div class="hd">${esc(d.me.name)} · ${esc(d.me.dept || '')} · ${esc(d.me.title || '')}</div><div class="it" data-act="my-password">${icon('edit', 13)}修改密码</div><div class="it" data-act="logout">${icon('x', 13)}退出登录</div>`, r.right - 240, r.bottom + 6, 240)
     const locked = d.settings.desktop?.personaSwitch === false
-    popup(`<div class="hd">${locked ? '身份已由管理员锁定' : '切换演示身份：每个身份看到的项目、字段和能做的操作都不同'}</div>${d.users.map(u => `<div class="it ${u.id === d.me.id ? 'on' : ''}" ${locked ? '' : `data-act="set-persona" data-id="${u.id}"`} title="${esc((u.roles ?? []).map(roleName).join('、'))}">${avatar(u.name, 22)}<div class="grow" style="min-width:0"><div>${esc(u.name)} <span class="dim">${esc(u.title)}</span></div><div class="dim ell" style="font-size:11px">${esc((u.roles ?? []).map(roleName).join('、'))}</div></div></div>`).join('')}`, r.right - 300, r.bottom + 6, 300)
+    const deptName = id => d.depts.find(x => x.id === id)?.name ?? ''
+    popup(`<div class="hd">${locked ? '身份已由管理员锁定' : '切换部门身份：不同部门自动进入专属操作台（仅管理层享全内容权限）'}</div>${d.users.map(u => {
+      const exec = (u.roles ?? []).includes('partner') || u.deptId === 'd_mgmt'
+      return `<div class="it ${u.id === d.me.id ? 'on' : ''}" ${locked ? '' : `data-act="set-persona" data-id="${u.id}"`} title="${esc(deptName(u.deptId))} · ${esc((u.roles ?? []).map(roleName).join('、'))}">${avatar(u.name, 22)}<div class="grow" style="min-width:0"><div>${esc(u.name)} <span class="tag ${exec ? 'real' : ''}" style="font-size:10px;padding:0 5px">${esc(deptName(u.deptId) || '未分部门')}</span></div><div class="dim ell" style="font-size:11px">${esc(u.title || '')} · ${esc((u.roles ?? []).map(roleName).join('、'))}</div></div></div>`
+    }).join('')}`, r.right - 340, r.bottom + 6, 340)
   },
-  'set-persona': async el => { closePopup(); await post('persona', { userId: el.dataset.id }); S.chat = []; S.project = null; await hooks.reload(); await loadChat(); if (S.view === 'project' && !proj(S.sel)) go('pipeline'); const c = D().caps; toast(`已切换为 ${D().me.name}（${c.roleNames.join('、')}）：数据范围 ${c.scopes.map(x => ({ own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }[x])).join('、')}，AI ${AI_LEVEL[c.ai]}`) },
+  'set-persona': async el => {
+    closePopup()
+    await post('persona', { userId: el.dataset.id })
+    S.deptWs = null; S.chat = []; S.project = null; S.sel = null; S.ctx.fileIds = []; S.aiWorkbenchOpen = false; S.execTab = 'overview'
+    await hooks.reload()
+    await loadChat()
+    go('workbench')
+    const dp = D().deptProfile
+    toast(`已进入「${dp?.workspaceTitle || '操作台'}」· ${D().me.name}（${dp?.isExecutive ? '领导全局全内容' : (dp?.deptName || '')}）`, 'ok')
+  },
   'force-logout': async () => { await post('logout'); location.reload() },
   'my-password': async () => {
     const r = await dialog(`<h3>修改密码</h3><label class="f">原密码<input class="input" type="password" name="old" autocomplete="current-password" required></label><label class="f">新密码（至少 8 位）<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required></label><label class="f">再次输入新密码<input class="input" type="password" name="again" autocomplete="new-password" required></label><div class="acts"><button class="btn" data-dlg="no">取消</button><button class="btn pri" data-dlg="ok">保存</button></div>`)
@@ -536,20 +574,22 @@ ACT.help = () => { closePopup(); openHelp() }
 ACT['tour-start'] = () => { closePopup(); closeDrawer(); startTour() }
 ACT['top-settings-menu'] = el => {
   const d = D()
+  const dp = d.deptProfile
+  const canGov = !!(dp?.canOpenSettings || can('org.manage') || can('settings.manage') || can('audit.read'))
   const dir = d.mounts.find(m => m.kind === 'nas') ?? d.mounts.find(m => m.kind === 'local')
   menuAt(el, [
-    mi('enterprise-open', '企业开箱落地向导', {}, { ic: 'building' }),
-    mi('nb-api', '模型连接', {}, { ic: 'spark' }),
-    mi('nb-arch-open', '运行状态', {}, { ic: 'shield' }),
-    mi('persona', d.mode === 'saas' ? '账户' : '切换岗位', {}, { ic: 'user' }),
+    (can('org.manage') || dp?.isExecutive) && mi('enterprise-open', '企业开箱落地向导', {}, { ic: 'building' }),
+    (canGov || can('ai.policy')) && mi('nb-api', '模型连接', {}, { ic: 'spark' }),
+    canGov && mi('nb-arch-open', '运行状态', {}, { ic: 'shield' }),
+    mi('persona', d.mode === 'saas' ? '账户与密码' : '切换部门身份', {}, { ic: 'user' }),
     '<hr>',
-    mi('go', '机构治理与模型配置', { view: 'settings' }, { ic: 'set' }),
+    canGov && mi('go', '机构治理与模型配置', { view: 'settings' }, { ic: 'set' }),
     mi('go', '底稿资料库', { view: 'knowledge' }, { ic: 'kb' }),
-    dir && mi('rescan', '重新扫描底稿目录', { id: dir.id }, { ic: 'history' }),
+    dir && can('kb.mount') && mi('rescan', '重新扫描底稿目录', { id: dir.id }, { ic: 'history' }),
     '<hr>',
     mi('help', '帮助与术语', {}, { ic: 'info' }),
     mi('tour-start', '界面导览', {}, { ic: 'play' }),
-  ], 232)
+  ].filter(Boolean), 238)
 }
 
 const ROLE_GUIDE = [
@@ -572,10 +612,10 @@ function openHelp() {
 }
 
 const TOUR = [
-  ['#nav, #app.embed .main', '三个入口', '投研项目总览、尽调与研判工作台、阶段门禁与投决中心。在 DSH 里，这三个入口在 DSH 自己的侧栏。'],
-  ['.nb-list', '项目', '每行左边是全周期进度。点一行看各阶段的进度，旁边是成果报送入口。'],
-  ['.me-btn', '岗位', '每个岗位看到的项目、敏感字段和能做的操作不同。演示模式下可以在这里切换。'],
-  ['[data-act="top-settings-menu"]', '设置与帮助', '模型连接、机构治理、底稿资料库、名词解释和常见问题在这里。灰色按钮点一下会说明原因。'],
+  ['#nav, #app.embed .main', '部门专属工作空间', '系统按登录账号所属部门自动切换导航、工具与数据权限。管理层独享全院全内容驾驶舱，各部门聚焦本职工作。'],
+  ['.dp-prog-sec, .nb-list', '全院脱敏项目进度', '各部门可同步查看全院项目阶段与推进百分比；未授权项目的敏感底稿与商业条款自动隔离，协作与保密兼得。'],
+  ['.me-btn', '部门身份与权限', '不同部门看到的菜单、专属模块、敏感字段与可执行操作各不相同。演示模式下可在此切换九大部门。'],
+  ['[data-act="top-settings-menu"]', '设置与帮助', '账户管理、底稿资料库、名词解释与界面导览在这里；模型路由与机构治理仅对管理层与信息技术部开放。'],
 ]
 function startTour(i = 0) {
   document.querySelectorAll('.tour-mask').forEach(e => e.remove())
@@ -633,7 +673,7 @@ function showLogin(info = {}) {
     <label class="f">密码<input class="input" name="password" type="password" autocomplete="current-password" required></label>
     <div id="lerr" class="bad" style="min-height:18px;font-size:12px"></div><button class="btn pri" style="width:100%">登录</button>
     ${info.sso ? '<a class="btn" style="width:100%;margin-top:8px" href="/sso/login">统一登录（企业账号）</a>' : ''}
-    <div class="dim" style="font-size:11px;margin-top:10px">首次启动的初始密码在服务端数据目录 initial-credentials.txt 中</div></form>`
+    <div class="dim" style="font-size:11.5px;margin-top:10px;line-height:1.6">系统按登录账号所属部门自动进入专属操作台（管理层享全院全内容视角，各业务与职能部门可见本部门操作台及全院脱敏项目进度）。<br>首次启动的初始密码在服务端数据目录 initial-credentials.txt 中。</div></form>`
   document.body.append(el)
   el.querySelector('form').addEventListener('submit', async ev => { ev.preventDefault(); try { await post('login', Object.fromEntries(new FormData(ev.target))); location.reload() } catch (err) { $('#lerr').textContent = err.message } })
 }

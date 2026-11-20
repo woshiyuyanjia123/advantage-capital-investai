@@ -32,6 +32,7 @@ import { TYC_DIMENSIONS, runTianyanchaDueDiligence, tianyanchaConfigured } from 
 import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
 import { planHarnessExecution, runHarnessPipeline, getHarnessStatus } from './nb-harness.mjs'
 import { ingestTextSource, ingestUrlSource, quickCreateProjectWithSources, buildOaInbox, nudgeProjectAction, buildProjectHandover, getEnterpriseReadiness, batchImportUsers } from './nb-enterprise.mjs'
+import { getDeptProfile, getNavBadges, buildDeptWorkspace, buildExecutiveOverview, buildSanitizedProgressBoard } from './dept-workspace.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -149,6 +150,8 @@ export function createApi(ctx) {
         aiWeek: db.find('jobs', j => j.startedAt > week && j.status === 'done').length,
       },
       unread: db.find('notifications', n => n.userId === user.id && !n.read).length,
+      deptProfile: getDeptProfile(user, db, org),
+      deptBadges: getNavBadges({ db, org, kb }, user),
       settings: settingsView(user), workTypes: WORK_TYPES,
       storage: await statfs(dir).then(s => ({ free: s.bavail * s.bsize, total: s.blocks * s.bsize }), () => null),
     }
@@ -639,6 +642,9 @@ export function createApi(ctx) {
     'nb.tyc.meta': async () => ({ dimensions: TYC_DIMENSIONS, configured: await tianyanchaConfigured() }),
     'nb.oa.inbox': user => buildOaInbox({ db, org, engine, guideFn: guide }, user),
     'nb.enterprise.status': () => getEnterpriseReadiness({ db, kb, ai, mode }),
+    'dept.workspace': user => buildDeptWorkspace({ db, org, engine, kb, guideFn: guide, readinessFn: () => getEnterpriseReadiness({ db, kb, ai, mode }) }, user),
+    'dept.executive': user => buildExecutiveOverview({ db, engine, kb }, user),
+    'dept.progress': user => buildSanitizedProgressBoard({ db, org, engine }, user),
     'nb.artifact.preview': async (user, q) => {
       const p = project(user, q.get('projectId'))
       // 只预览本项目登记过的成品：按登记记录里的路径读，不读请求里给的任意路径

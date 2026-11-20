@@ -13,7 +13,7 @@ export async function buildFlowBoardState({ db, org, engine, lifecycle, dir }, u
   const users = db.all('users').filter(u => !u.disabled).map(u => ({
     id: u.id, name: u.name, title: u.title, roles: u.roles,
     canFinalize: org.canOp(u, 'op.material.finalize'),
-    canVote: org.canOp(u, 'op.ic.vote'),
+    canVote: org.canOp(u, 'op.meeting.decide') || org.canOp(u, 'op.invest.approve'),
     canSubmit: org.can(u, 'deliverable.review'),
     canEdit: org.can(u, 'deliverable.edit'),
   }))
