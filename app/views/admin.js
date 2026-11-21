@@ -3,8 +3,17 @@
 import { S, D, ACT, VIEWS, hooks, $, $$, esc, md, icon, avatar, get, post, act, toast, dialog, confirmBox, askText, drawer, drawerHead, can, user, userName, fmt, ymd, rel, opts, empty, LEVELS } from '/api/investai?asset=ui.js'
 
 const TABS = [
-  ['onboarding', '企业开箱向导', null], ['org', '组织与人员', 'org.manage'], ['roles', '岗位权限', null], ['workflow', '流程配置', null], ['security', '密级与敏感字段', 'settings.manage'],
-  ['ai', 'AI 策略与模型', null], ['integrations', '集成', 'integration.manage'], ['automation', '自动化与定时', 'settings.manage'], ['cloud', '云端与安全', 'org.manage'], ['audit', '审计与回滚', 'audit.read'], ['eval', '评测', 'ai.policy'],
+  ['onboarding', '企业开箱向导', () => D()?.deptProfile?.isExecutive || can('org.manage') || can('settings.manage') || can('ai.policy')],
+  ['org', '组织与人员', 'org.manage'],
+  ['roles', '岗位权限', () => D()?.deptProfile?.isExecutive || can('org.manage') || can('audit.read')],
+  ['workflow', '流程配置', () => D()?.deptProfile?.isExecutive || can('workflow.config') || can('audit.read')],
+  ['security', '密级与敏感字段', 'settings.manage'],
+  ['ai', 'AI 策略与模型', () => D()?.deptProfile?.isExecutive || can('ai.policy') || can('settings.manage')],
+  ['integrations', '集成', 'integration.manage'],
+  ['automation', '自动化与定时', 'settings.manage'],
+  ['cloud', '云端与安全', 'org.manage'],
+  ['audit', '审计与回滚', 'audit.read'],
+  ['eval', '评测', 'ai.policy'],
 ]
 const AI_L = ['关闭', '辅助建议', '起草待确认', '授权执行']
 const SYNC_NAMES = { projects: '项目', companies: '公司库', deliverables: '成果（不含正文）', meetings: '会议', tasks: '任务', approvals: '决策表决', workflows: '流程', businessTypes: '业务类型', depts: '部门', users: '人员（不含密码）', roles: '岗位权限' }
@@ -12,7 +21,19 @@ const CAT = { amount: '投资金额', valuation: '内部估值', terms: '交易�
 const SCOPE = { own: '本人负责', dept: '本部门', assigned: '指定授权', postinv: '投后阶段', all: '全机构' }
 
 VIEWS.settings = v => {
-  const tabs = TABS.filter(([, , perm]) => !perm || can(perm))
+  const dp = D()?.deptProfile
+  const tabs = TABS.filter(([, , perm]) => !perm || (typeof perm === 'function' ? perm() : can(perm)))
+  if (!tabs.length) {
+    v.innerHTML = `<div class="page"><div class="nb-empty-ws">
+      ${icon('lock', 26)}
+      <h2>机构治理与系统配置仅对管理层、风控审计及信息技术部开放</h2>
+      <p class="dim">当前账号（${esc(dp?.deptName || D()?.me?.dept || '')}）未分配系统治理或审计权限，请返回本部门专属操作台处理业务。</p>
+      <div class="row" style="gap:8px;justify-content:center;margin-top:14px">
+        <button class="btn pri" data-act="go" data-view="workbench">返回${esc(dp?.workspaceTitle || '本部门操作台')}</button>
+      </div>
+    </div></div>`
+    return
+  }
   const tab = tabs.some(([k]) => k === S.sub) ? S.sub : tabs[0][0]
   v.innerHTML = `<div class="page scrollable"><div class="ph"><div class="grow"><h1>系统配置</h1><p>所有配置变更都记录历史并可回滚；你只能看到有权管理的配置项。</p></div></div>
     <div class="rtabs">${tabs.map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="go" data-view="settings" data-sub="${k}">${l}</button>`).join('')}</div><div id="sbody"><span class="spin"></span></div></div>`

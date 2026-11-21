@@ -51,6 +51,7 @@ export function exportDifyDslYaml(tplId = 'ac_dd_word') {
 }
 
 export async function runDifyWorkflow({ db, kb, org, deliverables, lifecycle, ai, dir }, user, p, b) {
+  org.assert(user, 'deliverable.edit')
   const gov = getEnterpriseGovState(db, user, org)
   if (gov.quota.remainCalls <= 0) throw Object.assign(new Error('本月的调用次数已经用完，请联系管理员调整额度'), { status: 403 })
   const tpl = DIFY_WORKFLOW_TEMPLATES.find(t => t.id === b.workflowId) ?? DIFY_WORKFLOW_TEMPLATES[0]

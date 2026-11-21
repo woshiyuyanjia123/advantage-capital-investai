@@ -144,3 +144,106 @@ test('D4 产业投资四阶段流程与门禁表决权限 canVote 校验', async
     await t.close()
   }
 })
+
+test('D5 底稿、项目专属文件夹与会议录音强隔离：0 授权基金部与无 material.view 的 IT 部门零越权', async () => {
+  const t = await boot()
+  try {
+    await t.core.kb.scanAll()
+    const fcFiles = await t.call('fengchen', 'files')
+    assert.equal(fcFiles.status, 200)
+    const leaked = fcFiles.body.filter(f => /(?:^|\/)(?:项目资料|项目专属文件夹|会议录音)(?:\/|$)/.test(f.rel) || f.mountId === 'm_ws')
+    assert.deepEqual(leaked, [], '基金运营部（0授权项目）绝不能在资料库看到项目成品夹或会议录音')
+
+    const adminFiles = await t.call('admin', 'files')
+    assert.equal(adminFiles.status, 200)
+    assert.equal(adminFiles.body.length, 0, '信息技术部（无 material.view）不应返回任何业务底稿')
+
+    // 审计日志与企业开箱体检强门禁
+    const fcArch = await t.call('fengchen', 'nb.arch.status')
+    assert.equal(fcArch.status, 200)
+    assert.deepEqual(fcArch.body.recentChanges, [], '非审计岗位调用 nb.arch.status 不应返回全院变更记录')
+    const fcEnt = await t.call('fengchen', 'nb.enterprise.status')
+    assert.equal(fcEnt.status, 403, '非管理层/非管理员调用 nb.enterprise.status 必须返回 403')
+
+    // 管理层部门新增普通 staff 助理不得误获管理层驾驶舱权限
+    const addRes = await t.call('admin', 'user.save', { name: '管理层助理', username: 'mgmt_staff', deptId: 'd_mgmt', roles: ['staff'], title: '行政助理' })
+    assert.equal(addRes.status, 200)
+    const staffExec = await t.call('mgmt_staff', 'dept.executive')
+    assert.equal(staffExec.status, 403, 'd_mgmt 下非合伙人岗位绝不能越权访问管理层驾驶舱')
+  } finally {
+    await t.close()
+  }
+})
+
+test('D6 敏感字段二次读取/成果编制/成品预览全链路脱敏与无编辑权拦截', async () => {
+  const t = await boot()
+  try {
+    await t.core.kb.scanAll()
+    const zwState = await t.call('zhangwei', 'state')
+    const cg = zwState.body.projects.find(p => p.name.includes('澄光'))
+    assert.ok(cg)
+
+    // 1) 提取缓存二次读取必须按查看者权限重新脱敏
+    const exZw = await t.call('zhangwei', 'extract.run', { projectId: cg.id, schema: 'bp' })
+    assert.equal(exZw.status, 200)
+    const exLin = await t.call('linxiao', 'extraction', undefined, { query: `&id=${exZw.body.id}` })
+    assert.equal(exLin.status, 200)
+    for (const key of ['本轮融资金额', '投前估值']) {
+      const row = exLin.body.rows.find(r => r.key === key)
+      assert.equal(row?.status, 'hidden', `分析师读取他人提取记录时 ${key} 必须脱敏`)
+      assert.equal(row?.value, null)
+    }
+
+    // 2) 机密底稿生成的 Studio 成品保持机密密级，低密级分析师不可预览，无编辑权合伙人不可调用编制
+    const zwArt = await t.call('zhangwei', 'nb.studio.make', { projectId: cg.id, kind: 'word' })
+    assert.equal(zwArt.status, 200)
+    assert.ok((t.core.kb.file(zwArt.body.fileId)?.level ?? 0) >= 2, '基于机密底稿生成的成品密级不得降级')
+    const linPrev = await t.call('linxiao', 'nb.artifact.preview', undefined, { query: `&projectId=${cg.id}&name=${encodeURIComponent(zwArt.body.name)}` })
+    assert.equal(linPrev.status, 403, '低密级分析师不应预览机密成品')
+
+    // 3) 分析师基于内部底稿自制成果时，项目登记的金额/估值/对赌条款不得泄露进成品
+    await t.call('linxiao', 'nb.source.paste', { projectId: cg.id, title: '内部调研笔记', text: '澄光半导体已通过客户产线验证，客户导入顺利。', level: 1 })
+    const linArt = await t.call('linxiao', 'nb.studio.make', { projectId: cg.id, kind: 'word' })
+    assert.equal(linArt.status, 200)
+    const selfPrev = await t.call('linxiao', 'nb.artifact.preview', undefined, { query: `&projectId=${cg.id}&name=${encodeURIComponent(linArt.body.name)}` })
+    assert.equal(selfPrev.status, 200)
+    const joined = (selfPrev.body.paras ?? []).join('\n')
+    assert.equal(joined.includes('8000 万元'), false, '分析师自制成果不得泄露项目拟投金额')
+    assert.equal(joined.includes('投前 30 亿元'), false, '分析师自制成果不得泄露项目投前估值')
+    assert.equal(joined.includes('8% 年化回购'), false, '分析师自制成果不得泄露项目回购条款')
+
+    // 4) 无 deliverable.edit 的合伙人不可通过 Studio/Harness/FlowSubmit 绕过编辑权限
+    const wangWord = await t.call('wang', 'nb.studio.make', { projectId: cg.id, kind: 'word' })
+    const wangTable = await t.call('wang', 'nb.studio.make', { projectId: cg.id, kind: 'table' })
+    assert.equal(wangWord.status, 403)
+    assert.equal(wangTable.status, 403)
+
+    // 5) SaaS 模式禁止 nb.folder.open 任意路径打开
+    const openHack = await t.call('zhangwei', 'nb.folder.open', { projectId: cg.id, filePath: 'C:\\Windows\\System32\\calc.exe' })
+    assert.equal(openHack.status, 403)
+  } finally {
+    await t.close()
+  }
+})
+
+test('D7 阶段工作项 role 归属与 IT 部门重新扫描权限校验', async () => {
+  const t = await boot()
+  try {
+    const zwState = await t.call('zhangwei', 'state')
+    const cg = zwState.body.projects.find(p => p.name.includes('澄光'))
+    const fb = await t.call('wulv', 'nb.flow.board', undefined, { query: `&projectId=${cg.id}` })
+    assert.equal(fb.status, 200)
+    const prep = fb.body.stages.find(s => s.id === 's_prep')
+    const nda = prep?.works?.find(w => w.type === 'NDA')
+    assert.equal(nda?.role, 'legal', '立项准备阶段 NDA 工作项应标注 legal 部门职责')
+
+    // IT 管理员具备 kb.mount，应允许触发目录重扫；动态岗位数应与角色表真实数量一致
+    const rescan = await t.call('admin', 'mount.rescan', { id: 'm_nas' })
+    assert.equal(rescan.status, 200)
+    const wsIt = await t.call('admin', 'dept.workspace')
+    const staffKpi = wsIt.body.kpis.find(k => k.label === '机构在册人员')
+    assert.match(staffKpi?.sub ?? '', new RegExp(`${t.core.db.all('roles').length} 类岗位`))
+  } finally {
+    await t.close()
+  }
+})

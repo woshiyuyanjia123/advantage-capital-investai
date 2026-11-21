@@ -207,7 +207,7 @@ export async function quickCreateProjectWithSources({ db, kb, org, engine, notif
 // ───────── 4. 企业 OA 个人待办聚合、一键催办与项目交接简报 ─────────
 export function buildOaInbox({ db, org, engine, guideFn }, user) {
   const ps = db.all('projects').filter(p => org.seesProject(user, p) && p.status === 'active')
-  const approvals = db.find('approvals', a => a.status === 'pending' && a.voters.includes(user.id) && !a.votes.some(v => v.userId === user.id) && !a.recused.includes(user.id))
+  const approvals = db.find('approvals', a => a.status === 'pending' && a.voters.includes(user.id) && !a.votes.some(v => v.userId === user.id) && !a.recused.includes(user.id) && org.seesProject(user, db.get('projects', a.projectId)))
     .map(a => ({ id: a.id, projectId: a.projectId, projectName: db.get('projects', a.projectId)?.name ?? '', gateName: a.gate.name, requestedAt: a.requestedAt, votesDone: a.votes.length, votesTotal: a.voters.length - a.recused.length }))
   const canFinalize = org.canOp(user, 'op.material.finalize')
   const reviews = canFinalize
@@ -215,7 +215,11 @@ export function buildOaInbox({ db, org, engine, guideFn }, user) {
     : []
   const mySteps = ps.flatMap(p => (guideFn(user, p, engine.readiness(p)) ?? []).filter(g => g.mine && !g.tab).map(g => ({ projectId: p.id, projectName: p.name, stage: db.get('workflows', p.workflowId)?.stages.find(s => s.id === p.stageId)?.name ?? '', text: g.text, workId: g.workId, deliverableId: g.deliverableId, gate: !!g.gate })))
   const tasks = db.find('tasks', t => !t.done && t.owner === user.id).sort((a, b) => (a.due || 9e15) - (b.due || 9e15)).slice(0, 12)
-    .map(t => ({ id: t.id, title: t.title, projectId: t.projectId, projectName: t.projectId ? db.get('projects', t.projectId)?.name ?? '' : '', due: t.due }))
+    .map(t => {
+      const tp = t.projectId ? db.get('projects', t.projectId) : null
+      const canSee = !!(tp && org.seesProject(user, tp))
+      return { id: t.id, title: t.title, projectId: canSee ? t.projectId : null, projectName: tp?.name ?? '', due: t.due }
+    })
   return {
     total: approvals.length + reviews.length + mySteps.length + tasks.length,
     approvals,
@@ -305,12 +309,13 @@ export function buildProjectHandover({ db, kb, org, engine }, user, p, { saveAsN
     ...(tasks.length ? tasks.map(t => `- [ ] ${t.title}（责任人：${db.get('users', t.owner)?.name ?? '待定'}）`) : ['- 当前无未完成待办任务']),
   ].filter(x => x !== null).join('\n')
 
+  const safeLines = org.redact(user, lines)
   let savedNote = null
   if (saveAsNote) {
-    const notes = saveNote(db, user, p.id, { title: `交接与上会简报 ${new Date().toISOString().slice(0, 10)}`, content: lines, tag: '交接简报', board: 'gates' })
+    const notes = saveNote(db, user, p.id, { title: `交接与上会简报 ${new Date().toISOString().slice(0, 10)}`, content: safeLines, tag: '交接简报', board: 'gates' })
     savedNote = notes[0] ?? null
   }
-  return { title: `${p.name} · 项目交接与上会简报`, markdown: lines, noteId: savedNote?.id ?? null }
+  return { title: `${p.name} · 项目交接与上会简报`, markdown: safeLines, noteId: savedNote?.id ?? null }
 }
 
 // ───────── 5. 企业开箱落地就绪度诊断与人员批量导入 ─────────
@@ -319,8 +324,8 @@ const ROLE_ALIAS = {
   head: 'head', 部门负责人: 'head', 总监: 'head', 董事总经理: 'head', md: 'head',
   pm: 'pm', 项目经理: 'pm', 投资经理: 'pm', 投资总监: 'pm', vp: 'pm',
   analyst: 'analyst', 分析师: 'analyst', 研究员: 'analyst', 投资助理: 'analyst',
-  risk: 'risk', 风控: 'risk', 风控总监: 'risk', 风控经理: 'risk',
-  legal: 'legal', 法务: 'legal', 法务合规: 'legal', 合规: 'legal',
+  risk: 'risk', 风控: 'risk', 风控总监: 'risk', 风控经理: 'risk', 风控合规: 'risk', 合规风控: 'risk', 合规: 'risk',
+  legal: 'legal', 法务: 'legal', 法务合规: 'legal',
   finance: 'finance', 财务: 'finance', 财务尽调: 'finance', 基金财务: 'finance',
   postinv: 'postinv', 投后: 'postinv', 投后管理: 'postinv', 赋能: 'postinv',
   fund: 'fund', 基金募资: 'fund', 募资: 'fund', ir: 'fund',

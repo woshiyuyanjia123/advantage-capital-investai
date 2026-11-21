@@ -29,6 +29,7 @@ export function getOsState(db, p) {
 }
 
 export async function dispatchAgentOs({ db, kb, org, deliverables, lifecycle, ai }, user, p, b) {
+  org.assert(user, 'deliverable.edit')
   const st = getOsState(db, p)
   const text = String(b.text || '').trim()
   if (!text) throw new Error('请输入群聊协同指令')

@@ -25,8 +25,9 @@ export function slidesToMd(deckTitle, slides = []) {
   }).join('\n\n')
 }
 
-export async function transcribeAudioLocal({ db, kb, meetings, settings }, user, b) {
-  const p = db.get('projects', b.projectId)
+export async function transcribeAudioLocal({ db, kb, org, meetings, settings }, user, b) {
+  const p = b.projectId ? db.get('projects', b.projectId) : null
+  if (p && org) org.assertProject(user, p)
   const c = p?.companyId ? db.get('companies', p.companyId) : null
   const terms = [c?.short, c?.name, p?.name, '尽调报告', '审计报告', '投委会', '立项会', '对赌条款', '业绩承诺', '估值'].filter(Boolean)
   if (b.segments || b.rawText) {
@@ -71,23 +72,20 @@ export async function handlePluginSubmit(ctx, user, p, b) {
   let deliverableId = b.deliverableId || null
   if (channel === 'local-checkin' && deliverableId) {
     const d = db.get('deliverables', deliverableId)
-    if (d?.checkout?.path) {
-      const st = await stat(d.checkout.path).catch(() => null)
-      if (st) {
-        const buf = await readFile(d.checkout.path)
-        const r = await deliverables.addVersion(user, { ...d, checkout: null }, { buffer: buf, ext: extname(d.checkout.path), engine: '本地 Office/WPS 插件回传', note })
-        db.put('deliverables', { ...db.get('deliverables', deliverableId), checkout: null }, { actor: user, reason: '本地修改插件提交', action: 'checkin' })
-        summary = `已回传本地修改文件为 v${r.version.v}`
-      }
-    }
-    if (!summary) throw Object.assign(new Error('未找到待回传的本地工作副本，请先点「本机 Office 修改」或直接上传本地文件'), { status: 409 })
+    if (!d || d.projectId !== p.id) throw Object.assign(new Error('成果不属于当前项目'), { status: 403 })
+    const r = await deliverables.checkin(user, deliverableId, note)
+    summary = `已回传本地修改文件为 v${r.version.v}`
   } else if (channel === 'file-upload' && b.data && b.name) {
     const targetType = b.workType || (p.works?.find(w => w.stageId === p.stageId)?.type ?? '立项报告')
-    const d = deliverableId ? db.get('deliverables', deliverableId) : deliverables.ensure(p.id, targetType, { workId: b.workId }, user)
+    const existing = deliverableId ? db.get('deliverables', deliverableId) : null
+    if (existing && existing.projectId !== p.id) throw Object.assign(new Error('成果不属于当前项目'), { status: 403 })
+    const d = existing || deliverables.ensure(p.id, targetType, { workId: b.workId }, user)
     deliverableId = d.id
     const r = await deliverables.upload(user, d.id, String(b.name), Buffer.from(String(b.data), 'base64'), note)
     summary = `插件上传本地文件「${b.name}」→ ${d.type} v${r.version.v}`
   } else if (channel === 'review-submit' && deliverableId) {
+    const d = db.get('deliverables', deliverableId)
+    if (!d || d.projectId !== p.id) throw Object.assign(new Error('成果不属于当前项目'), { status: 403 })
     const next = deliverables.submit(user, deliverableId)
     summary = `已将「${next.type}」提交阶段审核`
   } else if (channel === 'gate-submit') {

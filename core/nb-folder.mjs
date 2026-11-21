@@ -12,14 +12,15 @@ export async function ensureProjectFolder(db, dir, p) {
   return { folderName, root }
 }
 
-export async function writeProjectArtifact({ db, kb, dir }, user, p, { fileName, buffer, kind, sourceCount = 0, summary = '', meshCert = null, ...meta }) {
+export async function writeProjectArtifact({ db, kb, dir }, user, p, { fileName, buffer, kind, sourceCount = 0, summary = '', meshCert = null, level, ...meta }) {
   const { folderName, root } = await ensureProjectFolder(db, dir, p)
   const cleanName = safeDirName(fileName)
   const fullPath = join(root, cleanName)
   await writeFile(fullPath, buffer)
   const c = p.companyId ? db.get('companies', p.companyId) : null
   const subdir = `项目资料/${c?.short ?? safeDirName(p.name)}/Studio成品`
-  const f = await kb.upload('m_nas', cleanName, buffer, { level: 1, by: user.name, subdir })
+  const artifactLevel = Number.isInteger(level) ? Math.max(1, Math.min(3, level)) : undefined
+  const f = await kb.upload('m_nas', cleanName, buffer, { level: artifactLevel, by: user.name, subdir })
   const recKey = `artifacts_${p.id}`
   const prev = db.get('kvstate', recKey)?.list ?? []
   const item = {

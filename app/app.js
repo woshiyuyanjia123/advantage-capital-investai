@@ -27,9 +27,10 @@ async function loadState() {
 hooks.reload = async ({ files = true } = {}) => {
   if (files) S.files = await get('files').catch(() => [])
   await loadState()
-  if (S.view === 'project' && S.sel) await hooks.loadProject?.()
-  else if (S.view === 'notebook' && S.sel) await hooks.loadNbProject?.()
-  else if (S.view === 'flowboard' && S.sel) await hooks.loadFlowBoard?.(S.sel)
+  const selOk = S.sel && (D()?.projects ?? []).some(p => p.id === S.sel)
+  if (S.view === 'project' && selOk) await hooks.loadProject?.()
+  else if (S.view === 'notebook' && selOk) await hooks.loadNbProject?.()
+  else if (S.view === 'flowboard' && selOk) await hooks.loadFlowBoard?.(S.sel)
   window.dispatchEvent(new CustomEvent('investai:reload'))
 }
 let polling = false
@@ -153,7 +154,7 @@ const QUICK_CMDS = () => {
     can('project.create') && can('material.upload') && { act: 'quick-project', ic: 'upload', label: '带材料快速立项（自动识别公司与轮次）', kw: '立项 新建 上传 快速 bp' },
     pid && can('material.upload') && { act: 'nb-paste-src', ic: 'edit', label: '粘贴文本 / 微信沟通纪要入当前项目底稿', kw: '粘贴 文本 纪要 微信 底稿', data: { p: pid } },
     pid && can('material.upload') && { act: 'nb-url-src', ic: 'globe', label: '抓取公开网页链接入当前项目底稿', kw: '网页 链接 url 抓取 新闻 公告', data: { p: pid } },
-    pid && { act: 'nb-harness-open', ic: 'spark', label: '成套制作投研材料（方案审阅 → 质检报送）', kw: '成套 制作 ppt 报告 备忘录 harness', data: { p: pid } },
+    pid && can('deliverable.edit') && { act: 'nb-harness-open', ic: 'spark', label: '成套制作投研材料（方案审阅 → 质检报送）', kw: '成套 制作 ppt 报告 备忘录 harness', data: { p: pid } },
     pid && { act: 'nb-flowboard', ic: 'flow', label: '进入阶段门禁与投决中心（报送 / 表决 / 催办）', kw: '门禁 审批 表决 报送 催办 oa', data: { p: pid } },
     (can('org.manage') || D()?.deptProfile?.isExecutive) && { act: 'enterprise-open', ic: 'shield', label: '企业开箱落地向导与批量导入员工账号', kw: '企业 开箱 部署 批量 导入 账号 员工 部门' },
     (D()?.deptProfile?.canOpenSettings || can('ai.policy')) && { act: 'nb-api', ic: 'bot', label: '配置或切换 AI 大模型连接', kw: '模型 api key 连接 deepseek 本地' },
@@ -377,7 +378,7 @@ async function send(textArg, extra = {}) {
   const text = (textArg ?? ta.value).trim()
   if (!text) return
   if (!textArg) { ta.value = ''; ta.style.height = 'auto' }
-  if (!S.aiOpen) { S.aiOpen = true; renderChrome() }
+  if (!S.aiOpen || (S.view === 'workbench' && !S.aiWorkbenchOpen)) { S.aiOpen = true; if (S.view === 'workbench') S.aiWorkbenchOpen = true; renderChrome() }
   if (!extra.silent) { S.atab = extra.tab ?? 'chat'; S.chat.push({ role: 'user', text }); renderAI(); renderAIBody(true) }
   $('#sendBtn').disabled = true
   try {
@@ -472,7 +473,7 @@ Object.assign(ACT, {
   'pick-project': el => { const r = el.getBoundingClientRect(); popup(D().projects.filter(p => p.status === 'active').map(p => `<div class="it ${p.id === S.sel ? 'on' : ''}" data-act="set-sel" data-id="${p.id}"><span class="grow ell">${esc(p.name)}</span><span class="dim">${esc(p.stage)}</span></div>`).join('') || '<div class="it off">没有可见项目</div>', r.right - 300, r.bottom + 4, 300) },
   'set-sel': el => { closePopup(); const next = el.dataset.id; if (next !== S.sel) { S.sel = next; S.project = null; S.ctx.fileIds = []; loadChat(S.sel); if (S.view === 'notebook') hooks.loadNbProject?.(S.sel); else if (S.view === 'flowboard') hooks.loadFlowBoard?.(S.sel); else if (S.view === 'project') hooks.refresh?.() } renderAI() },
   'ctx-file': el => { S.ctx.fileIds = S.ctx.fileIds.filter(x => x !== el.dataset.id); renderAI() },
-  'ctx-add': el => { if (!S.ctx.fileIds.includes(el.dataset.id)) S.ctx.fileIds.push(el.dataset.id); closeDrawer(); S.aiOpen = true; S.atab = 'chat'; renderChrome(); renderAI(); toast('已带入 AI 上下文') },
+  'ctx-add': el => { if (!S.ctx.fileIds.includes(el.dataset.id)) S.ctx.fileIds.push(el.dataset.id); closeDrawer(); S.aiOpen = true; if (S.view === 'workbench') S.aiWorkbenchOpen = true; S.atab = 'chat'; renderChrome(); renderAI(); toast('已带入 AI 上下文') },
   'draft-type': el => { S.draftType = el.dataset.t; renderAIBody() },
   plan: async el => {
     const p = ctxProject()
@@ -517,7 +518,7 @@ Object.assign(ACT, {
     const locked = d.settings.desktop?.personaSwitch === false
     const deptName = id => d.depts.find(x => x.id === id)?.name ?? ''
     popup(`<div class="hd">${locked ? '身份已由管理员锁定' : '切换部门身份：不同部门自动进入专属操作台（仅管理层享全内容权限）'}</div>${d.users.map(u => {
-      const exec = (u.roles ?? []).includes('partner') || u.deptId === 'd_mgmt'
+      const exec = (u.roles ?? []).includes('partner')
       return `<div class="it ${u.id === d.me.id ? 'on' : ''}" ${locked ? '' : `data-act="set-persona" data-id="${u.id}"`} title="${esc(deptName(u.deptId))} · ${esc((u.roles ?? []).map(roleName).join('、'))}">${avatar(u.name, 22)}<div class="grow" style="min-width:0"><div>${esc(u.name)} <span class="tag ${exec ? 'real' : ''}" style="font-size:10px;padding:0 5px">${esc(deptName(u.deptId) || '未分部门')}</span></div><div class="dim ell" style="font-size:11px">${esc(u.title || '')} · ${esc((u.roles ?? []).map(roleName).join('、'))}</div></div></div>`
     }).join('')}`, r.right - 340, r.bottom + 6, 340)
   },

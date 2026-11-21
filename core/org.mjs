@@ -108,18 +108,18 @@ export function createOrg(db) {
   const PATTERNS = {
     amount: /(投资金额|拟投|出资|融资金额|本轮融资|融资|首付款|交易价格|对价|认缴|实缴|持仓)([^，。；\n]{0,10}?)(\d[\d.,]*\s*(?:亿|万)?(?:美元|元|人民币)?)/g,
     valuation: /(估值|投前|投后|目标价|市值|PE|PS)([^，。；\n]{0,10}?)(\d[\d.,]*\s*(?:亿|万|倍)?(?:美元|元)?)/g,
-    terms: /(回购|对赌|业绩承诺|优先清算|反稀释|领售)([^，。；\n]{0,16}?)(\d[\d.,]*\s*(?:%|亿|万|倍|年)?)/g,
+    terms: /(回购|对赌|业绩承诺|优先清算|反稀释|领售)([^，。；\n]{0,16}?)(\d[\d.,]*\s*(?:%|亿|万|倍|年)?)|(\d[\d.,]*\s*%[^，。；\n]{0,8}?)(回购|对赌|优先清算|年化)/g,
     fund_lp: /(LP|有限合伙人|出资人)([^，。；\n]{0,16}?)(\d[\d.,]*\s*(?:%|亿|万)?)/g,
     trade_secret: /(商业秘密|核心工艺|工艺参数|配方|源代码|未公开专利)([：:为是]\s*)([^，。；\n]{1,40})/g,
   }
   function redact(user, text) {
     const e = effective(user)
     let t = String(text ?? '')
-    for (const [cat, re] of Object.entries(PATTERNS)) if (!e?.categories.has(cat)) t = t.replace(re, '$1$2［已脱敏］')
+    for (const [cat, re] of Object.entries(PATTERNS)) if (!e?.categories.has(cat)) t = t.replace(re, (m, a, b, c, d, e2) => d ? `［已脱敏］${e2}` : `${a}${b}［已脱敏］`)
     return t
   }
   /** 发往外部模型的文本：所有敏感类别一律脱敏，与用户权限无关。 */
-  const redactAll = text => Object.values(PATTERNS).reduce((t, re) => t.replace(re, '$1$2［已脱敏］'), String(text ?? ''))
+  const redactAll = text => Object.values(PATTERNS).reduce((t, re) => t.replace(re, (m, a, b, c, d, e2) => d ? `［已脱敏］${e2}` : `${a}${b}［已脱敏］`), String(text ?? ''))
   const canCategory = (user, cat) => !cat || !!effective(user)?.categories.has(cat)
 
   /**

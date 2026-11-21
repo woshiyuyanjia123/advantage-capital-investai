@@ -7,7 +7,7 @@ import { gradeDocCredibility, runAgentMeshCrossCheck, previewAnyArtifact } from 
 import { prepareSources, checkNumbers, checkLine, sourceDigest, projectFacts } from './nb-ground.mjs'
 import { askJson } from './nb-author.mjs'
 import { runTianyanchaDueDiligence } from './nb-tianyancha.mjs'
-import { generateStudioArtifact, gatherDocs, withStage } from './nb-studio-gen.mjs'
+import { generateStudioArtifact, gatherDocs, withStage, projectForPrompt } from './nb-studio-gen.mjs'
 import { submitArtifactToNode } from './nb-flow-board.mjs'
 
 const ALL_KINDS = ['ic_memo', 'ppt', 'word', 'table', 'mindmap', 'audio', 'video', 'flashcards', 'quiz']
@@ -78,9 +78,10 @@ export async function planHarnessExecution(deps, user, p, opts = {}) {
   const withTianyancha = Boolean(opts.withTianyancha || /天眼查|工商核查/.test(userGoal))
   const autoSubmitStage = Boolean(opts.autoSubmitStage || /报送|提交审核|上会提交/.test(userGoal))
 
+  const pSafe = projectForPrompt(org, user, p, false)
   const { docs, levelMax } = await gatherDocs({ kb, org }, user, p, opts.fileIds)
   if (!docs.length) throw Object.assign(new Error('所选底稿里没有读到文字，无法制作。请确认底稿已上传并解析完成。'), { status: 400 })
-  const G = prepareSources(p, docs)
+  const G = prepareSources(pSafe, docs)
   const graded = docs.map((d, i) => ({ n: i + 1, id: d.id, name: d.name, ...gradeDocCredibility(d.name) }))
   const count = g => graded.filter(d => d.grade === g).length
   const todo = G.passages.filter(x => x.topics.includes('todo'))
@@ -92,15 +93,18 @@ export async function planHarnessExecution(deps, user, p, opts = {}) {
     if (!route.adapter) note = route.reason
     else {
       try {
+        const isExt = route.route === 'external'
+        const pPlan = isExt ? projectForPrompt(org, user, p, true) : pSafe
+        const docsPlan = isExt ? docs.map(d => ({ ...d, text: org.redactAll(d.text) })) : docs
         ai1 = await askJson(route.adapter, {
           maxTokens: 12000, timeoutMs: 240000,
           system: '你是优势资本的投资经理，要为一个项目成套准备材料。动手之前先把事情想清楚，把想法写给合伙人看，合伙人同意后才开始制作。只用给出的底稿和项目登记信息，底稿里没有的事实和数字不写；引用数字保持原样并标来源编号，如 [2]。用平实的中文，不写套话。只输出 JSON。',
-          user: `项目登记信息：\n${projectFacts(p).map(([k, v]) => `${k}：${v}`).join('\n') || p.name}
+          user: `项目登记信息：\n${projectFacts(pPlan).map(([k, v]) => `${k}：${v}`).join('\n') || p.name}
 
 底稿（共 ${docs.length} 份，括号里是按文件名推定的证据效力）：
 ${graded.map(s => `[${s.n}]《${s.name}》（${s.label}）`).join('\n')}
 
-${sourceDigest(docs)}
+${sourceDigest(docsPlan)}
 
 要制作的材料：${kinds.map(k => `${k}（${KIND_LABELS[k]}）`).join('、')}${userGoal ? `\n使用者的要求：${userGoal}` : ''}
 
@@ -162,6 +166,7 @@ function opened(kind, preview) {
 export async function runHarnessPipeline(deps, user, p, opts = {}) {
   const { db, kb, org, deliverables, lifecycle, ai, dir } = deps
   const t0 = Date.now()
+  if (!opts.planOnly) org.assert(user, 'deliverable.edit')
   p = withStage(db, p)
   let plan = opts.planId ? runsOf(db, p).find(r => r.id === opts.planId) ?? null : null
   if (!plan) plan = await planHarnessExecution(deps, user, p, opts)
@@ -191,7 +196,7 @@ export async function runHarnessPipeline(deps, user, p, opts = {}) {
   if (has('act_tyc')) {
     try {
       const c = p.companyId ? db.get('companies', p.companyId) : null
-      const tyc = await runTianyanchaDueDiligence({ db, kb }, user, p, { companyName: c?.name })
+      const tyc = await runTianyanchaDueDiligence({ db, kb, org }, user, p, { companyName: c?.name })
       if (tyc.file?.id && fileIds.length && !fileIds.includes(tyc.file.id)) fileIds.unshift(tyc.file.id)
       mark('act_tyc', 'done', `已把「${tyc.companyName}」的 ${tyc.fields} 项工商登记信息存为底稿《${tyc.file?.name}》`)
     } catch (e) { mark('act_tyc', 'skipped', e.message) }
@@ -202,7 +207,7 @@ export async function runHarnessPipeline(deps, user, p, opts = {}) {
 
   let mesh = null
   if (has('act_mesh')) {
-    mesh = await runAgentMeshCrossCheck(ai, p, docs, { level: levelMax })
+    mesh = await runAgentMeshCrossCheck(ai, projectForPrompt(org, user, p, false), docs, { level: levelMax })
     db.put('kvstate', { id: `mesh_${p.id}`, docSig: docs.map(d => d.id).join(','), savedAt: Date.now(), ...mesh }, { actor: user, reason: '交叉核对底稿口径', action: 'harness.mesh' })
     mark('act_mesh', mesh.engine ? 'done' : 'skipped', mesh.engine
       ? `${mesh.engine}：${mesh.conflicts.length ? `找到 ${mesh.conflicts.length} 处说法不一致（${mesh.conflicts.map(c => c.topic).join('、')}）` : '没有发现说法不一致的地方'}${mesh.numCheck?.unmatched?.length ? `；核对结论里有 ${mesh.numCheck.unmatched.length} 处数字在底稿里没找到` : ''}`

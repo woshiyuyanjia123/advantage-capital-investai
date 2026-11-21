@@ -17,14 +17,26 @@ export async function loadFlowBoard(projectId) {
   if (!pid) return
   S.sel = pid
   fb.loading = true
-  const [projData, boardData] = await Promise.all([
-    get('project', { id: pid }),
-    get('nb.flow.board', { projectId: pid }),
-  ])
-  S.project = projData
-  if (fb.projectId !== pid) { fb.pickedArt = null; fb.pickedWork = null }
-  fb.projectId = pid
-  fb.data = boardData
+  fb.error = null
+  let boardData
+  try {
+    const [projData, nextBoard] = await Promise.all([
+      get('project', { id: pid }),
+      get('nb.flow.board', { projectId: pid }),
+    ])
+    boardData = nextBoard
+    S.project = projData
+    if (fb.projectId !== pid) { fb.pickedArt = null; fb.pickedWork = null }
+    fb.projectId = pid
+    fb.data = boardData
+  } catch (err) {
+    fb.projectId = pid
+    fb.data = null
+    fb.error = err.message || '无权查看该项目或加载失败'
+    fb.loading = false
+    if (S.view === 'flowboard') renderFlowBoard($('#view'))
+    return
+  }
   const arts = boardData.artifacts?.items ?? []
   if (S.fbPickArtName) {
     fb.pickedArt = arts.find(a => a.name === S.fbPickArtName) ?? fb.pickedArt
@@ -55,6 +67,11 @@ export function renderFlowBoard(v) {
     return
   }
   if (!S.sel || !projs.some(x => x.id === S.sel)) S.sel = projs[0].id
+  if (fb.error && fb.projectId === S.sel) {
+    const dp = D()?.deptProfile
+    v.innerHTML = `<div class="page"><div class="nb-empty-ws">${icon('lock', 26)}<h2>无法进入该项目门禁</h2><p class="dim">${esc(fb.error)}</p><div class="row" style="gap:8px;justify-content:center;margin-top:14px"><button class="btn pri" data-act="go" data-view="workbench">返回${esc(dp?.workspaceTitle || '本部门操作台')}</button></div></div></div>`
+    return
+  }
   if (!fb.data || fb.projectId !== S.sel) {
     v.innerHTML = '<div class="nb-loading"><span class="spin"></span></div>'
     loadFlowBoard(S.sel)
@@ -96,7 +113,7 @@ function renderArtSubmitCol(p, b, sel) {
       <label class="nb-check"><input type="checkbox" class="ck" id="fbAutoFin">直接确认定稿</label>
       <div class="row"><button class="btn sm grow" data-act="nb-studio-ppt" data-p="${p.id}">${icon('slides', 13)}路演 PPT</button>
         <button class="btn sm grow" data-act="nb-studio-word" data-p="${p.id}">${icon('doc', 13)}尽调文书</button></div>
-      <button class="btn pri nb-submit" data-act="fb-submit-now" data-p="${p.id}">${icon('check', 14)}报送</button>
+      <button class="btn pri nb-submit" data-act="fb-submit-now" data-p="${p.id}" ${can('deliverable.edit') ? '' : 'disabled title="当前岗位无「编辑成果」权限，不可报送新版本"'}>${icon('check', 14)}报送</button>
     </div>
   </section>`
 }
@@ -149,12 +166,17 @@ function renderWorkNode(w) {
       ${(!dl || dl.status !== 'final') && w.assignee ? `<button class="btn sm ghost" data-act="fb-nudge" data-p="${S.sel}" data-w="${w.id}" title="向负责人或复核人发送站内与群消息催办提醒">催办</button>` : ''}
       ${dl && dl.status === 'draft' && dl.v ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.submit" data-d="${dl.id}" ${off(P.submit)}>提请复核</button>` : ''}
       ${dl && dl.status === 'review' ? `<button class="btn sm" data-act="fb-node-act" data-op="deliverable.finalize" data-d="${dl.id}" ${off(P.finalize)}>确认定稿</button>` : ''}
-      <button class="btn sm go" data-act="fb-slot-sub" data-w="${w.id}" data-t="${esc(w.type)}" ${fb.pickedArt ? '' : 'disabled'}>报送至此</button>
+      <button class="btn sm go" data-act="fb-slot-sub" data-w="${w.id}" data-t="${esc(w.type)}" ${fb.pickedArt && can('deliverable.edit') ? '' : `disabled title="${can('deliverable.edit') ? '请先在左栏选择一份工作成果' : '当前岗位无「编辑成果」权限'}"`}>报送至此</button>
     </div></div>`
 }
 
 const SCOPE = { own: '本人', dept: '本部门', assigned: '指定授权', postinv: '投后', all: '全机构' }
 const CATEGORY = { amount: '金额', valuation: '估值', terms: '条款', fund_lp: 'LP 信息', trade_secret: '商业秘密' }
+const OP_LABEL = {
+  'op.start.authorize': '项目启动授权', 'op.pm.confirm': '经理确认', 'op.material.finalize': '材料定稿',
+  'op.meeting.decide': '会议决策（表决）', 'op.invest.approve': '投资审批', 'op.trade.confirm': '交割确认',
+  'op.exit.approve': '退出审批', 'op.archive.confirm': '归档确认',
+}
 const LEVEL = ['公开', '内部', '机密', '绝密']
 
 const FB_OUTCOME_LABEL = { pass: '同意', hold: '继续持有', return: '退回补充', reject: '否决' }
@@ -178,14 +200,14 @@ function renderPermissionCol(x, p, b) {
       </div>
       ${lacking.length ? `<div class="nb-lack" id="fbLack">${lacking.map(i => `<div><b class="ell">${esc(i.work)}</b><span>${esc(i.why || i.status || '待定稿')}</span></div>`).join('')}</div>` : ''}
       <header class="nb-pane-hd sticky"><b>岗位</b><span class="n">${esc(caps.roleNames.join('、'))}</span></header>
-      ${b.users.slice(0, 8).map(u => saasStatic
+      <div style="max-height:220px;overflow:auto">${b.users.map(u => saasStatic
         ? `<div class="nb-role ${u.id === d.me.id ? 'on' : ''}"><i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></div>`
-        : `<button class="nb-role ${u.id === d.me.id ? 'on' : ''}" data-act="fb-switch-user" data-u="${u.id}"><i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></button>`).join('')}
+        : `<button class="nb-role ${u.id === d.me.id ? 'on' : ''}" data-act="fb-switch-user" data-u="${u.id}"><i></i><b>${esc(u.name)}</b><span class="grow ell">${esc(u.title)}</span></button>`).join('')}</div>
       <header class="nb-pane-hd sticky"><b>权限</b></header>
       <div class="kv nb-kv">
         <div><span>数据范围</span><b>${esc(caps.scopes.map(s => SCOPE[s] ?? s).join('、'))}</b></div>
         <div><span>底稿密级</span><b>${esc(LEVEL[caps.clearance] ?? caps.clearance)}及以下</b></div>
-        <div><span>业务操作</span><b>${esc(caps.ops.length ? caps.ops.join('、') : '起草和报送')}</b></div>
+        <div><span>业务操作</span><b>${esc(caps.ops.length ? caps.ops.map(o => OP_LABEL[o] ?? o).join('、') : (can('deliverable.edit') ? '起草和报送' : '审阅与协同'))}</b></div>
         <div><span>敏感字段</span><b>${esc(caps.categories.length ? caps.categories.map(c => CATEGORY[c] ?? c).join('、') : '已脱敏')}</b></div>
       </div>
     </div>
@@ -216,7 +238,23 @@ Object.assign(ACT, {
     await ACT['fb-submit-now']({ dataset: { p: S.sel } })
   },
   'fb-node-act': async el => { if (await act(el.dataset.op, { id: el.dataset.d }, '工作项状态已更新')) await again() },
-  'fb-switch-user': async el => { if (await act('persona', { userId: el.dataset.u }, '已切换岗位')) await again() },
+  'fb-switch-user': async el => {
+    const prevSel = S.sel
+    if (!await act('persona', { userId: el.dataset.u })) return
+    S.deptWs = null; S.chat = []; S.project = null; S.sel = null; S.ctx.fileIds = []; fb.data = null; fb.projectId = null; fb.error = null
+    await hooks.reload()
+    const visible = D()?.projects ?? []
+    const dp = D()?.deptProfile
+    if (prevSel && visible.some(p => p.id === prevSel)) {
+      S.sel = prevSel
+      await loadFlowBoard(prevSel)
+      toast(`已切换至 ${D().me.name}（${dp?.deptName || ''}）`, 'ok')
+    } else {
+      S.sel = visible[0]?.id ?? null
+      hooks.go('workbench')
+      toast(`已切换至 ${D().me.name}（${dp?.deptName || ''}），无权访问原项目已返回本部门操作台`, 'ok')
+    }
+  },
   // 准入没满足时不发请求，直接说还差哪几项
   'fb-gate': async el => {
     const rd = fb.data?.readiness

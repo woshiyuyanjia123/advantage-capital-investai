@@ -8,10 +8,10 @@ import { computeFlowMetrics } from './nb-flow.mjs'
 
 const BT_NAME = Object.fromEntries(BUSINESS_TYPES.map(b => [b.id, b.name]))
 
-/** 唯一全内容权限判定：仅管理层 / 合伙人 */
+/** 唯一全内容权限判定：仅企业管理层 / 合伙人岗位（防止管理层部门新增非合伙人助理越权） */
 export function isExecutiveUser(user) {
   if (!user) return false
-  return (user.roles ?? []).includes('partner') || user.deptId === 'd_mgmt'
+  return (user.roles ?? []).includes('partner')
 }
 
 /** 根据部门 ID、岗位及部门名称（兼容批量导入的新建部门）映射专属工作空间类型 */
@@ -362,14 +362,17 @@ function buildDeptWorkQueue({ db, org, engine, guideFn }, user, key, visibleProj
   }
 
   const userMap = new Map(db.all('users').map(u => [u.id, u.name]))
+  const canEdit = org.can(user, 'deliverable.edit')
   for (const p of active) {
     const wf = engine.def(p)
     const curStage = wf?.stages?.find(s => s.id === p.stageId)
+    const stageRoleMap = new Map((wf?.stages ?? []).flatMap(st => (st.works ?? []).map(sw => [`${st.id}:${sw.work}`, sw.role ?? 'pm'])))
     for (const w of p.works ?? []) {
       const d = w.deliverableId ? db.get('deliverables', w.deliverableId) : null
       if (w.status === 'done' || d?.status === 'final') continue
       const isMine = w.assignee === user.id
-      const matchesDeptWork = focusTypes.has(w.type) || (w.role && focusRoles.has(w.role))
+      const wRole = w.role || stageRoleMap.get(`${w.stageId}:${w.type}`) || ''
+      const matchesDeptWork = focusTypes.has(w.type) || (wRole && focusRoles.has(wRole))
       if (!isMine && !matchesDeptWork && key !== 'executive') continue
       if (key === 'executive' && !w.required) continue
       if (w.stageId !== p.stageId && !isMine) continue
@@ -381,7 +384,7 @@ function buildDeptWorkQueue({ db, org, engine, guideFn }, user, key, visibleProj
         title: `${w.type}${d ? `（${d.status === 'review' ? '待审核' : '草稿'} v${d.versions.length}）` : '（待起草）'}`,
         sub: `${curStage?.name ?? ''} · 负责人 ${userMap.get(w.assignee) ?? '未指派'}`,
         action: d?.status === 'review' ? 'nb-flowboard' : 'nb-enter',
-        actionLabel: d?.status === 'review' ? '去门禁' : '去办理',
+        actionLabel: d?.status === 'review' ? '去门禁' : (canEdit ? '去办理' : '查看研判'),
       })
     }
   }
@@ -498,7 +501,7 @@ function buildModulesForDept(key, user, org, visibleProjects) {
     ],
     it: [
       { id: 'it-onboard', layer: '系统治理', icon: 'building', title: '企业开箱落地与批量建号', desc: '检查 6 项上线就绪度，CSV 一键批量导入部门与员工账号', act: 'enterprise-open', tone: 'accent' },
-      { id: 'it-roles', layer: '权限治理', icon: 'shield', title: '四层权限与密级规则配置', desc: '维护 10 类岗位数据范围、业务操作、敏感字段与资料密级上限', act: 'go', view: 'settings', sub: 'roles', tone: 'blue' },
+      { id: 'it-roles', layer: '权限治理', icon: 'shield', title: '四层权限与密级规则配置', desc: '维护全机构各类岗位数据范围、业务操作、敏感字段与资料密级上限', act: 'go', view: 'settings', sub: 'roles', tone: 'blue' },
       { id: 'it-models', layer: '模型治理', icon: 'bot', title: '多模型安全路由配置', desc: '配置混合/本地/外部大模型连接与机密资料离线防外发阈值', act: 'nb-api', tone: 'amber' },
       { id: 'it-wf', layer: '流程治理', icon: 'flow', title: '业务流程版本编排与审计', desc: '可视化编排财投/产投工作流版本，查看操作审计与快照回滚', act: 'go', view: 'settings', sub: 'workflow', tone: 'muted' },
     ],
@@ -618,7 +621,7 @@ export function getNavBadges({ db, org, kb }, user) {
   const myTasks = db.find('tasks', t => !t.done && t.owner === user.id).length
   return {
     activeProjects: activeVisible.length,
-    kbFiles: kb ? kb.files().filter(f => kb.visible(user, f)).length : 0,
+    kbFiles: kb ? kb.files().filter(f => !f.rel.includes('/.versions/') && kb.visible(user, f)).length : 0,
     pendingApprovals: isExec ? pendingAll.length : myVotes,
     myVotes,
     deptQueue: myVotes + myReviews + myTasks,
@@ -641,7 +644,7 @@ export async function buildDeptWorkspace({ db, org, engine, kb, guideFn, readine
   const systemHealth = key === 'it' && readinessFn ? await readinessFn() : null
 
   const industrialPhases = (key === 'industrial' || key === 'executive')
-    ? INDUSTRIAL_PHASES.map(ph => ({ ...ph, projects: progressBoard.filter(p => p.businessType === 'industrial' && ph.stageIds.includes(p.stageId)) }))
+    ? INDUSTRIAL_PHASES.map(ph => ({ ...ph, projects: progressBoard.filter(p => p.businessType === 'industrial' && p.status === 'active' && ph.stageIds.includes(p.stageId)) }))
     : null
 
   const financialFunnel = (key === 'financial' || key === 'executive')
@@ -712,7 +715,7 @@ export async function buildDeptWorkspace({ db, org, engine, kb, guideFn, readine
     ],
     it: () => [
       { label: '企业开箱就绪度', value: `${systemHealth?.scorePct ?? 0}%`, sub: `${systemHealth?.readyCount ?? 0}/${systemHealth?.totalCount ?? 6} 项已就绪`, tone: (systemHealth?.scorePct ?? 0) >= 80 ? 'real' : 'amber' },
-      { label: '机构在册人员', value: db.all('users').filter(u => !u.disabled).length, sub: `${db.all('depts').length} 个部门 · 10 类岗位`, tone: 'blue' },
+      { label: '机构在册人员', value: db.all('users').filter(u => !u.disabled).length, sub: `${db.all('depts').length} 个部门 · ${db.all('roles').length} 类岗位`, tone: 'blue' },
       { label: '已发布流程版本', value: db.all('workflows').filter(w => w.status === 'published').length, sub: '支持多业务线版本化', tone: 'accent' },
       { label: '全院项目进度数', value: activeProgress.length, sub: '敏感业务底稿合规隔离', tone: '' },
     ],

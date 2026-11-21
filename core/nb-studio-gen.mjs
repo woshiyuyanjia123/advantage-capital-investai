@@ -41,6 +41,19 @@ export function withStage(db, p) {
   return name ? Object.defineProperty({ ...p }, 'stage', { value: name, enumerable: false }) : p
 }
 
+export function projectForPrompt(org, user, p, external = false) {
+  if (!p || !org) return p
+  const fields = {}
+  for (const [k, v] of Object.entries(p.fields ?? {})) {
+    const cat = org.fieldCategory('project', k)
+    if (!cat || (!external && org.canCategory(user, cat))) fields[k] = v
+  }
+  const desc = external ? org.redactAll(p.desc ?? '') : org.redact(user, p.desc ?? '')
+  const out = { ...p, fields, desc }
+  if (p.stage) Object.defineProperty(out, 'stage', { value: p.stage, enumerable: false })
+  return out
+}
+
 /** 读出勾选的底稿（没勾选时用项目的全部底稿），返回正文和其中最高的密级。成品自己不算底稿。 */
 export async function gatherDocs({ kb, org }, user, p, fileIds) {
   let allFiles = kb.list(user, { projectId: p.id }).filter(f => !f.rel.includes('/.versions/'))
@@ -66,29 +79,34 @@ export async function gatherDocs({ kb, org }, user, p, fileIds) {
 }
 
 export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, user, p, b) {
+  org.assert(user, 'deliverable.edit')
   p = withStage(db, p)
+  const pSafe = projectForPrompt(org, user, p, false)
   const kind = String(b.kind || 'ppt')
   const theme = String(b.theme || 'mck')
   const pageCount = Math.max(4, Math.min(24, Number(b.pageCount) || 8))
   const density = ['concise', 'standard', 'dense'].includes(b.density) ? b.density : 'standard'
   const { docs, levelMax } = await gatherDocs({ kb, org }, user, p, b.fileIds)
   if (!docs.length) throw Object.assign(new Error('所选底稿里没有读到文字，无法生成成果。请确认底稿已上传并解析完成。'), { status: 400 })
-  const G = prepareSources(p, docs)
+  const G = prepareSources(pSafe, docs)
   const route = await ai?.route?.(levelMax).catch(e => ({ adapter: null, reason: e.message })) ?? { adapter: null, reason: '未配置模型' }
+  const isExt = route.route === 'external'
+  const pForModel = isExt ? projectForPrompt(org, user, p, true) : pSafe
+  const docsForModel = isExt ? docs.map(d => ({ ...d, text: org.redactAll(d.text) })) : docs
   const ws = db.one('mounts', x => x.kind === 'workspace')
   const stamp = new Date().toISOString().slice(0, 10)
-  const save = (fileName, buffer, meta) => writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName, buffer, kind, sourceCount: docs.length, ...meta })
+  const save = (fileName, buffer, meta) => writeProjectArtifact({ db, kb, dir: ws.path }, user, p, { fileName, buffer, kind, sourceCount: docs.length, level: Math.max(1, levelMax), ...meta })
   const describe = (engine, note) => engine ? `${engine} 撰写` : `底稿摘编（${note}）`
 
   if (kind === 'ppt') {
     let deck = null, engine = '', note = route.adapter ? '' : route.reason, issues = []
     if (route.adapter) {
       try {
-        const r = await authorDeck(route.adapter, p, docs, { pageCount, density, prompt: b.prompt })
+        const r = await authorDeck(route.adapter, pForModel, docsForModel, { pageCount, density, prompt: b.prompt })
         deck = r.deck; issues = r.issues; engine = route.label
       } catch (e) { note = `模型撰稿失败：${e.message}` }
     }
-    if (!deck) deck = buildOfflineDeck(p, G, { pageCount })
+    if (!deck) deck = buildOfflineDeck(pSafe, G, { pageCount })
     deck.sources = G.sources
     deck.kicker ||= [p.stage, p.fields?.round].filter(Boolean).join(' · ')
     const check = checkNumbers(deckText(deck), G.corpus)
@@ -111,11 +129,11 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     let md = '', engine = '', note = route.adapter ? '' : route.reason, issues = []
     if (route.adapter) {
       try {
-        const r = await authorReport(route.adapter, p, docs, { type, chapters, density, prompt: [memo ? MEMO_PROMPT : '', b.prompt].filter(Boolean).join('\n') })
+        const r = await authorReport(route.adapter, pForModel, docsForModel, { type, chapters, density, prompt: [memo ? MEMO_PROMPT : '', b.prompt].filter(Boolean).join('\n') })
         md = r.markdown; issues = r.issues; engine = route.label
       } catch (e) { note = `模型撰稿失败：${e.message}` }
     }
-    if (!md) md = buildComprehensiveMarkdown(p, memo ? '投资备忘录（底稿摘编，结论待投资经理填写）' : type, docs)
+    if (!md) md = buildComprehensiveMarkdown(pSafe, memo ? '投资备忘录（底稿摘编，结论待投资经理填写）' : type, docs)
     const check = checkNumbers(md, G.corpus)
     const title = md.match(/^#\s+(.+)$/m)?.[1] ?? `${p.name} ${type}`
     const buf = await renderDocx({ title, subtitle: `${engine ? `${engine} 依据 ${docs.length} 份底稿撰写` : `${docs.length} 份底稿的原文摘编`} · ${stamp}`, markdown: md.replace(/^#\s+.+\n+/, ''), footer: checkLine(check) + (check.unmatched.length ? `：${check.unmatched.slice(0, 8).map(u => u.value).join('、')}` : '') })
@@ -130,7 +148,7 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
     let aiSheet = null, engine = '', note = route.adapter ? '' : route.reason
     if (route.adapter) {
       try {
-        aiSheet = await authorTable(route.adapter, p, docs, { prompt: b.prompt })
+        aiSheet = await authorTable(route.adapter, pForModel, docsForModel, { prompt: b.prompt })
         engine = route.label
       } catch (e) { note = `模型制表失败：${e.message}` }
     }
@@ -160,7 +178,7 @@ export async function generateStudioArtifact({ db, kb, org, deliverables, ai }, 
   }
 
   const label = INTERACTIVE[kind] ?? '专项成果'
-  const r = await buildInteractive(kind, p, docs, G, route, { prompt: b.prompt })
+  const r = await buildInteractive(kind, pForModel, docsForModel, G, route, { prompt: b.prompt })
   const check = checkNumbers(r.text, G.corpus)
   return save(`${p.name}_${label}_${stamp}.html`, Buffer.from(r.html, 'utf8'), { summary: `${label} · ${describe(r.engine, r.note)} · ${checkLine(check)}`, engine: r.engine || '底稿摘编', engineNote: r.note, check })
 }

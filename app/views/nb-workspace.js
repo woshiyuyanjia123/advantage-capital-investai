@@ -237,15 +237,16 @@ function renderRightPane(x, p) {
   const arts = x.artifacts?.items ?? []
   const making = S.makingStudio
   const cfg = studioCfg()
+  const canEdit = can('deliverable.edit')
   return `<section class="nb-pane nb-right">
     <header class="nb-pane-hd"><b>成果编制</b><span class="n">用 <span data-src-n>${S.ctx.fileIds.length}</span> 份底稿</span><span class="grow"></span>
-      <button class="btn sm pri" data-act="nb-harness-open" data-p="${p.id}">成套制作</button>
+      <button class="btn sm pri" data-act="nb-harness-open" data-p="${p.id}" ${canEdit ? '' : 'disabled title="当前岗位无「编辑成果」权限，仅供审阅与决策"'}>成套制作</button>
       <button class="btn sm ghost" data-act="nb-arch-open" data-p="${p.id}">状态</button>
-      <button class="btn sm ghost" data-act="nb-dify-open" data-p="${p.id}">模板</button></header>
+      <button class="btn sm ghost" data-act="nb-dify-open" data-p="${p.id}" ${canEdit ? '' : 'disabled title="当前岗位无「编辑成果」权限"'}>模板</button></header>
     <div class="nb-studio">${(() => {
       const pref = new Set(D()?.deptProfile?.workspaceHints?.preferredStudio ?? [])
       const ordered = [...STUDIO.filter(([k]) => pref.has(k)), ...STUDIO.filter(([k]) => !pref.has(k))]
-      return ordered.map(([k, ic, l]) => `<button class="nb-make ${pref.has(k) ? 'pref' : ''} ${making?.k === k ? 'busy' : ''}" data-act="nb-make" data-p="${p.id}" data-k="${k}" data-l="${l}" ${making ? 'disabled' : ''}>${pref.has(k) ? '<i class="pref-tag">推荐</i>' : ''}${icon(ic, 18)}<span>${l}</span></button>`).join('')
+      return ordered.map(([k, ic, l]) => `<button class="nb-make ${pref.has(k) ? 'pref' : ''} ${making?.k === k ? 'busy' : ''}" data-act="nb-make" data-p="${p.id}" data-k="${k}" data-l="${l}" ${making || !canEdit ? `disabled title="${canEdit ? '' : '当前岗位为审阅/决策权限，不能直接编制覆盖成果'}"` : ''}>${pref.has(k) ? '<i class="pref-tag">推荐</i>' : ''}${icon(ic, 18)}<span>${l}</span></button>`).join('')
     })()}</div>
     <div class="nb-cfg ${S.showStudioCfg ? 'open' : ''}">
       <button class="nb-cfg-hd" data-act="nb-cfg-toggle"><span>规格</span><b class="grow" data-cfg-sum>${cfgLine(cfg)}</b>${icon('chev', 13)}</button>

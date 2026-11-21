@@ -50,21 +50,84 @@ export class KB {
     return rules.find(r => path.includes(r.pattern))?.level ?? 1
   }
 
-  /** 资料关联的公司（目录名 = 公司简称，位于「项目资料/」或项目工作区根下）。 */
-  companyFor(f) {
-    const parts = f.rel.split('/')
-    const short = f.mountId === 'm_ws' ? parts[0] : parts[parts.indexOf('项目资料') + 1]
-    if (!short || (f.mountId !== 'm_ws' && !parts.includes('项目资料'))) return null
-    return this.db.one('companies', c => c.short === short || c.name === short)
+  /** 资料关联的项目（优先匹配 项目专属文件夹/<名>_<projectId>、项目资料/<项目名>、m_ws/<项目名>、会议录音/<公司或项目>）。 */
+  projectFor(f) {
+    if (!f?.rel) return null
+    const parts = String(f.rel).split('/')
+    const safeName = s => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim()
+    // 1) m_ws/项目专属文件夹/<name>_<projectId>/...
+    const folderIdx = parts.indexOf('项目专属文件夹')
+    if (folderIdx >= 0 && parts[folderIdx + 1]) {
+      const m = /_(p_[a-f0-9]+)$/.exec(parts[folderIdx + 1])
+      if (m) {
+        const p = this.db.get('projects', m[1])
+        if (p) return p
+      }
+      const prefix = parts[folderIdx + 1].replace(/_p_[a-f0-9]+$/, '')
+      const byName = this.db.one('projects', p => p.name === prefix || safeName(p.name) === prefix)
+      if (byName) return byName
+    }
+    // 2) 项目资料/<dir>/... 或 m_ws/<dir>/...
+    const seg = f.mountId === 'm_ws'
+      ? (parts[0] === '项目专属文件夹' ? null : parts[0])
+      : (parts.includes('项目资料') ? parts[parts.indexOf('项目资料') + 1] : null)
+    if (seg) {
+      const byProj = this.db.one('projects', p => p.name === seg || safeName(p.name) === seg)
+      if (byProj) return byProj
+    }
+    // 3) 会议录音/<short>/... 或 会议录音/<short>-xxx
+    const recIdx = parts.indexOf('会议录音')
+    if (recIdx >= 0 && parts[recIdx + 1]) {
+      const next = parts[recIdx + 1]
+      const stem = next.split(/[-_—·.]/)[0]
+      const byProj = this.db.one('projects', p => p.name === next || p.name.startsWith(stem))
+      if (byProj) return byProj
+    }
+    return null
   }
 
-  /** 权限：密级 + 项目范围。 */
+  /** 资料关联的公司（目录名 = 公司简称，位于「项目资料/」「项目工作区」「项目专属文件夹」「会议录音/」）。 */
+  companyFor(f) {
+    if (!f?.rel) return null
+    const parts = String(f.rel).split('/')
+    const safeName = s => String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim()
+    const matchComp = s => s ? this.db.one('companies', c => c.short === s || c.name === s || safeName(c.short) === s || safeName(c.name) === s) : null
+    if (parts.includes('项目专属文件夹')) {
+      const p = this.projectFor(f)
+      return p?.companyId ? this.db.get('companies', p.companyId) : null
+    }
+    if (parts.includes('会议录音')) {
+      const next = parts[parts.indexOf('会议录音') + 1]
+      if (!next) return null
+      return matchComp(next) ?? matchComp(next.split(/[-_—·.]/)[0]) ?? null
+    }
+    const short = f.mountId === 'm_ws' ? parts[0] : (parts.includes('项目资料') ? parts[parts.indexOf('项目资料') + 1] : null)
+    return matchComp(short)
+  }
+
+  /** 是否属于项目/会议受限空间（未匹配到明确项目或公司时也不得默认对低权限全放行）。 */
+  isProjectScoped(f) {
+    if (!f?.rel) return false
+    return f.mountId === 'm_ws' || /(?:^|\/)(?:项目资料|项目专属文件夹|会议录音)(?:\/|$)/.test(f.rel)
+  }
+
+  /** 权限：资料查看功能权限 + 密级 + 项目数据范围（严格隔离未授权项目底稿、成品夹与会议录音）。 */
   visible(user, f) {
-    if (!f || !this.org.canLevel(user, f.level ?? 1)) return false
+    if (!f) return false
+    if (user && !this.org.can(user, 'material.view')) return false
+    if (!this.org.canLevel(user, f.level ?? 1)) return false
+    const p = this.projectFor(f)
+    if (p) return this.org.seesProject(user, p)
     const c = this.companyFor(f)
-    if (!c) return true
-    const ps = this.db.find('projects', p => p.companyId === c.id)
-    return !ps.length || ps.some(p => this.org.seesProject(user, p))
+    if (c) {
+      const ps = this.db.find('projects', x => x.companyId === c.id)
+      return !ps.length || ps.some(x => this.org.seesProject(user, x))
+    }
+    if (this.isProjectScoped(f)) {
+      const scopes = this.org.effective(user)?.scopes ?? []
+      return scopes.includes('all')
+    }
+    return true
   }
 
   async mountsView() {

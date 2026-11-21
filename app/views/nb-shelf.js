@@ -60,11 +60,12 @@ function renderFlowDrawer(p, fresh) {
     <aside class="nb-plug">
       <div class="nb-fd-hd"><span class="nb-lab">成果报送</span><span class="grow"></span>
         <button class="lnk" data-act="nb-flowboard" data-p="${p.id}">阶段门禁与投决 ›</button></div>
-      ${plug('pri', 'nb-plug-sub', 'data-ch="plugin-draft"', 'bot', 'AI 辅助起草并报送')}
-      ${plug('', 'nb-plug-upload', '', 'upload', '上传正式成果文件')}
-      ${chk ? plug('', 'nb-plug-sub', `data-d="${chk.id}" data-ch="local-checkin"`, 'check', `回传本地修订件 · ${esc(chk.type)}`) : ''}
-      ${rev ? plug('', 'nb-plug-sub', `data-d="${rev.id}" data-ch="review-submit"`, 'check', `提请复核 · ${esc(rev.type)}`) : ''}
-      ${f.readinessOk ? plug('', 'nb-plug-sub', 'data-ch="gate-submit"', 'vote', '提请决策节点表决') : ''}
+      ${can('deliverable.edit') ? plug('pri', 'nb-plug-sub', 'data-ch="plugin-draft"', 'bot', 'AI 辅助起草并报送') : ''}
+      ${can('deliverable.edit') ? plug('', 'nb-plug-upload', '', 'upload', '上传正式成果文件') : ''}
+      ${chk && can('deliverable.edit') ? plug('', 'nb-plug-sub', `data-d="${chk.id}" data-ch="local-checkin"`, 'check', `回传本地修订件 · ${esc(chk.type)}`) : ''}
+      ${rev && can('deliverable.review') ? plug('', 'nb-plug-sub', `data-d="${rev.id}" data-ch="review-submit"`, 'check', `提请复核 · ${esc(rev.type)}`) : ''}
+      ${f.readinessOk && can('project.submit') ? plug('', 'nb-plug-sub', 'data-ch="gate-submit"', 'vote', '提请决策节点表决') : ''}
+      ${!can('deliverable.edit') ? '<div class="dim" style="font-size:11.5px;padding:6px 2px">当前岗位为审阅 / 决策视角，请点上方「阶段门禁与投决」查看表决或审核节点。</div>' : ''}
       ${f.submissions?.[0] ? `<div class="nb-last ell" title="${esc(f.submissions[0].summary)}">最近报送：${esc(f.submissions[0].summary)}</div>` : ''}
     </aside>
   </div>`
@@ -386,7 +387,7 @@ function renderSignatureSection(d, dp, ws) {
     const items = sh?.items ?? []
     return `<section class="dp-sec dp-sig">
       <div class="dp-sec-hd"><h2>企业开箱就绪体检（${sh?.readyCount ?? 0}/${sh?.totalCount ?? 6} 项就绪 · ${sh?.scorePct ?? 0}%）</h2><span class="dim">系统配置、权限矩阵、多模型安全路由与审计合规健康度</span></div>
-      <div class="dp-firewall">${icon('lock', 15)}<span><b>IT 运维与业务底稿隔离策略：</b>信息技术部负责组织架构、权限规则、流程版本与模型路由维护，不穿透查看未授权项目的敏感商业底稿，仅同步查看全院脱敏项目进度。</span></div>
+      <div class="dp-firewall">${icon('lock', 15)}<span><b>IT 运维与业务底稿隔离策略：</b>信息技术部负责组织架构、权限规则、流程版本、审计回滚与模型路由维护（可恢复误删项目壳），无资料查看与敏感字段权限，全院业务底稿正文与金额/估值/条款严格隔离。</span></div>
       <div class="dp-health-grid">${items.map(it => {
         const navParts = it.nav ? String(it.nav).split(':') : []
         const actionAttr = it.act
@@ -678,7 +679,7 @@ Object.assign(ACT, {
     const dept = ws?.executive?.departments?.find(x => x.id === el.dataset.dept)
     if (!dept) return
     drawer(`${drawerHead(`${dept.name} · 管理层巡检`, `${dept.workspaceTitle} · 在编 ${dept.headCount} 人 · 平均进度 ${dept.avgProgress}%`)}
-      <div class="dbody">
+      <div class="body">
         <div class="dp-sec-hd" style="margin-bottom:8px"><h3>部门人员（${dept.headCount}）</h3></div>
         <div class="chips" style="margin-bottom:16px">${dept.members.map(m => `<span class="tag">${esc(m.name)} · ${esc(m.title)}</span>`).join('') || '<span class="dim">暂无成员</span>'}</div>
         <div class="dp-sec-hd" style="margin-bottom:8px"><h3>关联项目与敏感要素（${dept.projects.length}）</h3></div>

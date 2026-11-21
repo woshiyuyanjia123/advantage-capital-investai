@@ -32,7 +32,7 @@ import { TYC_DIMENSIONS, runTianyanchaDueDiligence, tianyanchaConfigured } from 
 import { previewAnyArtifact, runAgentMeshCrossCheck } from './nb-agent-mesh.mjs'
 import { planHarnessExecution, runHarnessPipeline, getHarnessStatus } from './nb-harness.mjs'
 import { ingestTextSource, ingestUrlSource, quickCreateProjectWithSources, buildOaInbox, nudgeProjectAction, buildProjectHandover, getEnterpriseReadiness, batchImportUsers } from './nb-enterprise.mjs'
-import { getDeptProfile, getNavBadges, buildDeptWorkspace, buildExecutiveOverview, buildSanitizedProgressBoard } from './dept-workspace.mjs'
+import { isExecutiveUser, getDeptProfile, getNavBadges, buildDeptWorkspace, buildExecutiveOverview, buildSanitizedProgressBoard } from './dept-workspace.mjs'
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'"
 const ASSET = /^(?:views\/)?[a-z0-9-]+\.(?:html|css|js|svg)$/
@@ -109,7 +109,7 @@ export function createApi(ctx) {
     const pendingApp = db.one('approvals', a => a.projectId === p.id && a.status === 'pending')
     return { id: p.id, name: p.name, companyId: p.companyId, company: c?.short, industry: c?.industry, businessType: p.businessType, businessName: BUSINESS_TYPES.find(b => b.id === p.businessType)?.name, workflowId: p.workflowId, workflowVersion: wf?.version,
       stageId: p.stageId, stage: st?.name, stageKind: st?.kind, stageIndex: wf?.stages.findIndex(s => s.id === p.stageId), stageCount: wf?.stages.length, statusLabel: p.statusLabel, status: p.status, progress: p.progress,
-      owner: p.owner, ownerName: db.get('users', p.owner)?.name, deptId: p.deptId, members: p.members, grants: p.grants ?? [], tags: p.tags, desc: p.desc, fields: fieldView(user, p), updatedAt: p.updatedAt, createdAt: p.createdAt,
+      owner: p.owner, ownerName: db.get('users', p.owner)?.name, deptId: p.deptId, members: p.members, grants: p.grants ?? [], tags: p.tags, desc: org.redact(user, p.desc ?? ''), fields: fieldView(user, p), updatedAt: p.updatedAt, createdAt: p.createdAt,
       deliverables: dls.map(d => ({ id: d.id, type: d.type, format: d.format, status: d.status, v: d.versions.length, generating: !!d.generating, checkout: !!d.checkout })),
       flow: computeFlowMetrics(db, engine, p),
       pendingApproval: !!pendingApp,
@@ -146,7 +146,7 @@ export function createApi(ctx) {
         weekFinal: db.find('deliverables', d => d.status === 'final' && d.finalAt > week && ps.some(p => p.id === d.projectId)).length,
         pending: myTasks.filter(t => !t.done).length + db.find('approvals', a => a.status === 'pending' && a.voters.includes(user.id) && !a.votes.some(v => v.userId === user.id)).length,
         review: db.find('deliverables', d => d.status === 'review' && ps.some(p => p.id === d.projectId)).length,
-        kbFiles: kb.files().filter(f => kb.visible(user, f)).length,
+        kbFiles: kb.files().filter(f => !f.rel.includes('/.versions/') && kb.visible(user, f)).length,
         aiWeek: db.find('jobs', j => j.startedAt > week && j.status === 'done').length,
       },
       unread: db.find('notifications', n => n.userId === user.id && !n.read).length,
@@ -207,7 +207,7 @@ export function createApi(ctx) {
       comments: db.get('comments', p.id)?.list ?? [],
       tasks: db.find('tasks', t => t.projectId === p.id),
       notes: listNotes(db, p.id),
-      artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p),
+      artifacts: await listProjectArtifacts(db, db.one('mounts', x => x.kind === 'workspace')?.path ?? dir, p).then(a => ({ ...a, items: (a.items ?? []).filter(it => !it.fileId || !kb.file(it.fileId) || kb.visible(user, kb.file(it.fileId))) })),
       followUps: buildFollowUps(pv, lastUserQ, projectFiles(user, p).slice(0, 3).map(f => f.name), lastAiAns, lackingWorks),
       osState: getOsState(db, p),
       history: db.history('projects', p.id, 60),
@@ -256,7 +256,7 @@ export function createApi(ctx) {
       const md = slidesToMd(b.title || d.title, b.slides ?? [])
       return deliverables.saveText(user, d.id, md, b.note || '左上方 PPT 工坊本地修改保存')
     },
-    'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, meetings, settings: S() }, user, b),
+    'nb.asr': (user, b) => transcribeAudioLocal({ db, kb, org, meetings, settings: S() }, user, b),
     'nb.studio.make': (user, b) => generateStudioArtifact({ db, kb, org, deliverables, ai }, user, project(user, b.projectId), b),
     'nb.flow.submit': (user, b) => submitArtifactToNode({ db, kb, org, deliverables, lifecycle, dir: db.one('mounts', x => x.kind === 'workspace')?.path ?? dir }, user, project(user, b.projectId), b),
     'nb.harness.plan': (user, b) => planHarnessExecution({ db, kb, org, ai }, user, project(user, b.projectId), b),
@@ -272,10 +272,19 @@ export function createApi(ctx) {
     'nb.oa.nudge': (user, b) => nudgeProjectAction({ db, org, lifecycle, notify }, user, project(user, b.projectId), b),
     'nb.oa.handover': (user, b) => buildProjectHandover({ db, kb, org, engine }, user, project(user, b.projectId), b),
     'nb.enterprise.importUsers': (user, b) => batchImportUsers({ db, org, sessions, hashPassword, minPassword: SEC().minPassword, forceChange: SEC().forceChangeGenerated, mode }, user, b),
-    'nb.folder.open': (user, b) => {
+    'nb.folder.open': async (user, b) => {
+      if (mode === 'saas' && !process.env.INVESTAI_LOCAL_OFFICE) throw fail('SaaS 多人部署不支持在服务端打开本机文件夹，请在线预览或下载', 403)
       const p = project(user, b.projectId)
       const ws = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
-      return listProjectArtifacts(db, ws, p).then(a => openProjectFolderOrFile(b.filePath || a.folderPath))
+      const a = await listProjectArtifacts(db, ws, p)
+      let target = a.folderPath
+      if (b.filePath) {
+        const reqPath = normalize(String(b.filePath))
+        const allowed = new Set([a.folderPath, ...(a.items ?? []).map(x => x.fullPath), ...(a.diskFiles ?? []).map(x => x.fullPath)].filter(Boolean).map(x => normalize(x)))
+        if (!allowed.has(reqPath)) throw fail('仅允许打开当前项目专属文件夹内的已登记成品', 403)
+        target = reqPath
+      }
+      return openProjectFolderOrFile(target)
     },
 
     'project.create': (user, b) => projectView(user, engine.create(user, { name: b.name, companyId: b.companyId ?? createCompany(user, b), businessType: b.businessType ?? 'financial', fields: b.fields, tags: b.tags, desc: b.desc })),
@@ -351,7 +360,7 @@ export function createApi(ctx) {
     },
     'kb.fav': (user, b) => { const d = db.get('favs', user.id) ?? { id: user.id, list: [] }; const set = new Set(d.list); set.has(b.fileId) ? set.delete(b.fileId) : set.add(b.fileId); db.putQuiet('favs', { id: user.id, list: [...set] }); return { favs: [...set] } },
     'kb.level': async (user, b) => { org.assert(user, 'kb.mount'); const f = kb.file(b.id); if (!f) throw fail('文件不存在', 404); await kb.setLevel(b.id, Number(b.level)); db.putQuiet('audit', { id: randomBytes(6).toString('hex'), at: Date.now(), user: user.name, action: '调整资料密级', target: f.rel, detail: LEVELS[b.level] }); return { ok: true } },
-    'mount.rescan': (user, b) => { org.assert(user, 'material.upload'); return kb.scan(b.id) },
+    'mount.rescan': (user, b) => { if (!org.can(user, 'kb.mount')) org.assert(user, 'material.upload'); return kb.scan(b.id) },
     'mount.update': async (user, b) => {
       org.assert(user, 'kb.mount')
       let m = kb.mount(b.id) ?? { id: `m_${randomBytes(3).toString('hex')}`, name: String(b.name || '新挂载').slice(0, 30), kind: b.kind || 'local', path: '' }
@@ -363,11 +372,12 @@ export function createApi(ctx) {
     'extract.run': async (user, b) => { const r = await extractor.run(user, { projectId: b.projectId, schema: b.schema, fileIds: b.fileIds }); return { ...db.get('extractions', r.id) } },
     'extract.confirm': (user, b) => extractor.confirm(user, b.id, b),
     'extract.export': async (user, b) => {
-      const x = db.get('extractions', b.id)
-      project(user, x?.projectId)
+      const rawX = db.get('extractions', b.id)
+      project(user, rawX?.projectId)
+      const x = redactExtraction(user, rawX)
       const src = s => s ? `${s.path ?? ''}${s.page ? ` 第${s.page}页` : ''}` : ''
       let sheets
-      if (x.schema === 'bp') sheets = [{ name: x.name, columns: [{ header: '字段', key: 'k', width: 18 }, { header: '值', key: 'v', width: 48 }, { header: '状态', key: 's', width: 10 }, { header: '来源', key: 'src', width: 50 }], rows: x.rows.map(r => ({ k: r.key, v: { value: r.value ?? '缺失', source: src(r.source), flag: r.status === 'conflict' ? 'conflict' : r.status === 'missing' ? 'missing' : undefined }, s: { found: '已提取', missing: '缺失', conflict: '冲突', hidden: '受限' }[r.status], src: src(r.source) })) }]
+      if (x.schema === 'bp') sheets = [{ name: x.name, columns: [{ header: '字段', key: 'k', width: 18 }, { header: '值', key: 'v', width: 48 }, { header: '状态', key: 's', width: 10 }, { header: '来源', key: 'src', width: 50 }], rows: x.rows.map(r => ({ k: r.key, v: { value: r.status === 'hidden' ? '［已脱敏］' : (r.value ?? '缺失'), source: src(r.source), flag: r.status === 'conflict' ? 'conflict' : r.status === 'missing' ? 'missing' : undefined }, s: { found: '已提取', missing: '缺失', conflict: '冲突', hidden: '受限' }[r.status], src: src(r.source) })) }]
       else if (x.schema === 'financial') sheets = [{ name: '财务数据（亿元）', columns: [{ header: '指标', key: 'm', width: 18 }, ...x.fin.periods.map(p => ({ header: p, key: p, width: 14 }))], rows: x.fin.grid.map(g => ({ m: g.metric, ...Object.fromEntries(x.fin.periods.map(p => [p, g.cells[p] ? { value: Number(g.cells[p].yi.toFixed(4)), source: src(g.cells[p].source), flag: g.cells[p].conflict ? 'conflict' : undefined } : '—'])) })) }, { name: '衍生指标', columns: [{ header: '指标', key: 'metric' }, { header: '期间', key: 'period' }, { header: '数值', key: 'value' }], rows: x.fin.derived }]
       else sheets = [{ name: '尽调问题清单', columns: [{ header: '类别', key: 'category', width: 12 }, { header: '发现', key: 'finding', width: 60 }, { header: '严重度', key: 'severity', width: 8 }, { header: '状态', key: 'status', width: 10 }, { header: '来源', key: 'src', width: 40 }], rows: x.dd.map(r => ({ ...r, src: src(r.source) })) }]
       const buf = await renderXlsx({ title: `${db.get('projects', x.projectId).name} · ${x.name}`, sheets: sheets.map(s => ({ ...s, notes: ['标黄 = 缺失，标红 = 多源冲突；单元格批注为数据来源。所有数据须人工确认。'] })) })
@@ -569,6 +579,39 @@ export function createApi(ctx) {
     logout: (user, b, request) => { sessions.revoke(sidOf(request)); return json({ ok: true }, 200, { 'set-cookie': `investai_sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure(request)}` }) },
   }
 
+  function redactExtraction(user, x) {
+    if (!x) return x
+    const rows = Array.isArray(x.rows) ? x.rows.map(r => {
+      const cat = r.category ?? org.fieldCategory('company', r.key)
+      if (cat && !org.canCategory(user, cat)) return { key: r.key, status: 'hidden', value: null, category: cat, note: '敏感字段：当前岗位无权查看' }
+      return r
+    }) : x.rows
+    const dd = Array.isArray(x.dd) ? x.dd.map(r => ({ ...r, finding: org.redact(user, r.finding ?? '') })) : x.dd
+    return { ...x, rows, dd }
+  }
+  function redactProjectText(user, p, text) {
+    let out = org.redact(user, String(text ?? ''))
+    for (const [k, val] of Object.entries(p?.fields ?? {})) {
+      if (!val || org.canField(user, 'project', k)) continue
+      const sv = String(val).trim()
+      if (sv.length >= 2) out = out.split(sv).join('［已脱敏］')
+    }
+    return out
+  }
+  function redactPreview(user, p, parsed) {
+    if (!parsed) return parsed
+    const r = s => redactProjectText(user, p, s)
+    if (parsed.kind === 'html') return { ...parsed, content: r(parsed.content) }
+    if (parsed.kind === 'docx') return { ...parsed, paras: (parsed.paras ?? []).map(r) }
+    if (parsed.kind === 'pptx') return { ...parsed, slides: (parsed.slides ?? []).map(s => ({ ...s, title: r(s.title), bullets: (s.bullets ?? []).map(r), texts: (s.texts ?? []).map(r) })) }
+    if (parsed.kind === 'xlsx') return { ...parsed, sheets: (parsed.sheets ?? []).map(sh => ({ ...sh, rows: (sh.rows ?? []).map(row => row.map(r)) })) }
+    return parsed
+  }
+  function companyMetricsVisible(user, cid) {
+    const ps = db.find('projects', p => p.companyId === cid)
+    return !ps.length || ps.some(p => org.seesProject(user, p))
+  }
+
   function createCompany(user, b) {
     if (!b.companyName) return null
     org.assert(user, 'company.edit')
@@ -594,7 +637,7 @@ export function createApi(ctx) {
       return (db.get('chats', ai.chatKey(user.id, pid))?.messages ?? []).slice(-80).map(m => m.jobId ? { ...m, job: (() => { try { return ai.poll(m.jobId) } catch { return null } })() } : m)
     },
     job: (user, q) => { const j = ai.poll(q.get('id')); if (j.userId !== user.id) { if (!j.projectId) throw fail('无权查看他人的对话', 403); project(user, j.projectId) } return j },
-    files: (user, q) => kb.list(user, { mountId: q.get('mount') || undefined, q: q.get('q') || undefined, companyId: q.get('company') || undefined }).filter(f => !f.rel.includes('/.versions/')).map(f => ({ ...f, mount: kb.mount(f.mountId)?.name, company: kb.companyFor(f)?.short })),
+    files: (user, q) => kb.list(user, { mountId: q.get('mount') || undefined, q: q.get('q') || undefined, companyId: q.get('company') || undefined }).filter(f => !f.rel.includes('/.versions/')).map(f => ({ ...f, preview: org.redact(user, f.preview ?? ''), mount: kb.mount(f.mountId)?.name, company: kb.companyFor(f)?.short })),
     file: async (user, q) => { const r = await kb.read(q.get('id'), user); return { ...r, text: org.redact(user, r.text), level: LEVELS[r.file.level ?? 1] } },
     search: async (user, q) => {
       const term = (q.get('q') ?? '').trim()
@@ -602,17 +645,17 @@ export function createApi(ctx) {
       return {
         projects: visibleProjects(user).filter(p => [p.name, ...(p.tags ?? [])].some(x => String(x).includes(term))).slice(0, 8).map(p => ({ id: p.id, name: p.name, stage: projectView(user, p).stage })),
         files: (await kb.search(term, { user, limit: 8 })).map(r => ({ id: r.file.id, name: r.file.name, mount: kb.mount(r.file.mountId)?.name, snippet: org.redact(user, r.snippet) })),
-        companies: db.all('companies').filter(c => [c.name, c.short, c.industry].some(x => String(x).includes(term))).slice(0, 6).map(c => ({ id: c.id, name: c.name })),
+        companies: org.can(user, 'company.view') ? db.all('companies').filter(c => [c.name, c.short, c.industry].some(x => String(x).includes(term))).slice(0, 6).map(c => ({ id: c.id, name: c.name })) : [],
       }
     },
     /** 工作台「轮到你」：所有可见进行中项目里，下一步需要当前用户处理的事项。 */
     mynext: user => visibleProjects(user).filter(p => p.status === 'active').flatMap(p => guide(user, p, engine.readiness(p)).filter(g => g.mine).map(g => ({ ...g, projectId: p.id, project: p.name }))),
     tasks: user => db.find('tasks', t => t.owner === user.id || (t.projectId && org.seesProject(user, db.get('projects', t.projectId)))).sort((a, b) => a.due - b.due),
     notifications: user => db.find('notifications', n => n.userId === user.id).sort((a, b) => b.at - a.at).slice(0, 80),
-    approvals: user => db.find('approvals', a => a.status === 'pending' && a.voters.includes(user.id)).map(a => ({ ...a, project: db.get('projects', a.projectId)?.name })),
-    company: (user, q) => { org.assert(user, 'company.view'); const c = db.get('companies', q.get('id')); if (!c) throw fail('公司不存在', 404); return { ...projection.company(viewer.human(user), c), metrics: db.find('metrics', m => m.companyId === c.id), projects: visibleProjects(user).filter(p => p.companyId === c.id).map(p => projectView(user, p)) } },
-    metrics: user => { org.assert(user, 'company.view'); return db.all('metrics') },
-    extraction: (user, q) => { const x = db.get('extractions', q.get('id')); project(user, x?.projectId); return { ...x, markdown: org.redact(user, extractor.toMarkdown(x)) } },
+    approvals: user => db.find('approvals', a => a.status === 'pending' && a.voters.includes(user.id) && org.seesProject(user, db.get('projects', a.projectId))).map(a => ({ ...a, project: db.get('projects', a.projectId)?.name })),
+    company: (user, q) => { org.assert(user, 'company.view'); const c = db.get('companies', q.get('id')); if (!c) throw fail('公司不存在', 404); return { ...projection.company(viewer.human(user), c), metrics: companyMetricsVisible(user, c.id) ? db.find('metrics', m => m.companyId === c.id) : [], projects: visibleProjects(user).filter(p => p.companyId === c.id).map(p => projectView(user, p)) } },
+    metrics: user => { org.assert(user, 'company.view'); return db.all('metrics').filter(m => companyMetricsVisible(user, m.companyId)) },
+    extraction: (user, q) => { const rawX = db.get('extractions', q.get('id')); project(user, rawX?.projectId); const x = redactExtraction(user, rawX); return { ...x, markdown: org.redact(user, extractor.toMarkdown(x)) } },
     meeting: (user, q) => meetings.get(user, q.get('id')),
     meetings: user => db.find('meetings', m => org.seesProject(user, db.get('projects', m.projectId))).sort((a, b) => b.at - a.at).map(m => ({ ...m, asr: m.asr ? { ...m.asr, segments: m.asr.segments?.length } : null })),
     extractions: user => db.find('extractions', x => org.seesProject(user, db.get('projects', x.projectId))).sort((a, b) => b.createdAt - a.createdAt).map(x => ({ id: x.id, projectId: x.projectId, name: x.name, schema: x.schema, status: x.status, origin: x.origin, missing: x.missing, conflicts: x.conflicts, createdAt: x.createdAt, by: x.by, engine: x.engine })),
@@ -636,23 +679,30 @@ export function createApi(ctx) {
     models: user => { if (mode === 'saas') org.assert(user, 'ai.policy'); return ai.cloud.models() },
     'nb.local.probe': (user, q) => probeLocalModels(q.get('url') || ''),
     'nb.notes': (user, q) => listNotes(db, project(user, q.get('projectId')).id),
-    'nb.flow.board': (user, q) => buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
+    'nb.flow.board': (user, q) => buildFlowBoardState({ db, kb, org, engine, lifecycle, dir }, user, project(user, q.get('projectId'))),
     'nb.os.state': (user, q) => getOsState(db, project(user, q.get('projectId'))),
     'nb.harness.status': (user, q) => getHarnessStatus({ db }, q.get('projectId') ? project(user, q.get('projectId')) : null),
     'nb.tyc.meta': async () => ({ dimensions: TYC_DIMENSIONS, configured: await tianyanchaConfigured() }),
     'nb.oa.inbox': user => buildOaInbox({ db, org, engine, guideFn: guide }, user),
-    'nb.enterprise.status': () => getEnterpriseReadiness({ db, kb, ai, mode }),
+    'nb.enterprise.status': user => {
+      if (!isExecutiveUser(user) && !org.can(user, 'org.manage') && !org.can(user, 'settings.manage') && !org.can(user, 'ai.policy')) {
+        throw fail('仅管理层与系统管理员可查看企业开箱就绪度体检', 403)
+      }
+      return getEnterpriseReadiness({ db, kb, ai, mode })
+    },
     'dept.workspace': user => buildDeptWorkspace({ db, org, engine, kb, guideFn: guide, readinessFn: () => getEnterpriseReadiness({ db, kb, ai, mode }) }, user),
     'dept.executive': user => buildExecutiveOverview({ db, engine, kb }, user),
     'dept.progress': user => buildSanitizedProgressBoard({ db, org, engine }, user),
     'nb.artifact.preview': async (user, q) => {
       const p = project(user, q.get('projectId'))
-      // 只预览本项目登记过的成品：按登记记录里的路径读，不读请求里给的任意路径
+      // 只预览本项目登记过的成品：按登记记录里的路径读，不读请求里给的任意路径，并按查看者权限脱敏
       const fp = String(q.get('fp') || '')
       const art = (db.get('kvstate', `artifacts_${p.id}`)?.list ?? []).find(a => a.fullPath === fp || a.name === q.get('name'))
       if (!art) throw fail('只能预览本项目文件夹里的成品', 403)
-      const parsed = await previewAnyArtifact(art.fullPath)
-      return { ...parsed, artifact: { name: art.name, kind: art.kind, summary: art.summary, engine: art.engine, engineNote: art.engineNote, check: art.check ?? null, workType: art.workType ?? null } }
+      const af = art.fileId ? kb.file(art.fileId) : null
+      if (af && !kb.visible(user, af)) throw fail(`无权预览该密级成品（密级：${LEVELS[af.level ?? 1]}）`, 403)
+      const parsed = redactPreview(user, p, await previewAnyArtifact(art.fullPath))
+      return { ...parsed, artifact: { name: art.name, kind: art.kind, summary: redactProjectText(user, p, art.summary ?? ''), engine: art.engine, engineNote: art.engineNote, check: art.check ?? null, workType: art.workType ?? null } }
     },
     'nb.arch.status': async (user, q) => {
       const pid = q.get('projectId')
@@ -666,7 +716,7 @@ export function createApi(ctx) {
       const arts = p ? db.get('kvstate', `artifacts_${p.id}`)?.list ?? [] : []
       const files = p ? projectFiles(user, p).filter(f => f.mountId !== 'm_ws' && !f.rel.includes('/Studio成品/')) : []
       const mounts = db.all('mounts')
-      const recentChanges = db.recent(12)
+      const recentChanges = org.can(user, 'audit.read') ? db.recent(12) : []
       const LV = ['公开', '内部', '机密', '绝密']
       // 每一层只报能查到的实际状态
       return {

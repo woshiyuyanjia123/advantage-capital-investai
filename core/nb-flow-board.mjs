@@ -4,25 +4,27 @@ import { extname } from 'node:path'
 import { extractAny } from './office.mjs'
 import { listProjectArtifacts } from './nb-folder.mjs'
 
-export async function buildFlowBoardState({ db, org, engine, lifecycle, dir }, user, p) {
+export async function buildFlowBoardState({ db, kb, org, engine, lifecycle, dir }, user, p) {
   const wf = engine.def(p)
   const r = engine.readiness(p)
   const wsPath = db.one('mounts', x => x.kind === 'workspace')?.path ?? dir
-  const arts = await listProjectArtifacts(db, wsPath, p)
+  const rawArts = await listProjectArtifacts(db, wsPath, p)
+  const arts = kb ? { ...rawArts, items: (rawArts.items ?? []).filter(it => !it.fileId || !kb.file(it.fileId) || kb.visible(user, kb.file(it.fileId))) } : rawArts
   const caps = org.capabilities(user)
   const users = db.all('users').filter(u => !u.disabled).map(u => ({
     id: u.id, name: u.name, title: u.title, roles: u.roles,
     canFinalize: org.canOp(u, 'op.material.finalize'),
-    canVote: org.canOp(u, 'op.meeting.decide') || org.canOp(u, 'op.invest.approve'),
+    canVote: org.canOp(u, 'op.meeting.decide') || org.canOp(u, 'op.invest.approve') || org.canOp(u, 'op.exit.approve') || org.canOp(u, 'op.trade.confirm'),
     canSubmit: org.can(u, 'deliverable.review'),
     canEdit: org.can(u, 'deliverable.edit'),
   }))
   const stages = (wf.stages ?? []).map((st, idx) => {
+    const specRoleByType = new Map((st.works ?? []).map(sw => [sw.work, sw.role ?? 'pm']))
     const works = (p.works ?? []).filter(w => w.stageId === st.id).map(w => {
       const d = w.deliverableId ? db.get('deliverables', w.deliverableId) : null
       const stub = d ?? { projectId: p.id, type: w.type, status: 'draft', versions: [] }
       return {
-        ...w, assigneeName: db.get('users', w.assignee)?.name || '未指派',
+        ...w, role: w.role || specRoleByType.get(w.type) || 'pm', assigneeName: db.get('users', w.assignee)?.name || '未指派',
         deliverable: d ? { id: d.id, type: d.type, format: d.format, status: d.status, v: d.versions.length, finalV: d.finalV, checkout: d.checkout } : null,
         perms: lifecycle.actions(user, stub),
         holders: {
@@ -49,8 +51,14 @@ export async function submitArtifactToNode({ db, deliverables, lifecycle }, user
   const work = works.find(w => w.id === b.workId) ?? (wantType ? works.find(w => w.type === wantType && w.stageId === p.stageId) ?? works.find(w => w.type === wantType) : null)
   if (!work && !wantType) throw Object.assign(new Error('这份成品没有对应的工作项，请在「阶段门禁」页选择要报送到哪一项'), { status: 400 })
   const workType = work?.type || wantType
+  const existingD = (work?.deliverableId && db.get('deliverables', work.deliverableId)) || db.find('deliverables', x => x.projectId === p.id && x.type === workType)[0]
+  const checkStub = existingD ?? { projectId: p.id, type: workType, status: 'draft', versions: [] }
+  if (checkStub.status !== 'final') lifecycle.authorize(user, checkStub, 'edit')
   const d = deliverables.ensure(p.id, workType, { workId: work?.id }, user)
-  if (d.status === 'final') deliverables.reopen(user, d.id, '补充提交新成品版本')
+  if (d.status === 'final') {
+    deliverables.reopen(user, d.id, '补充提交新成品版本')
+    lifecycle.authorize(user, db.get('deliverables', d.id), 'edit')
+  }
   const note = String(b.note || '从右下角成品池自主提交至流程节点').slice(0, 160)
   let ver
   if (typeof b.editedText === 'string' && b.editedText.trim()) {
@@ -62,6 +70,7 @@ export async function submitArtifactToNode({ db, deliverables, lifecycle }, user
     const buf = await readFile(art.fullPath)
     const ext = extname(art.fullPath).toLowerCase()
     if (ext === `.${d.format}`) {
+      lifecycle.authorize(user, d, 'edit')
       ver = await deliverables.addVersion(user, d, { buffer: buf, ext, engine: '项目专属夹成品直交', note })
     } else {
       const extracted = await extractAny(buf, ext).catch(() => ({ text: '' }))

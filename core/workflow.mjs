@@ -56,9 +56,9 @@ function financial() {
   return {
     businessType: 'financial', name: '财务投资标准流程', version: 1, status: 'published',
     stages: [
-      { id: 's_opp', name: '项目机会', kind: 'pre', label: '新项目', works: [W('项目信息表', { required: true }), W('初审意见'), W('NDA')],
+      { id: 's_opp', name: '项目机会', kind: 'pre', label: '新项目', works: [W('项目信息表', { required: true }), W('初审意见'), W('NDA', { role: 'legal' })],
         gate: G('项目启动审批', { op: 'op.start.authorize', roles: ['head'], rule: 'any', requires: ['项目信息表'], outcomes: { pass: { to: 's_prep', label: '已启动项目' }, return: { to: 's_opp', label: '补充材料' }, reject: { terminate: true, label: '放弃项目' } } }) },
-      { id: 's_prep', name: '立项准备', kind: 'pre', label: '拟立项项目', works: [W('行业研究'), W('财务分析'), W('立项报告', { required: true }), W('NDA', { required: true })],
+      { id: 's_prep', name: '立项准备', kind: 'pre', label: '拟立项项目', works: [W('行业研究'), W('财务分析', { role: 'finance' }), W('立项报告', { required: true }), W('NDA', { required: true, role: 'legal' })],
         gate: G('立项会', { kind: 'meeting', op: 'op.meeting.decide', roles: ['partner', 'head'], rule: 'majority', requires: ['立项报告', 'NDA'], outcomes: { pass: { to: 's_dd', label: '已立项项目' }, return: { to: 's_prep', label: '补充后重新上会' }, reject: { terminate: true, label: '放弃项目' } } }) },
       { id: 's_dd', name: '尽职调查', kind: 'diligence', label: '已立项项目', works: [W('尽调清单'), W('行业研究'), W('财务分析', { role: 'finance' }), W('法律尽调', { role: 'legal' }), W('估值模型', { role: 'finance' }), W('尽调报告', { required: true }), W('尽调汇总')],
         gate: G('尽调结论确认', { op: 'op.pm.confirm', roles: ['head'], rule: 'any', requires: ['尽调报告'], outcomes: { pass: { to: 's_ic', label: '尽调完成' }, return: { to: 's_dd', label: '补充尽调' }, reject: { terminate: true, label: '放弃项目' } } }) },
@@ -89,7 +89,7 @@ function industrial() {
         gate: G('投委会', { kind: 'meeting', op: 'op.invest.approve', roles: ['partner'], rule: 'two_thirds', requires: ['交易结构方案', '三方尽调报告'], outcomes: { pass: { to: 'i_exec', label: '已过会项目' }, return: { to: 'i_land', label: '补充' }, reject: { terminate: true, label: '放弃项目' } } }) },
       { id: 'i_exec', name: '项目落地与股权投资', kind: 'execution', label: '已过会项目', dept: '项目组', works: [W('交易文件', { required: true, role: 'legal' }), W('交割清单', { role: 'finance' })],
         gate: G('落地 / 确权确认', { kind: 'sign', op: 'op.trade.confirm', roles: ['legal', 'finance'], rule: 'all', requires: ['交易文件'], outcomes: { pass: { to: 'i_post', label: '已投资项目' } } }) },
-      { id: 'i_post', name: '管理与退出', kind: 'post', label: '已投资项目', dept: '项目管理部', works: [W('投后报告', { role: 'postinv' }), W('退出建议书', { required: true })],
+      { id: 'i_post', name: '管理与退出', kind: 'post', label: '已投资项目', dept: '项目管理部', works: [W('投后报告', { role: 'postinv' }), W('退出建议书', { required: true, role: 'postinv' })],
         gate: G('退出投委会', { kind: 'meeting', op: 'op.exit.approve', roles: ['partner'], rule: 'majority', requires: ['退出建议书'], outcomes: { pass: { to: 'i_exit', label: '项目退出' }, hold: { to: 'i_post', label: '持有' }, return: { to: 'i_post', label: '补充' } } }) },
       { id: 'i_exit', name: '项目退出与归档', kind: 'archive', label: '项目退出', works: [W('项目复盘报告', { required: true })],
         gate: G('归档确认', { op: 'op.archive.confirm', roles: ['head', 'partner'], rule: 'any', outcomes: { pass: { complete: true, label: '已归档' } } }) },
@@ -159,9 +159,9 @@ export function createEngine({ db, org, events }) {
       const same = works.filter(w => w.type === spec.work)
       if (same.some(w => w.stageId === stageId)) continue
       const open = same.find(w => w.status !== 'done')
-      if (open) { open.stageId = stageId; open.required = spec.required || open.required; continue }
+      if (open) { open.stageId = stageId; open.required = spec.required || open.required; if (spec.role) open.role = spec.role; continue }
       if (same.length && spec.required) continue
-      works.push({ id: uid('w_'), type: spec.work, stageId, required: spec.required, format: spec.format, assignee: assigneeFor(p, spec.role), status: 'todo', createdAt: Date.now() })
+      works.push({ id: uid('w_'), type: spec.work, stageId, required: spec.required, role: spec.role ?? 'pm', format: spec.format, assignee: assigneeFor(p, spec.role), status: 'todo', createdAt: Date.now() })
     }
     const timeline = [...(p.timeline ?? []), { at: Date.now(), by: user?.name ?? '系统', event: `进入「${st.name}」`, note: reason ?? '' }]
     return { ...p, stageId, stageKind: st.kind, statusLabel: st.label, works, timeline }
