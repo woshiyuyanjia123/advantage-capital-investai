@@ -1,11 +1,12 @@
-// 分部门专属操作台与跨部门脱敏进度总览：
-//   1. 按登录者所属部门渲染差异化操作台（Hero、三层架构条、KPI、部门专属业务与 AI 模块、部门标志性业务视图、工作队列）
-//   2. 仅企业管理层 / 合伙人展示「管理层全局驾驶舱」（待决队列、九部门运行巡检矩阵、全院敏感台账）
-//   3. 各部门均可查看「全院脱敏项目进度看板」（阶段进度实时同步，未授权项目底稿与敏感字段严格隔离）
-import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, get, act, toast, dialog, drawer, drawerHead, closeDrawer, pick, toB64, can, P_STATUS, LEVELS, AI_LEVEL, RULE, due, opts, firstPaint, entered } from '/api/investai?asset=ui.js'
+// 分部门专属操作台与分类板块化项目总览（飞书/钉钉现代企业风格 × 分类项目板块与进度可视化）：
+//   1. 顶栏紧凑部门操作头 + 内嵌 4 项核心指标 + 4 项部门高频业务与 AI 快捷工具
+//   2. 分类板块化项目空间（财务投资股权 / 产业投资招商 / 投后管理退出 / 历史归档）直观呈现阶段进度条与卡片操作，支持板块/列表切换与阶段展开报送
+//   3. 仅管理层 / 合伙人展示「管理层全局驾驶舱」（待决队列、九部门巡检矩阵、全院敏感台账）；各部门同步查看「全院脱敏项目进度板块」
+import { S, D, ACT, VIEWS, hooks, $, $$, esc, icon, avatar, get, act, toast, dialog, drawer, drawerHead, closeDrawer, pick, toB64, can, P_STATUS, LEVELS, AI_LEVEL, RULE, due, opts, firstPaint, entered } from '/api/investai?asset=ui.js'
 
 S.nbExpanded ??= null
-S.oaOpen ??= true
+S.nbShelfMode ??= 'board'
+S.oaOpen ??= false
 S.execTab ??= 'overview'
 S.progFilter ??= 'all'
 let justOpened = null
@@ -49,9 +50,10 @@ function renderFlowDrawer(p, fresh) {
   const plug = (cls, actName, data, ic, label) => `<button class="nb-plug-it ${cls}" data-act="${actName}" data-p="${p.id}" ${data}>${icon(ic, 14)}<span class="grow">${label}</span>${icon('right', 13)}</button>`
   return `<div class="nb-flow-drawer ${fresh ? 'fresh' : ''}">
     <div class="nb-fd-main">
-      <div class="nb-fd-hd"><span class="nb-lab">阶段进度</span><span class="dim">当前阶段准入 ${f.curStagePct}%</span><span class="grow"></span>
+      <div class="nb-fd-hd"><span class="nb-lab">${esc(p.name)} · 阶段进度拆解</span><span class="dim">当前阶段准入 ${f.curStagePct}%</span><span class="grow"></span>
         <button class="btn sm ghost" data-act="nb-open-folder" data-p="${p.id}">${icon('folder', 13)}项目档案室</button>
-        <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">管控看板</button></div>
+        <button class="btn sm ghost" data-act="nb-open-board" data-p="${p.id}" data-b="stages">管控看板</button>
+        <button class="btn sm ghost ico" data-act="nb-card-toggle" data-id="${p.id}" title="收起">${icon('x', 13)}</button></div>
       <div class="nb-stages">${f.stageDetails.map(st => `<button class="nb-stage ${st.state}" data-act="nb-open-board" data-p="${p.id}" data-b="stages" title="${esc(st.name)} ${st.pct}%">
         <span class="no">${no2(st.index)}</span><span class="nm">${esc(st.name)}</span>
         <span class="bar"><i style="width:${st.pct}%"></i></span><span class="pc">${st.pct}%</span></button>`).join('')}</div>
@@ -152,23 +154,38 @@ function heroActionsHTML(d, dp) {
   return btns.join('')
 }
 
-function renderHero(d, dp) {
-  const m = d.model ?? {}
-  const route = ROUTE_LABEL[m.mode] ?? m.mode ?? '混合路由'
-  const modelLabel = m.ok ? (m.verified ? m.label : `${m.label}（待验证）`) : '离线合规引擎'
+function renderKpis(ws) {
+  if (!ws?.kpis?.length) return ''
+  return `<div class="dp-kpis">${ws.kpis.map(k => `<div class="dp-kpi tone-${esc(k.tone || 'plain')}">
+    <div class="dp-kpi-top"><span class="dp-kpi-lab">${esc(k.label)}</span><b class="dp-kpi-val">${esc(String(k.value))}</b></div>
+    <span class="dp-kpi-sub ell">${esc(k.sub || '')}</span>
+  </div>`).join('')}</div>`
+}
+
+function renderHero(d, dp, ws) {
   return `<section class="dp-hero" style="--dp-accent:${esc(dp?.accentVar || 'var(--accent)')}">
     <div class="dp-hero-top">
       <div class="dp-hero-title">
-        <div class="dp-hero-badges">
-          <span class="dp-badge"><i class="dp-dot"></i>${esc(dp?.badge || '投资业务操作台')}</span>
+        <div class="dp-hero-line">
+          <h1>${esc(dp?.workspaceTitle || '投研操作台')}</h1>
+          <span class="dp-badge"><i class="dp-dot"></i>${esc(dp?.badge || '业务部门')}</span>
           ${dp?.roleSubBadge ? `<span class="dp-subbadge">${esc(dp.roleSubBadge)}</span>` : ''}
-          <span class="tag ${dp?.isExecutive ? 'real' : ''}">${dp?.isExecutive ? '全机构全内容权限' : '本部门专属工作台 · 全院脱敏进度可视'}</span>
+          <span class="tag ${dp?.isExecutive ? 'blue' : ''}">${dp?.isExecutive ? '全机构全内容权限' : '本部门专属 · 全院进度可视'}</span>
         </div>
-        <h1>${esc(dp?.workspaceTitle || '投研操作台')}</h1>
         <p class="dp-tag">${esc(dp?.tagline || '')}</p>
       </div>
       <div class="dp-hero-acts">${heroActionsHTML(d, dp)}</div>
     </div>
+    ${ws ? renderKpis(ws) : ''}
+  </section>`
+}
+
+function renderLayersFooter(d, dp) {
+  const m = d.model ?? {}
+  const route = ROUTE_LABEL[m.mode] ?? m.mode ?? '混合路由'
+  const modelLabel = m.ok ? (m.verified ? m.label : `${m.label}（待验证）`) : '离线合规引擎'
+  return `<section class="dp-sec dp-arch-bar">
+    <div class="dp-sec-hd"><h2>企业三层智能架构运行摘要</h2><span class="dim">投资业务交互 · AI 协作执行 · 底层模型与密级安全边界</span></div>
     <div class="dp-layers">
       <div class="dp-layer"><b>01 投资业务交互层</b><span>${esc(dp?.businessLayer || '')}</span></div>
       <div class="dp-layer"><b>02 AI 协作与执行层</b><span>${esc(dp?.aiLayer || '')}</span></div>
@@ -177,19 +194,9 @@ function renderHero(d, dp) {
   </section>`
 }
 
-function renderKpis(ws) {
-  if (!ws?.kpis?.length) return ''
-  return `<section class="dp-kpis">${ws.kpis.map(k => `<div class="dp-kpi tone-${esc(k.tone || 'plain')}">
-    <span class="dp-kpi-lab">${esc(k.label)}</span>
-    <b class="dp-kpi-val">${esc(String(k.value))}</b>
-    <span class="dp-kpi-sub ell">${esc(k.sub || '')}</span>
-  </div>`).join('')}</section>`
-}
-
 function renderModules(ws) {
   if (!ws?.modules?.length) return ''
-  return `<section class="dp-sec">
-    <div class="dp-sec-hd"><h2>本部门高频业务与 AI 工具</h2><span class="dim">一键唤起本部门常用流程与专属 AI 指令</span></div>
+  return `<section class="dp-sec dp-mod-sec">
     <div class="dp-mod-grid">${ws.modules.map(m => {
       const attrs = [
         `data-act="${esc(m.act)}"`,
@@ -202,9 +209,12 @@ function renderModules(ws) {
         m.disabled ? 'disabled' : '',
       ].filter(Boolean).join(' ')
       return `<button class="dp-mod tone-${esc(m.tone || 'accent')}" ${attrs}>
-        <div class="dp-mod-hd"><span class="dp-mod-ic">${icon(m.icon || 'spark', 16)}</span><span class="dp-mod-layer">${esc(m.layer || 'AI 协作')}</span><span class="grow"></span>${icon('right', 13)}</div>
-        <b>${esc(m.title)}</b>
-        <p>${esc(m.desc)}</p>
+        <span class="dp-mod-ic">${icon(m.icon || 'spark', 16)}</span>
+        <div class="dp-mod-tx">
+          <b class="ell" title="${esc(m.title)}">${esc(m.title)}</b>
+          <p class="ell" title="${esc(m.desc)}">${esc(m.desc)}</p>
+        </div>
+        <span class="dp-mod-arr">${icon('right', 13)}</span>
       </button>`
     }).join('')}</div>
   </section>`
@@ -243,6 +253,7 @@ function renderRiskAlertsList(alerts) {
     <p>${esc(a.detail)}</p>
   </article>`).join('')}</div>`
 }
+
 function renderExecutiveCockpit(ws) {
   const ex = ws.executive
   if (!ex) return ''
@@ -419,6 +430,61 @@ function renderWorkQueue(ws) {
   </section>`
 }
 
+/** 按业务条线与生命周期自动归类为清晰的项目板块 */
+function groupProjectsIntoPlates(list) {
+  const specs = [
+    { key: 'financial', title: '财务投资 · 股权项目板块', sub: '项目机会 → 立项 → 尽调 → 投决 → 交割', icon: 'chart', tone: 'blue', match: p => p.status === 'active' && p.businessType === 'financial' && !['post', 'exit', 'archive'].includes(p.stageKind) },
+    { key: 'industrial', title: '产业投资 · 资本招商板块', sub: '立项承接 → 尽调承做 → 落地承销 → 确权', icon: 'industry', tone: 'green', match: p => p.status === 'active' && p.businessType === 'industrial' && !['post', 'exit', 'archive'].includes(p.stageKind) },
+    { key: 'postinv', title: '投后管理与退出板块', sub: '已投项目归档 · 季度经营赋能 · 退出推进', icon: 'shield', tone: 'cyan', match: p => p.status === 'active' && ['post', 'exit', 'archive'].includes(p.stageKind) },
+    { key: 'other', title: '其他资本业务板块', sub: '并购重组 · 上市公司资本运作 · 基金协同', icon: 'grid', tone: 'violet', match: p => p.status === 'active' && !['financial', 'industrial'].includes(p.businessType) && !['post', 'exit', 'archive'].includes(p.stageKind) },
+    { key: 'archived', title: '历史与已归档板块', sub: '已完成归档或决策否决的历史留痕项目', icon: 'history', tone: 'muted', match: p => p.status !== 'active' },
+  ]
+  return specs
+    .map(sp => {
+      const items = list.filter(sp.match)
+      const avgPct = items.length ? Math.round(items.reduce((s, x) => s + (x.flow?.overallPct ?? x.overallPct ?? x.progress ?? 0), 0) / items.length) : 0
+      return { ...sp, items, avgPct }
+    })
+    .filter(g => g.items.length > 0)
+}
+
+function projectCardHTML(p, tone) {
+  const exp = S.nbExpanded === p.id
+  const f = p.flow ?? { overallPct: p.progress ?? 0, stageDetails: [], readinessItems: [] }
+  const pct = f.overallPct ?? p.progress ?? 0
+  const missing = (f.readinessItems ?? []).filter(i => !i.ok)
+  const badges = [
+    p.myPendingVote ? '<span class="tag amber sm">待我表决</span>' : p.pendingApproval ? '<span class="tag sm">表决中</span>' : '',
+    p.reviewCount ? `<span class="tag blue sm">${p.reviewCount} 项待审</span>` : '',
+  ].filter(Boolean).join('')
+  return `<article class="nb-pcard tone-${tone} ${exp ? 'open' : ''}">
+    <div class="nb-pcard-top">
+      <div class="nb-pcard-tags">
+        <span class="nb-stage-pill tone-${tone}">${esc(p.stage || '立项')}</span>
+        ${badges}
+      </div>
+      <div class="nb-pcard-pct"><b data-count="${pct}">${pct}</b><i>%</i></div>
+    </div>
+    <button class="nb-pcard-title-btn" data-act="nb-enter" data-id="${p.id}" title="进入「${esc(p.name)}」尽调与研判工作台">
+      <h3 class="ell">${esc(p.name)}</h3>
+      <p class="ell">${esc(p.industry || '综合')} · ${esc(p.businessName || '')}${p.status !== 'active' ? ` · ${esc(P_STATUS[p.status] || p.status)}` : ''}</p>
+    </button>
+    <div class="nb-pcard-prog">
+      <div class="nb-pcard-bar"><i style="width:${pct}%"></i></div>
+      <div class="nb-pcard-segs" aria-hidden="true">${(f.stageDetails ?? []).map(st => `<i class="${st.state}" title="${esc(st.name)} ${st.pct}%"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
+      <div class="nb-pcard-hint ell">${f.readinessOk ? '<span class="ok">本阶段必做成果已齐备</span>' : missing.length ? `待定稿：${esc(missing.slice(0, 2).map(i => i.work).join('、'))}` : `全周期共 ${f.stageDetails?.length || 0} 个阶段`}</div>
+    </div>
+    <footer class="nb-pcard-ft">
+      <div class="nb-pcard-own">${avatar(p.ownerName || '未', 20)}<span class="ell">${esc(p.ownerName || '未指派')}</span><span class="dim">· 成果 ${p.deliverables?.length ?? 0}</span></div>
+      <div class="nb-pcard-acts">
+        <button class="btn sm ghost" data-act="nb-card-toggle" data-id="${p.id}" title="展开或收起各阶段详细进度与成果报送">${exp ? '收起' : '进度'}</button>
+        <button class="btn sm ghost" data-act="nb-flowboard" data-p="${p.id}">门禁</button>
+        <button class="btn sm pri" data-act="nb-enter" data-id="${p.id}">研判</button>
+      </div>
+    </footer>
+  </article>`
+}
+
 function listHTML(d) {
   const dp = d.deptProfile
   if (!d.projects.length) {
@@ -426,7 +492,7 @@ function listHTML(d) {
       ${icon('shield', 20)}
       <div class="grow">
         <b>当前账号（${esc(dp?.deptName || d.me.dept || '')}）暂无已授权穿透底稿的项目</b>
-        <p class="dim">按企业四层权限策略，敏感业务底稿仅向项目团队成员、牵头部门及管理层开放；您仍可在下方「全院项目进度看板」实时掌握全部项目的阶段与推进百分比，或使用上方本部门专属工具。</p>
+        <p class="dim">按企业四层权限策略，敏感业务底稿仅向项目团队成员、牵头部门及管理层开放；您可在下方「全院项目进度板块」实时查看各业务条线项目阶段与完成进度。</p>
       </div>
     </div>`
   }
@@ -434,28 +500,51 @@ function listHTML(d) {
   const q = (S.filters.q || '').trim()
   const mineIds = S.filters.mine && oaCache ? new Set([...oaCache.approvals.map(x => x.projectId), ...oaCache.reviews.map(x => x.projectId), ...oaCache.mySteps.map(x => x.projectId), ...oaCache.tasks.map(x => x.projectId).filter(Boolean)]) : null
   const list = d.projects.filter(p => (!bt || p.businessType === bt) && (!mineIds || mineIds.has(p.id)) && (!q || [p.name, p.company, p.industry].some(x => String(x || '').includes(q))))
-  return list.map(p => {
-    const exp = S.nbExpanded === p.id
-    const f = p.flow
-    const pct = f?.overallPct ?? p.progress ?? 0
-    const badges = [
-      p.myPendingVote ? '<span class="tag amber sm">待我表决</span>' : p.pendingApproval ? '<span class="tag sm">表决中</span>' : '',
-      p.reviewCount ? `<span class="tag blue sm">${p.reviewCount} 项待审</span>` : '',
-    ].join('')
-    return `<article class="nb-row ${exp ? 'open' : ''}" data-act="nb-card-toggle" data-id="${p.id}">
-      <div class="nb-row-main">
-        <div class="nb-pct"><b data-count="${pct}">${pct}</b><i>%</i></div>
-        <div class="nb-row-body">
-          <div class="nb-title-row"><h3 class="nb-name ell" title="${esc(p.name)}">${esc(p.name)}</h3>${badges}</div>
-          <div class="nb-meta ell"><span class="st">${esc(p.stage || '立项')}</span>${[P_STATUS[p.status] || p.status, p.businessName, p.industry || '综合', p.ownerName && `负责人 ${p.ownerName}`, `成果 ${p.deliverables.length} 份`].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
+  if (!list.length) {
+    return `<div class="nb-empty"><p>当前筛选条件下没有匹配项目</p>${can('project.create') && can('material.upload') ? '<button class="btn pri" data-act="quick-project">带底稿快速立项</button>' : ''}</div>`
+  }
+
+  if (S.nbShelfMode === 'list') {
+    return `<div class="nb-list-box">${list.map(p => {
+      const exp = S.nbExpanded === p.id
+      const f = p.flow
+      const pct = f?.overallPct ?? p.progress ?? 0
+      const badges = [
+        p.myPendingVote ? '<span class="tag amber sm">待我表决</span>' : p.pendingApproval ? '<span class="tag sm">表决中</span>' : '',
+        p.reviewCount ? `<span class="tag blue sm">${p.reviewCount} 项待审</span>` : '',
+      ].join('')
+      return `<article class="nb-row ${exp ? 'open' : ''}" data-act="nb-card-toggle" data-id="${p.id}">
+        <div class="nb-row-main">
+          <div class="nb-pct"><b data-count="${pct}">${pct}</b><i>%</i></div>
+          <div class="nb-row-body">
+            <div class="nb-title-row"><h3 class="nb-name ell" title="${esc(p.name)}">${esc(p.name)}</h3>${badges}</div>
+            <div class="nb-meta ell"><span class="st">${esc(p.stage || '立项')}</span>${[P_STATUS[p.status] || p.status, p.businessName, p.industry || '综合', p.ownerName && `负责人 ${p.ownerName}`, `成果 ${p.deliverables.length} 份`].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
+          </div>
+          <div class="nb-mini" aria-hidden="true">${(f?.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
+          <button class="btn sm nb-open" data-act="nb-enter" data-id="${p.id}">进入工作台</button>
+          <span class="nb-caret">${icon('chev', 15)}</span>
         </div>
-        <div class="nb-mini" aria-hidden="true">${(f?.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
-        <button class="btn sm nb-open" data-act="nb-enter" data-id="${p.id}">进入工作台</button>
-        <span class="nb-caret">${icon('chev', 15)}</span>
-      </div>
-      ${exp ? renderFlowDrawer(p, justOpened === p.id) : ''}
-    </article>`
-  }).join('') || `<div class="nb-empty"><p>当前筛选条件下没有匹配项目</p>${can('project.create') && can('material.upload') ? '<button class="btn pri" data-act="quick-project">带底稿快速立项</button>' : ''}</div>`
+        ${exp ? renderFlowDrawer(p, justOpened === p.id) : ''}
+      </article>`
+    }).join('')}</div>`
+  }
+
+  const plates = groupProjectsIntoPlates(list)
+  return `<div class="nb-plates">${plates.map(pl => {
+    const expProj = pl.items.find(x => x.id === S.nbExpanded)
+    return `<section class="nb-plate tone-${pl.tone}">
+      <header class="nb-plate-hd">
+        <span class="nb-plate-ic">${icon(pl.icon, 15)}</span>
+        <div class="grow" style="min-width:0">
+          <div class="row" style="gap:8px"><h3>${esc(pl.title)}</h3><span class="nb-plate-cnt">${pl.items.length} 个项目</span></div>
+          <span class="dim">${esc(pl.sub)}</span>
+        </div>
+        <div class="nb-plate-avg"><span class="dim">板块均进度</span><b>${pl.avgPct}%</b></div>
+      </header>
+      <div class="nb-plate-grid" data-n="${pl.items.length}">${pl.items.map(p => projectCardHTML(p, pl.tone)).join('')}</div>
+      ${expProj ? renderFlowDrawer(expProj, justOpened === expProj.id) : ''}
+    </section>`
+  }).join('')}</div>`
 }
 
 function progressBoardRowsHTML(board) {
@@ -467,28 +556,43 @@ function progressBoardRowsHTML(board) {
     return true
   })
   if (!list.length) return '<div class="dp-empty-sm">当前筛选下暂无项目进度记录</div>'
-  return list.map(p => `<div class="dp-prog-row ${p.canOpen ? 'can-open' : 'locked'}">
-    <div class="dp-prog-pct"><b>${p.overallPct}</b><i>%</i></div>
-    <div class="dp-prog-main">
-      <div class="dp-prog-hd">
+  const plates = groupProjectsIntoPlates(list)
+  return plates.map(pl => `<div class="dp-prog-group tone-${pl.tone}">
+    <div class="dp-prog-ghd">
+      <span class="nb-plate-ic sm">${icon(pl.icon, 13)}</span>
+      <b>${esc(pl.title)}</b>
+      <span class="nb-plate-cnt">${pl.items.length}</span>
+      <span class="grow"></span>
+      <span class="dim">平均推进 ${pl.avgPct}%</span>
+    </div>
+    <div class="dp-prog-grid" data-n="${pl.items.length}">${pl.items.map(p => `<article class="dp-prog-row ${p.canOpen ? 'can-open' : 'locked'} tone-${pl.tone}">
+      <div class="dp-prog-top">
+        <div class="dp-prog-hd">
+          <span class="nb-stage-pill tone-${pl.tone}">${esc(p.stage)}</span>
+          ${p.readinessOk ? '<span class="tag real sm">准入齐备</span>' : ''}
+        </div>
+        <div class="dp-prog-pct"><b>${p.overallPct}</b><i>%</i></div>
+      </div>
+      <div class="dp-prog-main">
         <b class="ell" title="${esc(p.name)}">${esc(p.name)}</b>
-        <span class="tag ${p.status === 'active' ? 'blue' : ''} sm">${esc(p.stage)}</span>
-        <span class="tag sm">${esc(p.businessName)}</span>
-        ${p.readinessOk ? '<span class="tag real sm">准入齐备</span>' : ''}
+        <div class="dp-prog-meta ell">
+          <span>${esc(p.deptName)}</span>
+          <span>负责人 ${esc(p.ownerName)}</span>
+          <span>${esc(p.industry)}</span>
+        </div>
       </div>
-      <div class="dp-prog-meta ell">
-        <span>牵头：${esc(p.deptName)}</span>
-        <span>负责人：${esc(p.ownerName)}</span>
-        <span>行业：${esc(p.industry)}</span>
-        <span>${esc(P_STATUS[p.status] || p.status)}</span>
+      <div class="dp-prog-track">
+        <div class="nb-pcard-bar"><i style="width:${p.overallPct}%"></i></div>
+        <div class="nb-mini dp-prog-bars" aria-hidden="true" title="各阶段推进比例">${(p.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
       </div>
-    </div>
-    <div class="nb-mini dp-prog-bars" aria-hidden="true" title="各阶段推进比例">${(p.stageDetails ?? []).map(st => `<i class="${st.state}"><b style="width:${st.pct}%"></b></i>`).join('')}</div>
-    <div class="dp-prog-acts">
-      ${p.canOpen
-        ? `<button class="btn sm" data-act="nb-enter" data-id="${p.id}">工作台</button><button class="btn sm ghost" data-act="nb-flowboard" data-p="${p.id}">门禁</button>`
-        : `<button class="btn sm ghost dp-locked-btn" data-act="dept-prog-locked" title="${esc(p.accessHint)}">${icon('lock', 12)}仅脱敏进度 · 底稿隔离</button>`}
-    </div>
+      <div class="dp-prog-acts">
+        <span class="dim" style="font-size:11px">${esc(P_STATUS[p.status] || p.status)}</span>
+        <span class="grow"></span>
+        ${p.canOpen
+          ? `<button class="btn sm ghost" data-act="nb-flowboard" data-p="${p.id}">门禁</button><button class="btn sm pri" data-act="nb-enter" data-id="${p.id}">工作台</button>`
+          : `<button class="btn sm ghost dp-locked-btn" data-act="dept-prog-locked" title="${esc(p.accessHint)}">${icon('lock', 12)}脱敏进度</button>`}
+      </div>
+    </article>`).join('')}</div>
   </div>`).join('')
 }
 
@@ -504,10 +608,30 @@ function renderProgressBoard(ws) {
   ]
   return `<section class="dp-sec dp-prog-sec">
     <div class="dp-sec-hd">
-      <div><h2>全院项目进度看板</h2><span class="dim">跨部门实时同步全机构阶段进度与完成度 · 未授权项目自动隔离底稿与敏感字段</span></div>
+      <div><h2>全院项目进度板块</h2><span class="dim">跨部门按业务条线实时同步阶段进度 · 未授权项目底稿与敏感字段严格隔离</span></div>
       <nav class="dp-tabs" id="dpProgTabs">${filters.map(([k, l, n]) => `<button class="${f === k ? 'on' : ''}" data-act="dept-prog-filter" data-f="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>
     </div>
     <div class="dp-prog-list" id="dpProgList">${progressBoardRowsHTML(board)}</div>
+  </section>`
+}
+
+function renderAuthorizedProjectsSection(d, dp) {
+  const bt = S.filters.bt || ''
+  const authTitle = dp?.isExecutive ? '全机构项目板块' : '本部门授权项目板块'
+  return `<section class="dp-sec nb-auth-sec">
+    <div class="dp-sec-hd">
+      <div><h2>${authTitle}（${d.projects.length}）</h2><span class="dim">${dp?.isExecutive ? '按财务投资 / 产业投资 / 投后退出分类卡片展示，点击进入底稿研判或展开阶段报送' : '按业务板块归类展示已授权项目进度，点击卡片直达底稿工作台'}</span></div>
+      <div class="nb-shelf-tools">
+        <div class="seg sm" role="group" aria-label="切换视图">
+          <button class="${S.nbShelfMode !== 'list' ? 'on' : ''}" data-act="nb-view-mode" data-m="board">板块视图</button>
+          <button class="${S.nbShelfMode === 'list' ? 'on' : ''}" data-act="nb-view-mode" data-m="list">列表视图</button>
+        </div>
+        <label class="nb-find">${icon('search', 14)}<input id="nbShelfQ" placeholder="筛选项目" value="${esc(S.filters.q || '')}" autocomplete="off"></label>
+        ${can('project.create') && can('material.upload') ? `<button class="btn pri sm" data-act="quick-project" data-bt="${dp?.key === 'industrial' ? 'industrial' : 'financial'}">${icon('upload', 13)}快速立项</button>` : ''}
+      </div>
+    </div>
+    ${d.projects.length ? `<nav class="rtabs nb-bt">${[['', '全部板块', d.projects.length], ...d.businessTypes.filter(b => d.projects.some(p => p.businessType === b.id)).map(b => [b.id, b.name, d.projects.filter(p => p.businessType === b.id).length])].map(([k, l, n]) => `<button class="${bt === k ? 'on' : ''}" data-act="bt" data-k="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>` : ''}
+    <div class="nb-list" id="nbList">${listHTML(d)}</div>
   </section>`
 }
 
@@ -515,30 +639,32 @@ export function renderNotebookShelf(v) {
   const d = D()
   const dp = d.deptProfile
   const ws = getCachedWs(d)
-  const bt = S.filters.bt || ''
   const fresh = firstPaint(`shelf:${d.me.id}:${dp?.key || ''}`)
-  const authTitle = dp?.isExecutive ? '全机构项目列表' : '本部门已授权项目'
-  v.innerHTML = `<div class="nb-shelf dp-shelf ${fresh ? 'enter' : ''}" data-dept="${esc(dp?.key || 'financial')}">
-    ${renderHero(d, dp)}
-    ${ws ? `
-      ${renderKpis(ws)}
-      ${renderModules(ws)}
-      ${renderSignatureSection(d, dp, ws)}
-      ${renderWorkQueue(ws)}
-    ` : '<div class="dp-ws-loading"><span class="spin"></span><span>正在加载本部门专属操作台与全院脱敏进度…</span></div>'}
-    <section id="nbOaWrap">${oaInboxHTML(oaCache)}</section>
-    <section class="dp-sec">
-      <div class="dp-sec-hd">
-        <div><h2>${authTitle}（${d.projects.length}）</h2><span class="dim">${dp?.isExecutive ? '管理层可穿透查看全部项目底稿与敏感字段' : '点击行展开阶段进度与一键报送，或直接进入尽调工作台'}</span></div>
-        <div class="nb-shelf-tools">
-          <label class="nb-find">${icon('search', 14)}<input id="nbShelfQ" placeholder="筛选已授权项目" value="${esc(S.filters.q || '')}" autocomplete="off"></label>
-          ${can('project.create') && can('material.upload') ? `<button class="btn pri sm" data-act="quick-project" data-bt="${dp?.key === 'industrial' ? 'industrial' : 'financial'}">${icon('upload', 13)}快速立项</button>` : ''}
-        </div>
-      </div>
-      ${d.projects.length ? `<nav class="rtabs nb-bt">${[['', '全部已授权', d.projects.length], ...d.businessTypes.map(b => [b.id, b.name, d.projects.filter(p => p.businessType === b.id).length])].map(([k, l, n]) => `<button class="${bt === k ? 'on' : ''}" data-act="bt" data-k="${k}">${esc(l)}<span class="n">${n}</span></button>`).join('')}</nav>` : ''}
-      <div class="nb-list" id="nbList">${listHTML(d)}</div>
-    </section>
-    ${ws ? renderProgressBoard(ws) : ''}
+  const key = dp?.key || 'financial'
+  const zeroAuth = d.projects.length === 0
+  const mainFlow = ws ? (
+    key === 'it'
+      ? `${renderSignatureSection(d, dp, ws)}
+         ${renderAuthorizedProjectsSection(d, dp)}
+         ${renderProgressBoard(ws)}`
+      : zeroAuth
+        ? `${renderProgressBoard(ws)}
+           ${renderSignatureSection(d, dp, ws)}
+           <section id="nbOaWrap">${oaInboxHTML(oaCache)}</section>
+           ${renderAuthorizedProjectsSection(d, dp)}`
+        : `${renderAuthorizedProjectsSection(d, dp)}
+           ${renderSignatureSection(d, dp, ws)}
+           <section id="nbOaWrap">${oaInboxHTML(oaCache)}</section>
+           ${renderWorkQueue(ws)}
+           ${renderProgressBoard(ws)}`
+  ) : `<div class="dp-ws-loading"><span class="spin"></span><span>正在加载本部门专属操作台与分类项目板块…</span></div>
+       ${renderAuthorizedProjectsSection(d, dp)}`
+
+  v.innerHTML = `<div class="nb-shelf dp-shelf ${fresh ? 'enter' : ''}" data-dept="${esc(key)}">
+    ${renderHero(d, dp, ws)}
+    ${ws ? renderModules(ws) : ''}
+    ${mainFlow}
+    ${renderLayersFooter(d, dp)}
   </div>`
   if (fresh) entered(v)
   justOpened = null
@@ -620,13 +746,17 @@ Object.assign(ACT, {
   'oa-filter-mine': () => { S.filters.mine = !S.filters.mine; const box = $('#nbOaWrap'); if (box) box.innerHTML = oaInboxHTML(oaCache); if ($('#nbList')) $('#nbList').innerHTML = listHTML(D()) },
   'oa-task-done': async el => { await act('task.toggle', { id: el.dataset.id }, '任务已完成'); await hooks.reload({ files: false }); void refreshOaBar() },
   'quick-project': el => openQuickProject([], el?.dataset?.bt || (D()?.deptProfile?.key === 'industrial' ? 'industrial' : 'financial')),
+  'nb-view-mode': el => {
+    S.nbShelfMode = el.dataset.m === 'list' ? 'list' : 'board'
+    renderNotebookShelf($('#view'))
+  },
   'nb-card-toggle': (el, e) => {
-    if (e?.target.closest('.nb-flow-drawer')) return
+    if (e?.target.closest('.nb-flow-drawer') && !e?.target.closest('[data-act="nb-card-toggle"]')) return
     S.nbExpanded = S.nbExpanded === el.dataset.id ? null : el.dataset.id
     justOpened = S.nbExpanded
     const box = $('#nbList')
     $('.nb-shelf')?.classList.remove('enter')
-    if (box) { box.innerHTML = listHTML(D()); justOpened = null } else hooks.refresh()
+    if (box) { box.innerHTML = listHTML(D()); justOpened = null; if (S.nbExpanded) box.querySelector('.nb-flow-drawer')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) } else hooks.refresh()
   },
   'nb-open-folder': async el => { const r = await act('nb.folder.open', { projectId: el.dataset.p, filePath: el.dataset.fp }); if (r) toast(`已打开 ${r.opened}`, 'ok') },
   'nb-enter': el => {

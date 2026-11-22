@@ -6,11 +6,11 @@ export const API = '/api/investai'
 export const $ = (s, el = document) => el.querySelector(s)
 export const $$ = (s, el = document) => [...el.querySelectorAll(s)]
 export const EMBED = document.documentElement.dataset.embedded === '1'
-export const VERSION = 'v3.3.1'
+export const VERSION = 'v3.3.2'
 
-// ───────── 主题：深色（默认）/ 浅色，记在 localStorage，内嵌时通知 DSH 宿主一起切 ─────────
+// ───────── 主题：亮暗雅韵（默认，深色曜石廊柱 + 宣白画布）/ 深邃墨玉（暗色模式），记在 localStorage，内嵌时通知 DSH 宿主同步 ─────────
 const THEME_KEY = 'investai.theme'
-export function theme() { try { return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark' } catch { return 'dark' } }
+export function theme() { try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light' } catch { return 'light' } }
 export function setTheme(t) {
   try { localStorage.setItem(THEME_KEY, t) } catch { /* 无痕模式下只在本次生效 */ }
   document.documentElement.dataset.theme = t
@@ -125,10 +125,10 @@ const P = {
   right: '<path d="m9 6 6 6-6 6"/>',
 }
 export const icon = (n, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] ?? P.file}</svg>`
-const AV = ['#5B6B5E', '#6B5B4E', '#4E5F6B', '#6B4E5B', '#5E5B6B', '#4E6B63', '#7A6A45', '#6B4E4E']
+const AV = ['oklch(50% 0.195 262)', 'oklch(47% 0.130 162)', 'oklch(50% 0.145 55)', 'oklch(49% 0.165 288)', 'oklch(48% 0.118 218)', 'oklch(50% 0.175 25)', 'oklch(46% 0.120 245)', 'oklch(48% 0.140 150)']
 export const avColor = name => AV[[...String(name)].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length]
 export const avatar = (name, size = 26) => `<span class="av" style="width:${size}px;height:${size}px;background:${avColor(name)};font-size:${Math.round(size * .42)}px" title="${esc(name)}">${esc(String(name ?? '?').slice(0, 1))}</span>`
-const FTYPE = { '.md': ['MD', '#4E5F6B'], '.csv': ['CSV', '#2F6B4F'], '.xlsx': ['X', '#2F6B4F'], '.docx': ['W', '#3F5870'], '.pptx': ['P', '#A5562A'], '.pdf': ['PDF', '#A33B2B'], '.txt': ['TXT', '#77736A'], '.m4a': ['♪', '#5E4B7A'], '.mp3': ['♪', '#5E4B7A'], '.wav': ['♪', '#5E4B7A'], '.webm': ['♪', '#5E4B7A'], '.html': ['H', '#7A6A45'], '.json': ['J', '#77736A'], '.png': ['图', '#4E6B63'], '.svg': ['图', '#4E6B63'], '.mp4': ['▶', '#6B4E5B'] }
+const FTYPE = { '.md': ['MD', 'oklch(50% 0.185 262)'], '.csv': ['CSV', 'oklch(46% 0.132 162)'], '.xlsx': ['X', 'oklch(46% 0.132 162)'], '.docx': ['W', 'oklch(50% 0.195 262)'], '.pptx': ['P', 'oklch(51% 0.155 48)'], '.pdf': ['PDF', 'oklch(49% 0.185 25)'], '.txt': ['TXT', 'oklch(47% 0.018 258)'], '.m4a': ['♪', 'oklch(49% 0.165 288)'], '.mp3': ['♪', 'oklch(49% 0.165 288)'], '.wav': ['♪', 'oklch(49% 0.165 288)'], '.webm': ['♪', 'oklch(49% 0.165 288)'], '.html': ['H', 'oklch(50% 0.140 62)'], '.json': ['J', 'oklch(47% 0.018 258)'], '.png': ['图', 'oklch(47% 0.118 218)'], '.svg': ['图', 'oklch(47% 0.118 218)'], '.mp4': ['▶', 'oklch(49% 0.160 345)'] }
 export const ficon = (ext, small) => { const [t, c] = FTYPE[ext] ?? ['F', '#77736A']; return `<span class="fi${small ? ' sm' : ''}" style="background:${c}">${t}</span>` }
 export const levelTag = l => `<span class="tag lv${l ?? 1}" title="资料密级">${LEVELS[l ?? 1]}</span>`
 
